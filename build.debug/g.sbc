@@ -1,0 +1,18 @@
+fingerprint 36
+funcLength 1
+callentry 0
+sendentry 1
+numberOfLocals 0
+numberOfInstructions 11
+numberOfConstants 2
+setfl 8
+setfl 8
+string 1 #0="print"
+getglobal 1 1
+string 2 #1="space"
+move 8 2
+call 1 1
+setfl 8
+geta 1
+seta 1
+ret

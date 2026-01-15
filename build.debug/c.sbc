@@ -1,0 +1,120 @@
+fingerprint 36
+funcLength 3
+callentry 0
+sendentry 1
+numberOfLocals 0
+numberOfInstructions 88
+numberOfConstants 12
+setfl 10
+setfl 10
+makeclosure 1 0
+string 2 #0="Item"
+setglobal 2 1
+getglobal 2 2
+fixnum 3 101
+new 1 2
+move 9 1
+move 10 3
+newsend 2 1
+setfl 10
+string 2 #1="Object"
+getglobal 2 2
+geta 3
+instanceof 2 3 2
+jumpfalse 2 2
+geta 1
+string 2 #2="persistent"
+setglobal 2 1
+string 1 #3="print"
+getglobal 1 1
+string 2 #4="Generating\sgarbage..."
+move 10 2
+call 1 1
+setfl 10
+fixnum 1 0
+string 2 #5="i"
+setglobal 2 1
+jump 20
+string 1 #0="Item"
+getglobal 2 1
+getglobal 4 3
+new 1 2
+move 9 1
+move 10 4
+newsend 2 1
+setfl 10
+string 2 #1="Object"
+getglobal 2 2
+geta 4
+instanceof 2 4 2
+jumpfalse 2 2
+geta 1
+string 2 #6="junk"
+setglobal 2 1
+getglobal 1 3
+addregfix 1 1 1
+setglobal 3 1
+string 3 #5="i"
+getglobal 1 3
+fixnum 2 200000
+lessthan 1 1 2
+jumptrue 1 -23
+string 2 #3="print"
+getglobal 1 2
+string 3 #7="Verifying\spersistent\sobject..."
+move 10 3
+call 1 1
+setfl 10
+string 1 #2="persistent"
+getglobal 1 1
+getpropregstr 3 1 #8="check"
+move 10 1
+send 3 0
+setfl 10
+geta 1
+string 3 #9="result"
+setglobal 3 1
+getglobal 1 3
+eqregfix 1 1 101
+jumpfalse 1 8
+getglobal 1 2
+string 2 #10="SUCCESS:\sDRAM\sobject\svalid."
+move 10 2
+call 1 1
+setfl 10
+geta 1
+jump 8
+getglobal 1 2
+getglobal 2 3
+addstrreg 2 #11="FAILURE:\sGot\s" 2
+move 10 2
+call 1 1
+setfl 10
+geta 1
+seta 1
+ret
+callentry 0
+sendentry 2
+numberOfLocals 0
+numberOfInstructions 9
+numberOfConstants 2
+setfl 7
+getglobalobj 1
+setfl 7
+setpropregstrreg 1 #0="value" 2
+makeclosure 2 1
+setpropregstrreg 1 #1="check" 2
+specconst 1 undefined
+seta 1
+ret
+callentry 0
+sendentry 2
+numberOfLocals 0
+numberOfInstructions 6
+numberOfConstants 1
+setfl 6
+getglobalobj 1
+setfl 6
+getpropregstr 1 1 #0="value"
+seta 1
+ret

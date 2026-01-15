@@ -1,0 +1,218 @@
+fingerprint 36
+funcLength 6
+callentry 0
+sendentry 1
+numberOfLocals 0
+numberOfInstructions 146
+numberOfConstants 19
+setfl 13
+setfl 13
+makeclosure 1 0
+string 2 #0="objectTest_binary_tree"
+setglobal 2 1
+fixnum 1 0
+string 3 #1="count"
+setglobal 3 1
+getglobal 2 2
+new 1 2
+move 13 1
+newsend 2 0
+setfl 13
+string 2 #2="Object"
+getglobal 2 2
+geta 3
+instanceof 2 3 2
+jumpfalse 2 2
+geta 1
+string 2 #3="root"
+setglobal 2 1
+string 1 #4="print"
+getglobal 1 1
+string 2 #5="===\sLoop\sstart\s==="
+move 13 2
+call 1 1
+setfl 13
+fixnum 1 0
+string 2 #6="i"
+setglobal 2 1
+jump 84
+string 2 #0="objectTest_binary_tree"
+getglobal 3 2
+new 1 3
+move 13 1
+newsend 3 0
+setfl 13
+string 3 #2="Object"
+getglobal 4 3
+geta 5
+instanceof 4 5 4
+jumpfalse 4 2
+geta 1
+string 4 #7="leftChild"
+setglobal 4 1
+getglobal 2 2
+new 1 2
+move 13 1
+newsend 2 0
+setfl 13
+getglobal 2 3
+geta 3
+instanceof 2 3 2
+jumpfalse 2 2
+geta 1
+string 2 #8="rightChild"
+setglobal 2 1
+string 3 #3="root"
+getglobal 1 3
+getpropregstr 5 1 #9="setLeft"
+getglobal 6 4
+move 12 1
+move 13 6
+send 5 1
+setfl 13
+getglobal 1 3
+getpropregstr 5 1 #10="setRight"
+getglobal 2 2
+move 12 1
+move 13 2
+send 5 1
+setfl 13
+string 2 #1="count"
+getglobal 1 2
+addregfix 1 1 1
+setglobal 2 1
+getglobal 1 4
+setglobal 3 1
+getglobal 1 7
+modregfix 3 1 100
+fixnum 4 0
+equalregfix 1 3 0
+isundef 5 1
+jumpfalse 5 17
+isobject 1 3
+jumpfalse 1 6
+getpropregstr 1 3 #11="valueOf"
+move 13 3
+send 1 0
+geta 1
+jump 6
+getpropfixstr 1 0 #11="valueOf"
+move 13 4
+send 1 0
+geta 4
+move 1 3
+equal 1 1 4
+isundef 3 1
+jumpfalse 3 2
+error 1 #12="EQUAL_GETTOPRIMITIVE"
+jumpfalse 1 11
+string 1 #4="print"
+getglobal 1 1
+getglobal 3 7
+addstrreg 3 #13="i\s=\s" 3
+addregstr 3 3 #14=",\scount\s=\s"
+getglobal 2 2
+add 2 3 2
+move 13 2
+call 1 1
+setfl 13
+getglobal 1 7
+addregfix 1 1 1
+setglobal 7 1
+string 7 #6="i"
+getglobal 1 7
+fixnum 2 50000
+lessthan 1 1 2
+jumptrue 1 -87
+string 1 #4="print"
+getglobal 2 1
+string 3 #15="===\sLoop\send\s==="
+move 13 3
+call 2 1
+setfl 13
+getglobal 2 1
+getglobal 3 7
+addstrreg 3 #16="Final\si\s=\s" 3
+move 13 3
+call 2 1
+setfl 13
+getglobal 2 1
+string 3 #1="count"
+getglobal 3 3
+addstrreg 3 #17="Final\scount\s=\s" 3
+move 13 3
+call 2 1
+setfl 13
+getglobal 1 1
+string 2 #18="===\sProgram\send\s==="
+move 13 2
+call 1 1
+setfl 13
+geta 1
+seta 1
+ret
+callentry 0
+sendentry 2
+numberOfLocals 2
+numberOfInstructions 18
+numberOfConstants 4
+setfl 7
+getglobalobj 1
+newframe 2 0
+setfl 7
+specconst 2 null
+setlocal 0 0 2
+setlocal 0 1 2
+makeclosure 2 1
+setpropregstrreg 1 #0="setLeft" 2
+makeclosure 2 2
+setpropregstrreg 1 #1="setRight" 2
+makeclosure 2 3
+setpropregstrreg 1 #2="getLeft" 2
+makeclosure 2 4
+setpropregstrreg 1 #3="getRight" 2
+specconst 1 undefined
+seta 1
+ret
+callentry 0
+sendentry 1
+numberOfLocals 0
+numberOfInstructions 6
+numberOfConstants 0
+setfl 7
+setfl 7
+setlocal 0 0 2
+specconst 1 undefined
+seta 1
+ret
+callentry 0
+sendentry 1
+numberOfLocals 0
+numberOfInstructions 6
+numberOfConstants 0
+setfl 7
+setfl 7
+setlocal 0 1 2
+specconst 1 undefined
+seta 1
+ret
+callentry 0
+sendentry 1
+numberOfLocals 0
+numberOfInstructions 5
+numberOfConstants 0
+setfl 6
+setfl 6
+getlocal 1 0 0
+seta 1
+ret
+callentry 0
+sendentry 1
+numberOfLocals 0
+numberOfInstructions 5
+numberOfConstants 0
+setfl 6
+setfl 6
+getlocal 1 0 1
+seta 1
+ret

@@ -1,0 +1,152 @@
+fingerprint 36
+funcLength 2
+callentry 0
+sendentry 1
+numberOfLocals 0
+numberOfInstructions 124
+numberOfConstants 13
+setfl 10
+setfl 10
+makeclosure 1 0
+string 2 #0="Container"
+setglobal 2 1
+string 1 #1="Array"
+getglobal 2 1
+fixnum 3 0
+new 1 2
+move 9 1
+move 10 3
+newsend 2 1
+setfl 10
+geta 1
+string 2 #2="containers"
+setglobal 2 1
+string 1 #3="i"
+setglobal 1 3
+jump 20
+string 1 #0="Container"
+getglobal 2 1
+new 1 2
+move 10 1
+newsend 2 0
+setfl 10
+string 2 #4="Object"
+getglobal 2 2
+geta 3
+instanceof 2 3 2
+jumpfalse 2 2
+geta 1
+string 2 #2="containers"
+getglobal 2 2
+getglobal 3 4
+setprop 2 3 1
+getglobal 1 4
+addregfix 1 1 1
+setglobal 4 1
+string 4 #3="i"
+getglobal 1 4
+lessthanregfix 1 1 100
+jumptrue 1 -22
+fixnum 1 0
+string 2 #5="j"
+setglobal 2 1
+jump 18
+string 1 #0="Container"
+getglobal 2 1
+new 1 2
+move 10 1
+newsend 2 0
+setfl 10
+string 2 #4="Object"
+getglobal 2 2
+geta 3
+instanceof 2 3 2
+jumpfalse 2 2
+geta 1
+string 2 #6="dummy"
+setglobal 2 1
+getglobal 1 4
+addregfix 1 1 1
+setglobal 4 1
+string 4 #5="j"
+getglobal 1 4
+lessthanregfix 1 1 10000
+jumptrue 1 -20
+string 1 #7="print"
+getglobal 1 1
+string 2 #8="===\sMain\sloop:\sOld\scontainers\spointing\sto\sYoung\sobjects\s==="
+move 10 2
+call 1 1
+setfl 10
+fixnum 1 0
+string 2 #9="round"
+setglobal 2 1
+jump 34
+fixnum 1 0
+string 2 #3="i"
+setglobal 2 1
+jump 22
+string 2 #4="Object"
+getglobal 2 2
+new 1 2
+move 10 1
+newsend 2 0
+setfl 10
+geta 1
+string 2 #9="round"
+getglobal 2 2
+mulregfix 2 2 100
+getglobal 4 3
+add 2 2 4
+setpropregstrreg 1 #10="value" 2
+string 2 #2="containers"
+getglobal 2 2
+getglobal 4 3
+getprop 2 2 4
+setpropregstrreg 2 #11="data" 1
+getglobal 1 3
+addregfix 1 1 1
+setglobal 3 1
+string 3 #3="i"
+getglobal 1 3
+lessthanregfix 1 1 100
+jumptrue 1 -24
+string 1 #9="round"
+getglobal 2 1
+addregfix 2 2 1
+setglobal 1 2
+string 1 #9="round"
+getglobal 1 1
+fixnum 2 50000
+lessthan 1 1 2
+jumptrue 1 -37
+string 1 #7="print"
+getglobal 1 1
+string 2 #12="===\sProgram\send\s==="
+move 10 2
+call 1 1
+setfl 10
+geta 1
+seta 1
+ret
+callentry 0
+sendentry 2
+numberOfLocals 0
+numberOfInstructions 16
+numberOfConstants 2
+setfl 10
+getglobalobj 1
+setfl 10
+string 2 #0="Array"
+getglobal 2 2
+fixnum 3 0
+new 4 2
+move 9 4
+move 10 3
+newsend 2 1
+setfl 10
+geta 4
+setpropregstrreg 1 #1="data" 4
+specconst 1 undefined
+seta 1
+ret

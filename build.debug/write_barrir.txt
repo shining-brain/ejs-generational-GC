@@ -1,0 +1,13 @@
+#include <stdio.h>
+
+
+
+write_barrier(ptr, value){
+    if(in_old(ptr) && in_young(value)){
+        remember_set.add(ptr)
+    }
+}
+
+
+
+

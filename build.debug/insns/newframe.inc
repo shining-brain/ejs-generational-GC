@@ -1,0 +1,47 @@
+
+DEFLABEL(HEAD):
+INSN_COUNT0(newframe);Lnewframe0:
+TLnewframe:
+{ // vmgen.newsynth.DecisionDiagram$Leaf@550
+
+  int frame_len = i0;
+  int make_arguments = i1;
+  FunctionFrame *fr;
+
+  int num_of_args, i;
+  JSValue args;
+
+  /*
+     allocates a new function frame into which arguments array is stored
+   */
+  // However, is it correct?
+  // fr = new_frame(get_cf(context), fframe_prev(get_lp(context))); ???
+  save_context();
+  fr = new_frame(context, get_cf(context), get_lp(context), frame_len);
+  set_lp(context, fr);
+  update_context();
+
+  if (make_arguments) {
+    JSValue *body;
+    num_of_args = get_ac(context);
+    save_context();
+    GC_PUSH(fr);
+    args = new_array_object(context, DEBUG_NAME("arguments"),
+                            gshapes.g_shape_Array, num_of_args);
+    GC_POP(fr);
+    update_context();
+
+    body = get_jsarray_body(args);
+    for (i = 0; i < num_of_args; i++) {
+      body[i] = regbase[i + 2];
+    }
+    fframe_arguments(fr) = args;
+    fframe_locals_idx(fr, 0) = args;
+  }
+/* Local Variables:      */
+/* mode: c               */
+/* c-basic-offset: 2     */
+/* indent-tabs-mode: nil */
+/* End:                  */
+}
+

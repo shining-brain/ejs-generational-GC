@@ -355,6 +355,12 @@ ifeq ($(OPT_GC),compact)
     OFILES+=markcompact-collector.o
     HFILES+=markcompact-collector.h markcompact-collector-inl.h mark-tracer
 endif
+ifeq ($(OPT_GC),cache_cheney)
+    CPPFLAGS+=-DUSE_NATIVEGC=1 -DCACHE_CHENEY
+    CXX_FILES+=cache_dram_manager.cc cache_cheney_Rset.cc
+    OFILES+=cache_dram_manager.o cache_cheney_Rset.o
+    HFILES+=cache_dram_manager.h
+endif
 
 ifeq ($(OPT_REGEXP),oniguruma)
     CPPFLAGS+=-DUSE_REGEXP=1
