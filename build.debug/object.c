@@ -800,6 +800,9 @@ Shape *new_object_shape(Context *ctx, char *name, PropertyMap *pm,
     Shape *p = *pp;
     if (p == NULL || p->n_embedded_slots < num_embedded) {
       s->next = *pp;
+#ifdef remembered_set
+      write_barrier_ptr((void **) pp, (void *) s);
+#endif /* remembered_set */
       *pp = s;
       break;
     }

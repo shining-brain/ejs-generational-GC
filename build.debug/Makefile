@@ -23,7 +23,6 @@ SUPERINSNTYPE = 4
 # CPPFLAGS = -O2 -DNDEBUG -UDEBUG $(HEAPSIZE)
 # CPPFLAGS = -Os -DNDEBUG -UDEBUG $(HEAPSIZE)
 CPPFLAGS = -O0 -g -DDEBUG $(HEAPSIZE)
-CPPFLAGS += -Dremember_set
 CFLAGS +=
 CXXFLAGS =
 INSNGEN_FLAGS = -Xgen:pad_cases true -Xcmp:opt_pass MR:S -Xcmp:rand_seed 0
@@ -109,9 +108,11 @@ CPPFLAGS       += -DHC_PROF
 ## show inline cache statistics
 CPPFLAGS       += -DIC_PROF
 ## show allocation site cache statistics
-CPPFLAGS       += -DAS_PROF
+# CPPFLAGS       += -DAS_PROF
 ## show shape statisics
 CPPFLAGS       += -DSHAPE_PROF
+CPPFLAGS += -pg
+LDFLAGS += -pg
 
 
 ## dump hidden class graph
@@ -150,6 +151,10 @@ CPPFLAGS       += -DBIBOP_FREELIST
 #CPPFLAGS       += -DFLONUM_SPACE
 ## debug
 CPPFLAGS       += -DVERIFY_BIBOP
+
+ifeq ($(OPT_GC),cache_cheney)
+	CPPFLAGS += -Dremember_set
+endif
 
 ##
 ## Threaded compactor options

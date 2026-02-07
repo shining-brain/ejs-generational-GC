@@ -1,3 +1,4 @@
+#include <exception>
 #include <stdlib.h>
 #include <stdio.h>
 #include "prefix.h"
@@ -5,7 +6,7 @@
 #include "header.h"
 #include "log.h"
 
-static Context *the_context;
+Context *the_context;
 #include "gc-visitor-inl.h"
 #include "cache_dram_manager.h"
 
@@ -20,6 +21,9 @@ long pass_the_remember_set_count = 0;
 void scavenge();
 void scan_init_area();
 void scan_remembered_set();
+void garbage_collection(Context *ctx);
+static void print_gc_status();
+static long scan_init_objects_count = 0;
 
 inline bool need_major_gc()
 {
@@ -35,13 +39,13 @@ void print_dram_space_usage()
         printf("Warning: dram_space.available_bytes inconsistent with pointer!!!\n");
         exit(1);
     }
-    printf("DRAM space usage: used %d KB, available bytes: %d KB, total %d KB\n", used_bytes / 1024, dram_space.available_bytes / 1024, dram_space.total_size / 1024);
+    // printf("DRAM space usage: used %d KB, available bytes: %d KB, total %d KB\n", used_bytes / 1024, dram_space.available_bytes / 1024, dram_space.total_size / 1024);
 }
 
 void print_cache_space_useage()
 {
     int used_bytes = cache_space.current - cache_space.work_begin;
-    printf("Cache space usage: used %f KB\n", used_bytes / 1024.0);
+    // printf("Cache space usage: used %f KB\n", used_bytes / 1024.0);
 }
 
 class CacheCheney_Tracer
@@ -302,18 +306,23 @@ CacheCheney_Tracer::~CacheCheney_Tracer()
 
 void space_init(size_t bytes, size_t threshold_bytes)
 {
+    atexit(print_gc_status);
 
     printf("object_header size: %lu bytes\n", sizeof(object_header));
     initial_alloc_bytes = 0;
     //initial cache space
     long cache_size = 512*1024; // 512KB cache space
+    // long cache_size = 100*1024*1024; // 100MB cache space
     cache_space.begin = (uintptr_t) malloc(cache_size); // 512KB cache space
     cache_space.current = cache_space.begin;
     cache_space.total_size = cache_size;
     cache_space.threshold_size = threshold_bytes;
 
     //test
-    cache_space.threshold_size = 1024; // 1KB threshold for testing
+    // cache_space.threshold_size = 1024; // 1KB threshold for testing
+    // cache_space.threshold_size = cache_size / 10;
+    cache_space.threshold_size = 512;
+
 
     cache_space.end = cache_space.begin + cache_space.total_size;
 
@@ -329,6 +338,9 @@ void space_init(size_t bytes, size_t threshold_bytes)
 
 
     //initial dram space
+    //test: modify DRAM to the biggist size
+    //now is the maximum number of int32_t
+    bytes = 0x7fffffff; //16GB
     dram_space.begin = (uintptr_t) malloc(bytes);
     dram_space.free = dram_space.begin;
     dram_space.current = dram_space.begin;
@@ -358,14 +370,19 @@ void *space_alloc(uintptr_t request_bytes, cell_type_t type)
         return array;
     }
 
+    // printf("Allocating %lu bytes in cache space for type 0x%02x\n", request_bytes, type);
 
     int total_byte = (int)request_bytes + sizeof(object_header);
     int align_bytes = ALIGN(total_byte);
-    // if(cache_space.current + align_bytes > cache_space.end) {
-    //     printf("Cache space full, need to trigger GC\n");
-    //     exit(1);
-    //     // garbage_collection(the_context);
-    // }
+    if(cache_space.current + align_bytes > cache_space.end) {
+        printf("Cache space full, need to trigger GC!!!\n");
+        // exit(1);
+        garbage_collection(the_context);
+        if(cache_space.current + align_bytes > cache_space.end) {
+            printf("Error: Not enough space even after GC for allocation of %lu bytes\n", request_bytes);
+            exit(1);
+        }
+    }
 
     object_header *obj_hdr = (object_header *) (cache_space.current);
     obj_hdr->type = type;
@@ -392,7 +409,9 @@ void garbage_collection(Context *ctx)
   /* initialise */
     the_context = ctx;
     
-    dram_space.current = dram_space.begin;
+    // dram_space.current = dram_space.begin;
+    uintptr_t scan_start = dram_space.free;
+    // dram_space.current = dram_space.free; //start from the free pointer
 
     if(need_major_gc()) {
         printf("===============major GC triggered=================\n");
@@ -401,9 +420,9 @@ void garbage_collection(Context *ctx)
     }
 
     print_cache_space_useage();
-    printf("=================minor GC triggered==================\n");
+    // printf("=================minor GC triggered==================\n");
     minor_gc_count++;
-    printf("Minor GC count: %d, size of rememberset %d\n", minor_gc_count, remembered_set.count);
+    // printf("Minor GC count: %d, size of rememberset %d\n", minor_gc_count, remembered_set.count);
 
     scan_roots<CacheCheney_Tracer>(ctx);
 
@@ -411,10 +430,18 @@ void garbage_collection(Context *ctx)
 
     #ifdef remember_set
     scan_remembered_set();
+    // #else
+    // scan_init_area();
     #endif
         pass_the_remember_set_count++;
+
+    dram_space.current = scan_start;
+    printf("there are %d items between dram_space.current and dram_space.free to scavenge\n",
+           (int)((dram_space.free - dram_space.current)/8));
     scavenge();
-    printf("scavenge finished\n");
+
+    // scan_init_area();
+    // printf("scavenge finished\n");
 
     // weak_clear<CacheCheney_Tracer>(ctx);
     // printf("weak_clear finished\n");
@@ -455,12 +482,12 @@ void garbage_collection(Context *ctx)
 
     #ifdef remember_set
     rememberset_clear();
-    printf("remembered set cleared\n");
+    // printf("remembered set cleared\n");
     #endif
     
     pass_the_remember_set_count++;
-    printf("minor GC finished\n");
-    printf("Total passed the remembered set count: %ld\n", pass_the_remember_set_count);
+    // printf("minor GC finished\n");
+    // printf("Total passed the remembered set count: %ld\n", pass_the_remember_set_count);
     return;
 }
 
@@ -489,8 +516,9 @@ void scan_init_area() {
         process_node<CacheCheney_Tracer>(obj_hdr->type, payload_ptr);
         
         current += ALIGN(obj_hdr->size + sizeof(object_header));
+        scan_init_objects_count++;
     }
-    printf("scan_init_area finished\n");
+    // printf("scan_init_area finished\n");
 }
 
 void scan_remembered_set() {
@@ -503,10 +531,19 @@ void scan_remembered_set() {
         // }
 
         // printf("value=%lx\n", *slot);
+        // printf("Scanning remembered set object %d at address %p, value=%lx\n", i, (void*)slot_addr, *slot);
         CacheCheney_Tracer::process_edge(*slot);
     }
-    printf("scan_remembered_set finished, processed %d remembered objects\n", remembered_set.count);
+    // printf("scan_remembered_set finished, processed %d remembered objects\n", remembered_set.count);
     
+}
+
+static void print_gc_status(){
+    printf("========== GC Status ==========\n");
+    printf("Minor GC count: %d\n", minor_gc_count);
+    printf("Init area scanned objects count: %ld\n", scan_init_objects_count);
+    printf("average per GC: %f\n", (float)scan_init_objects_count / (float)minor_gc_count);
+    printf("===================================\n");
 }
 
 

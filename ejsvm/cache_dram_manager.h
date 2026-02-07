@@ -30,6 +30,8 @@ typedef struct RememberedSet
     uintptr_t *buffer;  // Array of pointers to remembered objects
     int count;       // Number of remembered objects
     int capacity;    // Capacity of the buffer
+    int size_of_hash_table;
+    uintptr_t *hash_table; // Hash table for quick lookup
 } RememberedSet;
 
 typedef struct
@@ -45,6 +47,7 @@ typedef struct
 extern Cache_space cache_space;
 extern Dram_space dram_space;
 extern RememberedSet remembered_set;
+extern Context *the_context;
 
 
 //current size: 16 bytes
@@ -76,6 +79,7 @@ extern void init_remembered_set();
 extern void rememberset_add(uintptr_t obj_ptr);
 extern void rememberset_clear();
 extern void write_barrier(JSValue *ptr, JSValue value);
+extern void write_barrier_ptr(void** ptr, void* value);
 
 
 

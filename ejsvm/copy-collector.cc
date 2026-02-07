@@ -14,7 +14,7 @@
 #include "header.h"
 #include "log.h"
 
-static Context *the_context;
+Context *the_context;
 #include "gc-visitor-inl.h"
 
 /*
@@ -67,6 +67,8 @@ class CopyTracer {
     return space.to <= ptr && ptr < space.to + space.bytes;
   }
  public:
+  static constexpr bool is_single_object_scanner = false;
+  static constexpr bool is_hcg_mutator = false;
   static void process_edge(JSValue &v) {
     if (is_fixnum(v) || is_special(v))
       return;

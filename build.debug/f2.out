@@ -1,0 +1,2535 @@
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls   s/call   s/call  name    
+ 13.79      0.48     0.48        1     0.48     3.43  vmrun_threaded
+  9.34      0.81     0.33 336350700     0.00     0.00  is_ptag
+  8.48      1.10     0.30 246023951     0.00     0.00  is_ptag
+  6.32      1.32     0.22 85595626     0.00     0.00  get_htag
+  5.32      1.51     0.19  6632530     0.00     0.00  set_prop_
+  4.60      1.67     0.16 74340020     0.00     0.00  jsv_to_jsobject
+  3.16      1.78     0.11 159935646     0.00     0.00  clear_ptag
+  3.16      1.89     0.11 34195527     0.00     0.00  jsv_to_jsobject
+  2.87      1.99     0.10 74340020     0.00     0.00  is_htag
+  2.59      2.08     0.09 59847324     0.00     0.00  is_htag
+  2.44      2.16     0.09 59074478     0.00     0.00  get_ptag
+  2.30      2.24     0.08 59847324     0.00     0.00  get_htag
+  2.01      2.31     0.07 61903307     0.00     0.00  gc_pop_checked
+  1.87      2.38     0.07 61903307     0.00     0.00  gc_push_checked
+  1.87      2.44     0.07  7952377     0.00     0.00  get_ptag
+  1.72      2.50     0.06 94042852     0.00     0.00  clear_ptag
+  1.72      2.56     0.06 16876730     0.00     0.00  object_get_prop_address
+  1.72      2.62     0.06  6633043     0.00     0.00  space_alloc
+  1.44      2.67     0.05 53059360     0.00     0.00  is_ptag
+  1.44      2.72     0.05 10162368     0.00     0.00  hash_get_with_attribute
+  1.29      2.77     0.05  8843317     0.00     0.00  hcprof_enter_shape
+  1.29      2.81     0.05  6632430     0.00     0.00  object_grow_shape
+  1.15      2.85     0.04 102472364     0.00     0.00  gc_obj_header_type
+  1.15      2.89     0.04 102472364     0.00     0.00  space_get_cell_type
+  1.15      2.93     0.04 67799701     0.00     0.00  gc_obj_header_type
+  1.15      2.97     0.04 13264840     0.00     0.00  get_htag
+  1.15      3.01     0.04  7034608     0.00     0.00  put_ptag
+  1.15      3.05     0.04  2210887     0.00     0.00  allocate_jsobject
+  0.86      3.08     0.03 17686450     0.00     0.00  clear_ptag
+  0.86      3.11     0.03  4421610     0.00     0.00  jsv_to_jsobject
+  0.86      3.14     0.03  1318975     0.00     0.00  get_system_prop
+  0.86      3.17     0.03   600624     0.00     0.00  CacheCheney_Tracer::forward(unsigned long)
+  0.86      3.20     0.03        1     0.03     0.03  is_boolean
+  0.57      3.22     0.02 14665938     0.00     0.00  jsv_to_extension_prop
+  0.57      3.24     0.02 11454508     0.00     0.00  write_barrier
+  0.57      3.26     0.02 10162368     0.00     0.00  is_ptag
+  0.57      3.28     0.02  5223802     0.00     0.00  fixnum_to_cint
+  0.57      3.30     0.02  2210800     0.00     0.00  create_simple_object_with_constructor
+  0.57      3.32     0.02  2210800     0.00     0.00  restore_special_registers
+  0.57      3.34     0.02                             double_to_number
+  0.29      3.35     0.01 67799701     0.00     0.00  space_get_cell_type
+  0.29      3.36     0.01 15475640     0.00     0.00  space_get_cell_type
+  0.29      3.37     0.01 10162368     0.00     0.00  prop_index
+  0.29      3.38     0.01 10162365     0.00     0.00  object_get_prop_address
+  0.29      3.39     0.01  7034608     0.00     0.00  small_cint_to_fixnum
+  0.29      3.40     0.01  6633044     0.00     0.00  check_gc_request(context*, int)
+  0.29      3.41     0.01  6633043     0.00     0.00  gc_malloc
+  0.29      3.42     0.01  2210808     0.00     0.00  ptr_to_normal_simple_object
+  0.29      3.43     0.01  2210801     0.00     0.00  get_cached_shape
+  0.29      3.44     0.01  2210800     0.00     0.00  call_function
+  0.29      3.45     0.01  2210800     0.00     0.00  create_simple_object_with_prototype
+  0.29      3.46     0.01   400036     0.00     0.00  void NodeScanner::scan_SimpleObject<CacheCheney_Tracer>(jsobject_cell*)
+  0.29      3.47     0.01        2     0.01     0.01  rememberset_clear
+  0.14      3.48     0.01  2210861     0.00     0.00  get_prop_with_ic
+  0.14      3.48     0.01       76     0.00     0.00  new_object_shape
+  0.00      3.48     0.00 15475640     0.00     0.00  gc_obj_header_type
+  0.00      3.48     0.00 13264840     0.00     0.00  is_htag
+  0.00      3.48     0.00 11454508     0.00     0.00  is_ptag(unsigned long, PTag)
+  0.00      3.48     0.00  6633044     0.00     0.00  space_check_gc_request()
+  0.00      3.48     0.00  6632503     0.00     0.00  jsv_to_extension_prop
+  0.00      3.48     0.00  6632430     0.00     0.00  hcprof_leave_shape
+  0.00      3.48     0.00  2800146     0.00     0.00  GC_PM_EQ(property_map*, property_map*)
+  0.00      3.48     0.00  2410700     0.00     0.00  cint_to_number
+  0.00      3.48     0.00  2210992     0.00     0.00  put_ptag
+  0.00      3.48     0.00  2210808     0.00     0.00  new_simple_object
+  0.00      3.48     0.00  2210805     0.00     0.00  jsv_to_noheap_ptr
+  0.00      3.48     0.00  2210800     0.00     0.00  get_function_ptr_environment
+  0.00      3.48     0.00  2210800     0.00     0.00  get_function_ptr_table_entry
+  0.00      3.48     0.00  2210800     0.00     0.00  get_jsfunction_environment
+  0.00      3.48     0.00  2210800     0.00     0.00  get_jsfunction_table_entry
+  0.00      3.48     0.00  2210800     0.00     0.00  get_ptag
+  0.00      3.48     0.00  2210800     0.00     0.00  jsv_to_function_frame
+  0.00      3.48     0.00  2210800     0.00     0.00  jsv_to_function_frame
+  0.00      3.48     0.00  2210800     0.00     0.00  jsv_to_noheap_ptr
+  0.00      3.48     0.00  2210800     0.00     0.00  save_special_registers
+  0.00      3.48     0.00  2006244     0.00     0.00  is_ptag(unsigned long, PTag)
+  0.00      3.48     0.00  1603849     0.00     0.00  CacheCheney_Tracer::in_cache_space(unsigned long)
+  0.00      3.48     0.00  1319492     0.00     0.00  clear_ptag(unsigned long)
+  0.00      3.48     0.00  1319490     0.00     0.00  rememberset_add
+  0.00      3.48     0.00  1318974     0.00     0.00  jsv_to_property_map
+  0.00      3.48     0.00  1203139     0.00     0.00  CacheCheney_Tracer::process_edge(unsigned long&)
+  0.00      3.48     0.00   802593     0.00     0.00  clear_ptag(unsigned long)
+  0.00      3.48     0.00   801254     0.00     0.00  CacheCheney_Tracer::process_edge(void*&)
+  0.00      3.48     0.00   801210     0.00     0.00  void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long)
+  0.00      3.48     0.00   600624     0.00     0.00  CacheCheney_Tracer::in_dram_space(unsigned long)
+  0.00      3.48     0.00   400442     0.00     0.00  void*& cast_process_edge_arg<property_map>(property_map*&)
+  0.00      3.48     0.00   400377     0.00     0.00  get_ptag(unsigned long)
+  0.00      3.48     0.00   400370     0.00     0.00  void*& cast_process_edge_arg<shape>(shape*&)
+  0.00      3.48     0.00   400367     0.00     0.00  put_ptag(unsigned long, PTag)
+  0.00      3.48     0.00   400216     0.00     0.00  CacheCheney_Tracer::copy_to_dram(unsigned long, int)
+  0.00      3.48     0.00   400194     0.00     0.00  void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*)
+  0.00      3.48     0.00   400040     0.00     0.00  CacheCheney_Tracer::process_node_JSValue_array(unsigned long*)
+  0.00      3.48     0.00   400032     0.00     0.00  void NodeScanner::scan_Prop<CacheCheney_Tracer>(unsigned long*)
+  0.00      3.48     0.00   400032     0.00     0.00  CacheCheney_Tracer::process_edge_ex_JSValue_array(unsigned long&, unsigned long)
+  0.00      3.48     0.00   400022     0.00     0.00  alloc_site_update_info(jsobject_cell*)
+  0.00      3.48     0.00   400020     0.00     0.00  find_lub(property_map*, property_map*)
+  0.00      3.48     0.00     4182     0.00     0.00  is_ptag
+  0.00      3.48     0.00     2778     0.00     0.00  cast_process_edge_arg(unsigned long&)
+  0.00      3.48     0.00     1230     0.00     0.00  clear_ptag
+  0.00      3.48     0.00     1224     0.00     0.00  is_ptag
+  0.00      3.48     0.00     1066     0.00     0.00  gc_obj_header_type
+  0.00      3.48     0.00     1066     0.00     0.00  space_get_cell_type
+  0.00      3.48     0.00     1025     0.00     0.00  get_htag
+  0.00      3.48     0.00     1025     0.00     0.00  is_htag
+  0.00      3.48     0.00     1000     0.00     0.00  fixnum_to_cint
+  0.00      3.48     0.00     1000     0.00     0.00  get_array_ptr_size
+  0.00      3.48     0.00     1000     0.00     0.00  get_jsarray_size
+  0.00      3.48     0.00      900     0.00     0.00  get_array_ptr_body
+  0.00      3.48     0.00      900     0.00     0.00  get_array_ptr_length
+  0.00      3.48     0.00      900     0.00     0.00  get_jsarray_body
+  0.00      3.48     0.00      900     0.00     0.00  get_jsarray_length
+  0.00      3.48     0.00      900     0.00     0.00  jsv_to_array_data
+  0.00      3.48     0.00      800     0.00     0.00  get_array_element
+  0.00      3.48     0.00      800     0.00     0.00  get_array_element_no_proto
+  0.00      3.48     0.00      800     0.00     0.00  number_to_double
+  0.00      3.48     0.00      759     0.00     0.00  is_ptag
+  0.00      3.48     0.00      495     0.00     0.00  clear_ptag
+  0.00      3.48     0.00      495     0.00     0.00  jsv_to_normal_string
+  0.00      3.48     0.00      438     0.00     0.00  CacheCheney_Tracer::process_weak_edge(unsigned long&)
+  0.00      3.48     0.00      400     0.00     0.00  void scan_function_table_entry<CacheCheney_Tracer>(function_table*)
+  0.00      3.48     0.00      330     0.00     0.00  get_jsnormal_string_value
+  0.00      3.48     0.00      330     0.00     0.00  get_normal_string_ptr_value
+  0.00      3.48     0.00      303     0.00     0.00  special_to_boolean
+  0.00      3.48     0.00      303     0.00     0.00  step_load_code
+  0.00      3.48     0.00      303     0.00     0.00  to_boolean
+  0.00      3.48     0.00      302     0.00     0.00  CacheCheney_Tracer::process_weak_edge(void*&)
+  0.00      3.48     0.00      291     0.00     0.00  find_insn
+  0.00      3.48     0.00      291     0.00     0.00  init_alloc_site
+  0.00      3.48     0.00      291     0.00     0.00  init_inline_cache
+  0.00      3.48     0.00      291     0.00     0.00  insn_load_sbc
+  0.00      3.48     0.00      282     0.00     0.00  update_hash
+  0.00      3.48     0.00      277     0.00     0.00  finalise_hash
+  0.00      3.48     0.00      277     0.00     0.00  string_table_lookup2
+  0.00      3.48     0.00      272     0.00     0.00  cstr_to_string_ool
+  0.00      3.48     0.00      264     0.00     0.00  gc_pop_checked
+  0.00      3.48     0.00      264     0.00     0.00  gc_push_checked
+  0.00      3.48     0.00      254     0.00     0.00  void*& cast_process_edge_arg<str_cons>(str_cons*&)
+  0.00      3.48     0.00      254     0.00     0.00  void NodeScanner::scan_String<CacheCheney_Tracer>(string_cell*)
+  0.00      3.48     0.00      254     0.00     0.00  void NodeScanner::scan_StrCons<CacheCheney_Tracer>(str_cons*)
+  0.00      3.48     0.00      205     0.00     0.00  jsv_to_jsobject
+  0.00      3.48     0.00      155     0.00     0.00  get_jsnormal_string_hash
+  0.00      3.48     0.00      155     0.00     0.00  get_normal_string_ptr_hash
+  0.00      3.48     0.00      152     0.00     0.00  void NodeScanner::scan_Shape<CacheCheney_Tracer>(shape*)
+  0.00      3.48     0.00      142     0.00     0.00  void NodeScanner::scan_Builtin<CacheCheney_Tracer>(jsobject_cell*)
+  0.00      3.48     0.00      127     0.00     0.00  allocate_string
+  0.00      3.48     0.00      127     0.00     0.00  ptr_to_normal_string
+  0.00      3.48     0.00      127     0.00     0.00  put_ptag
+  0.00      3.48     0.00      127     0.00     0.00  set_normal_string_ptr_length
+  0.00      3.48     0.00      127     0.00     0.00  string_table_put
+  0.00      3.48     0.00      121     0.00     0.00  hash_put_property
+  0.00      3.48     0.00      121     0.00     0.00  property_map_add_property_entry
+  0.00      3.48     0.00      105     0.00     0.00  small_cint_to_fixnum
+  0.00      3.48     0.00      104     0.00     0.00  cint_to_number
+  0.00      3.48     0.00      104     0.00     0.00  set_array_ptr_length
+  0.00      3.48     0.00      100     0.00     0.00  set_array_element
+  0.00      3.48     0.00      100     0.00     0.00  set_array_prop
+  0.00      3.48     0.00      100     0.00     0.00  set_jsarray_length
+  0.00      3.48     0.00       96     0.00     0.00  void*& cast_process_edge_arg<hash_table>(hash_table*&)
+  0.00      3.48     0.00       96     0.00     0.00  void NodeScanner::scan_Hashtable<CacheCheney_Tracer>(hash_table*)
+  0.00      3.48     0.00       96     0.00     0.00  void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*)
+  0.00      3.48     0.00       90     0.00     0.00  gc_pop_checked
+  0.00      3.48     0.00       90     0.00     0.00  gc_push_checked
+  0.00      3.48     0.00       71     0.00     0.00  new_builtin_object
+  0.00      3.48     0.00       71     0.00     0.00  ptr_to_normal_builtin
+  0.00      3.48     0.00       71     0.00     0.00  set_builtin_ptr_body
+  0.00      3.48     0.00       71     0.00     0.00  set_builtin_ptr_constructor
+  0.00      3.48     0.00       71     0.00     0.00  set_builtin_ptr_nargs
+  0.00      3.48     0.00       61     0.00     0.00  get_object_prop
+  0.00      3.48     0.00       61     0.00     0.00  get_prop_prototype_chain_with_ic
+  0.00      3.48     0.00       60     0.00     0.00  void NodeScanner::scan_TransitionTable<CacheCheney_Tracer>(transition_table*)
+  0.00      3.48     0.00       60     0.00     0.00  calc_displacement
+  0.00      3.48     0.00       60     0.00     0.00  decode_escape_char
+  0.00      3.48     0.00       60     0.00     0.00  load_const_sbc
+  0.00      3.48     0.00       60     0.00     0.00  load_string_sbc
+  0.00      3.48     0.00       56     0.00     0.00  void*& cast_process_edge_arg<transition_table>(transition_table*&)
+  0.00      3.48     0.00       48     0.00     0.00  hash_create
+  0.00      3.48     0.00       48     0.00     0.00  new_property_map
+  0.00      3.48     0.00       41     0.00     0.00  fixnum_to_cint
+  0.00      3.48     0.00       41     0.00     0.00  gc_pop_checked
+  0.00      3.48     0.00       41     0.00     0.00  gc_push_checked
+  0.00      3.48     0.00       41     0.00     0.00  get_array_ptr_body
+  0.00      3.48     0.00       41     0.00     0.00  get_array_ptr_length
+  0.00      3.48     0.00       41     0.00     0.00  get_array_ptr_size
+  0.00      3.48     0.00       41     0.00     0.00  get_jsarray_body
+  0.00      3.48     0.00       41     0.00     0.00  get_jsarray_length
+  0.00      3.48     0.00       41     0.00     0.00  get_jsarray_size
+  0.00      3.48     0.00       41     0.00     0.00  get_ptag
+  0.00      3.48     0.00       41     0.00     0.00  jsv_to_array_data
+  0.00      3.48     0.00       41     0.00     0.00  number_to_double
+  0.00      3.48     0.00       41     0.00     0.00  reallocate_array_data
+  0.00      3.48     0.00       41     0.00     0.00  set_array_ptr_body
+  0.00      3.48     0.00       41     0.00     0.00  set_array_ptr_size
+  0.00      3.48     0.00       41     0.00     0.00  set_jsarray_body
+  0.00      3.48     0.00       41     0.00     0.00  set_jsarray_size
+  0.00      3.48     0.00       34     0.00     0.00  void*& cast_process_edge_arg<property_map_list>(property_map_list*&)
+  0.00      3.48     0.00       34     0.00     0.00  void NodeScanner::scan_PropertyMapList<CacheCheney_Tracer>(property_map_list*)
+  0.00      3.48     0.00       30     0.00     0.00  extend_property_map
+  0.00      3.48     0.00       30     0.00     0.00  hash_copy
+  0.00      3.48     0.00       30     0.00     0.00  hash_put_transition
+  0.00      3.48     0.00       30     0.00     0.00  property_map_add_transition
+  0.00      3.48     0.00       26     0.00     0.00  void NodeScanner::scan_Flonum<CacheCheney_Tracer>(flonum_cell*)
+  0.00      3.48     0.00       22     0.00     0.00  is_ptag
+  0.00      3.48     0.00       18     0.00     0.00  hcprof_add_root_property_map
+  0.00      3.48     0.00       16     0.00     0.00  create_map_and_shape
+  0.00      3.48     0.00       16     0.00     0.00  put_ptag
+  0.00      3.48     0.00       15     0.00     0.00  fill_builtin_properties
+  0.00      3.48     0.00       13     0.00     0.00  allocate_flonum
+  0.00      3.48     0.00       13     0.00     0.00  is_ptag
+  0.00      3.48     0.00       13     0.00     0.00  ptr_to_normal_flonum
+  0.00      3.48     0.00       13     0.00     0.00  set_normal_flonum_ptr_value
+  0.00      3.48     0.00       12     0.00     0.00  check_read_token
+  0.00      3.48     0.00       12     0.00     0.00  double_to_number
+  0.00      3.48     0.00       10     0.00     0.00  space_get_cell_type(unsigned long)
+  0.00      3.48     0.00       10     0.00     0.00  gc_obj_header_type
+  0.00      3.48     0.00       10     0.00     0.00  get_jsnormal_string_length
+  0.00      3.48     0.00       10     0.00     0.00  get_normal_string_ptr_length
+  0.00      3.48     0.00        8     0.00     0.00  fixnum_to_cint(unsigned long)
+  0.00      3.48     0.00        8     0.00     0.00  number_to_double(unsigned long)
+  0.00      3.48     0.00        8     0.00     0.00  jsv_to_array_data(unsigned long)
+  0.00      3.48     0.00        8     0.00     0.00  get_array_ptr_body(jsobject_cell*)
+  0.00      3.48     0.00        8     0.00     0.00  get_array_ptr_size(jsobject_cell*)
+  0.00      3.48     0.00        8     0.00     0.00  get_array_ptr_length(jsobject_cell*)
+  0.00      3.48     0.00        8     0.00     0.00  void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*)
+  0.00      3.48     0.00        8     0.00     0.00  void NodeScanner::scan_ArrayData<CacheCheney_Tracer>(unsigned long*)
+  0.00      3.48     0.00        8     0.00     0.00  is_ptag
+  0.00      3.48     0.00        8     0.00     0.00  set_array_ptr_body
+  0.00      3.48     0.00        6     0.00     0.00  clear_ptag
+  0.00      3.48     0.00        5     0.00     0.00  call_builtin
+  0.00      3.48     0.00        5     0.00     0.00  gc_obj_header_type
+  0.00      3.48     0.00        5     0.00     0.00  get_builtin_ptr_nargs
+  0.00      3.48     0.00        5     0.00     0.00  get_htag
+  0.00      3.48     0.00        5     0.00     0.00  get_jsbuiltin_nargs
+  0.00      3.48     0.00        5     0.00     0.00  is_htag
+  0.00      3.48     0.00        5     0.00     0.00  space_get_cell_type
+  0.00      3.48     0.00        5     0.00     0.00  string_concat_ool
+  0.00      3.48     0.00        4     0.00     0.00  print_cache_space_useage()
+  0.00      3.48     0.00        4     0.00     0.00  void NodeScanner::scan_FunctionFrame<CacheCheney_Tracer>(function_frame*)
+  0.00      3.48     0.00        4     0.00     0.00  builtin_print
+  0.00      3.48     0.00        4     0.00     0.00  clear_ptag
+  0.00      3.48     0.00        4     0.00     0.00  get_builtin_ptr_body
+  0.00      3.48     0.00        4     0.00     0.00  get_jsbuiltin_body
+  0.00      3.48     0.00        4     0.00     0.00  get_jsnormal_string_value
+  0.00      3.48     0.00        4     0.00     0.00  get_normal_string_ptr_value
+  0.00      3.48     0.00        4     0.00     0.00  jsv_to_normal_string
+  0.00      3.48     0.00        4     0.00     0.00  new_array_object
+  0.00      3.48     0.00        4     0.00     0.00  print_value
+  0.00      3.48     0.00        4     0.00     0.00  print_value_simple
+  0.00      3.48     0.00        4     0.00     0.00  ptr_to_normal_array
+  0.00      3.48     0.00        4     0.00     0.00  set_array_ptr_size
+  0.00      3.48     0.00        3     0.00     0.00  print_dram_space_usage()
+  0.00      3.48     0.00        3     0.00     0.00  cint_to_string
+  0.00      3.48     0.00        3     0.00     0.00  fixnum_to_cint
+  0.00      3.48     0.00        3     0.00     0.00  fixnum_to_string
+  0.00      3.48     0.00        3     0.00     0.00  gc_pop_checked
+  0.00      3.48     0.00        3     0.00     0.00  gc_push_checked
+  0.00      3.48     0.00        3     0.00     0.00  small_cint_to_fixnum
+  0.00      3.48     0.00        3     0.00     0.00  specstr_to_jsvalue
+  0.00      3.48     0.00        3     0.00     0.00  to_string
+  0.00      3.48     0.00        2     0.00     0.00  void scan_roots<CacheCheney_Tracer>(context*)
+  0.00      3.48     0.00        2     0.00     0.00  void scan_stack<CacheCheney_Tracer>(unsigned long*, int, int)
+  0.00      3.48     0.00        2     0.00     0.00  void scan_Context<CacheCheney_Tracer>(context*)
+  0.00      3.48     0.00        2     0.00     0.00  need_major_gc()
+  0.00      3.48     0.00        2     0.00     0.00  scan_init_area()
+  0.00      3.48     0.00        2     0.00     0.00  void scan_string_table<CacheCheney_Tracer>(str_table*)
+  0.00      3.48     0.00        2     0.00     0.03  garbage_collection(context*)
+  0.00      3.48     0.00        2     0.00     0.00  scan_remembered_set()
+  0.00      3.48     0.00        2     0.00     0.00  void*& cast_process_edge_arg<function_frame>(function_frame*&)
+  0.00      3.48     0.00        2     0.00     0.02  scavenge()
+  0.00      3.48     0.00        2     0.00     0.00  is_boolean(unsigned long)
+  0.00      3.48     0.00        2     0.00     0.00  jsv_to_function_frame(unsigned long)
+  0.00      3.48     0.00        2     0.00     0.00  get_number_object_ptr_value(jsobject_cell*)
+  0.00      3.48     0.00        2     0.00     0.00  void NodeScanner::scan_Function<CacheCheney_Tracer>(jsobject_cell*)
+  0.00      3.48     0.00        2     0.00     0.00  void NodeScanner::scan_BoxedNumber<CacheCheney_Tracer>(jsobject_cell*)
+  0.00      3.48     0.00        2     0.00     0.00  void NodeScanner::scan_BoxedString<CacheCheney_Tracer>(jsobject_cell*)
+  0.00      3.48     0.00        2     0.00     0.00  void NodeScanner::scan_BoxedBoolean<CacheCheney_Tracer>(jsobject_cell*)
+  0.00      3.48     0.00        2     0.00     0.00  CacheCheney_Tracer::process_edge_function_frame(unsigned long&)
+  0.00      3.48     0.00        2     0.00     0.00  gc_pop_checked
+  0.00      3.48     0.00        2     0.00     0.00  gc_push_checked
+  0.00      3.48     0.00        2     0.00     0.00  init_prop
+  0.00      3.48     0.00        2     0.00     0.00  init_special_registers
+  0.00      3.48     0.00        2     0.00     0.00  make_ilabel
+  0.00      3.48     0.00        2     0.00     0.00  new_frame
+  0.00      3.48     0.00        2     0.00     0.00  reset_context
+  0.00      3.48     0.00        2     0.00     0.00  set_function_table
+  0.00      3.48     0.00        2     0.00     0.03  start_garbage_collection
+  0.00      3.48     0.00        1     0.00     0.00  allocate_context
+  0.00      3.48     0.00        1     0.00     0.00  array_constr
+  0.00      3.48     0.00        1     0.00     0.00  cint_to_number
+  0.00      3.48     0.00        1     0.00     0.00  code_loader
+  0.00      3.48     0.00        1     0.00     0.00  create_array_object
+  0.00      3.48     0.00        1     0.00     0.00  enable_gc
+  0.00      3.48     0.00        1     0.00     0.00  end_code_loader
+  0.00      3.48     0.00        1     0.00     0.00  file_type
+  0.00      3.48     0.00        1     0.00     0.00  fixnum_to_cint
+  0.00      3.48     0.00        1     0.00     0.00  gc_pop_checked
+  0.00      3.48     0.00        1     0.00     0.00  gc_push_checked
+  0.00      3.48     0.00        1     0.00     0.00  gc_restore_root_stack
+  0.00      3.48     0.00        1     0.00     0.00  gc_save_root_stack
+  0.00      3.48     0.00        1     0.00     0.00  get_builtin_ptr_constructor
+  0.00      3.48     0.00        1     0.00     0.00  get_jsbuiltin_constructor
+  0.00      3.48     0.00        1     0.00     0.00  get_jsnormal_string_length
+  0.00      3.48     0.00        1     0.00     0.00  get_normal_string_ptr_length
+  0.00      3.48     0.00        1     0.00     0.00  init_code_loader
+  0.00      3.48     0.00        1     0.00     0.00  init_context
+  0.00      3.48     0.00        1     0.00     0.00  init_global_constants
+  0.00      3.48     0.00        1     0.00     0.00  init_global_objects
+  0.00      3.48     0.00        1     0.00     0.00  init_memory
+  0.00      3.48     0.00        1     0.00     0.03  init_meta_objects
+  0.00      3.48     0.00        1     0.00     0.00  init_remembered_set
+  0.00      3.48     0.00        1     0.00     0.00  init_string_table
+  0.00      3.48     0.00        1     0.00     0.00  jsv_to_jsobject
+  0.00      3.48     0.00        1     0.00     0.00  jsv_to_normal_string
+  0.00      3.48     0.00        1     0.00     0.03  new_boolean_object
+  0.00      3.48     0.00        1     0.00     0.00  new_function_object
+  0.00      3.48     0.00        1     0.00     0.00  new_number_object
+  0.00      3.48     0.00        1     0.00     0.00  new_string_object
+  0.00      3.48     0.00        1     0.00     0.00  process_options
+  0.00      3.48     0.00        1     0.00     0.00  ptr_to_normal_boolean_object
+  0.00      3.48     0.00        1     0.00     0.00  ptr_to_normal_function
+  0.00      3.48     0.00        1     0.00     0.00  ptr_to_normal_number_object
+  0.00      3.48     0.00        1     0.00     0.00  ptr_to_normal_string_object
+  0.00      3.48     0.00        1     0.00     0.00  put_ptag
+  0.00      3.48     0.00        1     0.00     0.00  set_array_ptr_length
+  0.00      3.48     0.00        1     0.00     0.00  set_boolean_object_ptr_value
+  0.00      3.48     0.00        1     0.00     0.00  set_function_ptr_environment
+  0.00      3.48     0.00        1     0.00     0.00  set_function_ptr_table_entry
+  0.00      3.48     0.00        1     0.00     0.00  set_jsarray_length
+  0.00      3.48     0.00        1     0.00     0.00  set_number_object_ptr_value
+  0.00      3.48     0.00        1     0.00     0.00  set_string_object_ptr_value
+  0.00      3.48     0.00        1     0.00     0.00  small_cint_to_fixnum
+  0.00      3.48     0.00        1     0.00     0.00  space_free_dram_manager_init
+  0.00      3.48     0.00        1     0.00     0.00  space_init
+
+ %         the percentage of the total running time of the
+time       program used by this function.
+
+cumulative a running sum of the number of seconds accounted
+ seconds   for by this function and those listed above it.
+
+ self      the number of seconds accounted for by this
+seconds    function alone.  This is the major sort for this
+           listing.
+
+calls      the number of times this function was invoked, if
+           this function is profiled, else blank.
+
+ self      the average number of milliseconds spent in this
+ms/call    function per call, if this function is profiled,
+	   else blank.
+
+ total     the average number of milliseconds spent in this
+ms/call    function and its descendents per call, if this
+	   function is profiled, else blank.
+
+name       the name of the function.  This is the minor sort
+           for this listing. The index shows the location of
+	   the function in the gprof listing. If the index is
+	   in parenthesis it shows where it would appear in
+	   the gprof listing if it were to be printed.
+
+Copyright (C) 2012-2020 Free Software Foundation, Inc.
+
+Copying and distribution of this file, with or without modification,
+are permitted in any medium without royalty provided the copyright
+notice and this notice are preserved.
+
+		     Call graph (explanation follows)
+
+
+granularity: each sample hit covers 2 byte(s) for 0.29% of 3.48 seconds
+
+index % time    self  children    called     name
+                                                 <spontaneous>
+[1]     99.4    0.00    3.46                 main [1]
+                0.48    2.95       1/1           vmrun_threaded [2]
+                0.00    0.03       1/1           init_meta_objects [50]
+                0.00    0.00       1/1           init_global_objects [81]
+                0.00    0.00       1/1           code_loader [121]
+                0.00    0.00       1/1           init_global_constants [129]
+                0.00    0.00       2/2           reset_context [136]
+                0.00    0.00       1/1           enable_gc [162]
+                0.00    0.00       1/1           process_options [286]
+                0.00    0.00       1/1           init_memory [282]
+                0.00    0.00       1/1           init_string_table [284]
+                0.00    0.00       1/1           init_context [281]
+                0.00    0.00       1/1           space_free_dram_manager_init [296]
+                0.00    0.00       1/1           file_type [272]
+                0.00    0.00       1/1           init_code_loader [280]
+                0.00    0.00       1/1           end_code_loader [271]
+-----------------------------------------------
+                0.48    2.95       1/1           main [1]
+[2]     98.5    0.48    2.95       1         vmrun_threaded [2]
+                0.19    0.85 6632429/6632530     set_prop_ [3]
+                0.12    0.57 57463290/74340020     jsv_to_jsobject [4]
+                0.02    0.47 2210800/2210800     create_simple_object_with_constructor [7]
+                0.06    0.26 16876730/16876730     object_get_prop_address [12]
+                0.01    0.16 2210800/2210800     call_function [17]
+                0.03    0.05 11255606/85595626     get_htag [6]
+                0.06    0.00 42197740/59074478     get_ptag [27]
+                0.01    0.03 4623908/7034608     small_cint_to_fixnum [43]
+                0.02    0.01 5223802/5223802     fixnum_to_cint [57]
+                0.02    0.00 2210800/2210800     restore_special_registers [58]
+                0.00    0.02 2410700/2410700     cint_to_number [63]
+                0.01    0.00 4821978/11454508     write_barrier [59]
+                0.00    0.00     800/800         get_array_element [82]
+                0.00    0.00       5/5           call_builtin [84]
+                0.00    0.00     100/100         set_array_prop [92]
+                0.00    0.00      61/61          get_object_prop [101]
+                0.00    0.00       5/5           string_concat_ool [135]
+                0.00    0.00       1/1           new_function_object [139]
+                0.00    0.00       3/3           to_string [150]
+                0.00    0.00     303/303         to_boolean [187]
+                0.00    0.00       3/3           gc_push_checked [261]
+                0.00    0.00       3/3           gc_pop_checked [260]
+                0.00    0.00       2/2           make_ilabel [267]
+                0.00    0.00       1/1           gc_save_root_stack [277]
+                0.00    0.00       1/1           gc_restore_root_stack [276]
+-----------------------------------------------
+                0.00    0.00       1/6632530     create_simple_object_with_prototype [15]
+                0.00    0.00     100/6632530     fill_builtin_properties [90]
+                0.19    0.85 6632429/6632530     vmrun_threaded [2]
+[3]     29.7    0.19    0.85 6632530         set_prop_ [3]
+                0.05    0.26 6632430/6632430     object_grow_shape [13]
+                0.04    0.15 13867935/34195527     jsv_to_jsobject [8]
+                0.01    0.12 6632530/10162365     object_get_prop_address [16]
+                0.01    0.05 6632530/10162368     prop_index [30]
+                0.01    0.04 6632662/59847324     is_htag [9]
+                0.05    0.00 39794580/61903307     gc_pop_checked [33]
+                0.04    0.00 39794580/61903307     gc_push_checked [34]
+                0.02    0.00 13265192/246023951     is_ptag [14]
+                0.01    0.00 6632530/11454508     write_barrier [59]
+                0.00    0.00      51/76          new_object_shape [76]
+                0.00    0.00      30/30          extend_property_map [111]
+-----------------------------------------------
+                0.04    0.17 16876730/74340020     object_get_prop_address [12]
+                0.12    0.57 57463290/74340020     vmrun_threaded [2]
+[4]     25.8    0.16    0.74 74340020         jsv_to_jsobject [4]
+                0.10    0.52 74340020/74340020     is_htag [5]
+                0.07    0.00 74340020/336350700     is_ptag [11]
+                0.05    0.00 74340020/159935646     clear_ptag [22]
+-----------------------------------------------
+                0.10    0.52 74340020/74340020     jsv_to_jsobject [4]
+[5]     17.7    0.10    0.52 74340020         is_htag [5]
+                0.19    0.32 74340020/85595626     get_htag [6]
+-----------------------------------------------
+                0.03    0.05 11255606/85595626     vmrun_threaded [2]
+                0.19    0.32 74340020/85595626     is_htag [5]
+[6]     17.1    0.22    0.37 85595626         get_htag [6]
+                0.25    0.00 256786878/336350700     is_ptag [11]
+                0.03    0.03 85595626/102472364     gc_obj_header_type [29]
+                0.06    0.00 85595626/159935646     clear_ptag [22]
+-----------------------------------------------
+                0.02    0.47 2210800/2210800     vmrun_threaded [2]
+[7]     14.0    0.02    0.47 2210800         create_simple_object_with_constructor [7]
+                0.01    0.28 2210800/2210800     create_simple_object_with_prototype [15]
+                0.01    0.13 2210800/2210861     get_prop_with_ic [18]
+                0.01    0.03 4421600/59847324     is_htag [9]
+                0.01    0.00 4421600/246023951     is_ptag [14]
+-----------------------------------------------
+                0.00    0.00     100/34195527     set_jsarray_length [114]
+                0.00    0.00     900/34195527     get_jsarray_body [88]
+                0.00    0.00     900/34195527     get_jsarray_length [91]
+                0.00    0.00    1000/34195527     get_jsarray_size [89]
+                0.00    0.01 1318975/34195527     get_system_prop [26]
+                0.01    0.02 2210922/34195527     get_prop_with_ic [18]
+                0.02    0.07 6632430/34195527     object_grow_shape [13]
+                0.03    0.11 10162365/34195527     object_get_prop_address [16]
+                0.04    0.15 13867935/34195527     set_prop_ [3]
+[8]     13.8    0.11    0.37 34195527         jsv_to_jsobject [8]
+                0.06    0.24 38626139/59847324     is_htag [9]
+                0.05    0.00 38626139/246023951     is_ptag [14]
+                0.02    0.00 34195527/94042852     clear_ptag [36]
+-----------------------------------------------
+                0.00    0.00       1/59847324     ptr_to_normal_function [157]
+                0.00    0.00       1/59847324     ptr_to_normal_string_object [159]
+                0.00    0.00       1/59847324     ptr_to_normal_number_object [158]
+                0.00    0.00       1/59847324     ptr_to_normal_boolean_object [156]
+                0.00    0.00       4/59847324     ptr_to_normal_array [153]
+                0.00    0.00      71/59847324     ptr_to_normal_builtin [127]
+                0.00    0.00     100/59847324     set_jsarray_length [114]
+                0.00    0.00     100/59847324     set_array_element [93]
+                0.00    0.00     800/59847324     get_array_element_no_proto [83]
+                0.00    0.00     800/59847324     get_array_element [82]
+                0.00    0.00     900/59847324     get_jsarray_body [88]
+                0.00    0.00     900/59847324     get_jsarray_length [91]
+                0.00    0.00    1000/59847324     get_jsarray_size [89]
+                0.00    0.01 1318975/59847324     get_system_prop [26]
+                0.00    0.01 2210800/59847324     create_simple_object_with_prototype [15]
+                0.00    0.01 2210808/59847324     ptr_to_normal_simple_object [56]
+                0.01    0.03 4421600/59847324     create_simple_object_with_constructor [7]
+                0.01    0.03 4421661/59847324     get_prop_with_ic [18]
+                0.01    0.04 6632662/59847324     set_prop_ [3]
+                0.06    0.24 38626139/59847324     jsv_to_jsobject [8]
+[9]     13.4    0.09    0.38 59847324         is_htag [9]
+                0.08    0.30 59847324/59847324     get_htag [10]
+-----------------------------------------------
+                0.08    0.30 59847324/59847324     is_htag [9]
+[10]    10.9    0.08    0.30 59847324         get_htag [10]
+                0.22    0.00 179541972/246023951     is_ptag [14]
+                0.04    0.01 59847324/67799701     gc_obj_header_type [44]
+                0.04    0.00 59847324/94042852     clear_ptag [36]
+-----------------------------------------------
+                0.01    0.00 5223802/336350700     fixnum_to_cint [57]
+                0.07    0.00 74340020/336350700     jsv_to_jsobject [4]
+                0.25    0.00 256786878/336350700     get_htag [6]
+[11]     9.3    0.33    0.00 336350700         is_ptag [11]
+-----------------------------------------------
+                0.06    0.26 16876730/16876730     vmrun_threaded [2]
+[12]     9.1    0.06    0.26 16876730         object_get_prop_address [12]
+                0.04    0.17 16876730/74340020     jsv_to_jsobject [4]
+                0.02    0.03 14665938/14665938     jsv_to_extension_prop [39]
+-----------------------------------------------
+                0.05    0.26 6632430/6632430     set_prop_ [3]
+[13]     8.8    0.05    0.26 6632430         object_grow_shape [13]
+                0.02    0.07 6632430/34195527     jsv_to_jsobject [8]
+                0.01    0.08 4421623/6633043     gc_malloc [19]
+                0.03    0.00 6632430/8843317     hcprof_enter_shape [45]
+                0.00    0.02 2210820/6632503     jsv_to_extension_prop [38]
+                0.02    0.00 13264860/61903307     gc_pop_checked [33]
+                0.01    0.00 13264860/61903307     gc_push_checked [34]
+                0.00    0.00 6632430/6632430     hcprof_leave_shape [163]
+-----------------------------------------------
+                0.00    0.00       1/246023951     jsv_to_normal_string [161]
+                0.00    0.00       1/246023951     ptr_to_normal_function [157]
+                0.00    0.00       1/246023951     ptr_to_normal_string_object [159]
+                0.00    0.00       1/246023951     ptr_to_normal_number_object [158]
+                0.00    0.00       1/246023951     ptr_to_normal_boolean_object [156]
+                0.00    0.00       1/246023951     new_number_object [147]
+                0.00    0.00       1/246023951     new_string_object [145]
+                0.00    0.00       4/246023951     ptr_to_normal_array [153]
+                0.00    0.00      61/246023951     get_prop_prototype_chain_with_ic [103]
+                0.00    0.00      61/246023951     get_object_prop [101]
+                0.00    0.00      71/246023951     ptr_to_normal_builtin [127]
+                0.00    0.00     100/246023951     set_jsarray_length [114]
+                0.00    0.00     100/246023951     set_array_prop [92]
+                0.00    0.00     200/246023951     set_array_element [93]
+                0.00    0.00     800/246023951     number_to_double [116]
+                0.00    0.00     800/246023951     get_array_element_no_proto [83]
+                0.00    0.00     800/246023951     get_array_element [82]
+                0.00    0.00     900/246023951     get_jsarray_body [88]
+                0.00    0.00     900/246023951     get_jsarray_length [91]
+                0.00    0.00    1000/246023951     get_jsarray_size [89]
+                0.00    0.00    1000/246023951     fixnum_to_cint [118]
+                0.00    0.00 1318975/246023951     get_system_prop [26]
+                0.00    0.00 2210800/246023951     create_simple_object_with_prototype [15]
+                0.00    0.00 2210808/246023951     ptr_to_normal_simple_object [56]
+                0.01    0.00 4421600/246023951     create_simple_object_with_constructor [7]
+                0.01    0.00 4421661/246023951     get_prop_with_ic [18]
+                0.02    0.00 13265192/246023951     set_prop_ [3]
+                0.05    0.00 38626139/246023951     jsv_to_jsobject [8]
+                0.22    0.00 179541972/246023951     get_htag [10]
+[14]     8.5    0.30    0.00 246023951         is_ptag [14]
+-----------------------------------------------
+                0.01    0.28 2210800/2210800     create_simple_object_with_constructor [7]
+[15]     8.4    0.01    0.28 2210800         create_simple_object_with_prototype [15]
+                0.00    0.13 2210800/2210808     new_simple_object [20]
+                0.03    0.07 1318975/1318975     get_system_prop [26]
+                0.00    0.01 2210800/59847324     is_htag [9]
+                0.00    0.01 1318974/1318974     jsv_to_property_map [64]
+                0.01    0.00 2210800/2210801     get_cached_shape [69]
+                0.01    0.00 6632401/61903307     gc_pop_checked [33]
+                0.01    0.00 6632401/61903307     gc_push_checked [34]
+                0.00    0.00 2210800/246023951     is_ptag [14]
+                0.00    0.00       8/76          new_object_shape [76]
+                0.00    0.00       1/6632530     set_prop_ [3]
+                0.00    0.00       1/48          new_property_map [108]
+-----------------------------------------------
+                0.00    0.02 1318974/10162365     get_system_prop [26]
+                0.00    0.04 2210861/10162365     get_prop_with_ic [18]
+                0.01    0.12 6632530/10162365     set_prop_ [3]
+[16]     5.5    0.01    0.18 10162365         object_get_prop_address [16]
+                0.03    0.11 10162365/34195527     jsv_to_jsobject [8]
+                0.00    0.04 4421683/6632503     jsv_to_extension_prop [38]
+-----------------------------------------------
+                0.01    0.16 2210800/2210800     vmrun_threaded [2]
+[17]     4.9    0.01    0.16 2210800         call_function [17]
+                0.00    0.08 2210800/2210800     get_jsfunction_environment [28]
+                0.00    0.08 2210800/2210800     get_jsfunction_table_entry [31]
+                0.00    0.00 2210800/2210800     save_special_registers [169]
+-----------------------------------------------
+                0.00    0.00      61/2210861     get_prop_prototype_chain_with_ic [103]
+                0.01    0.13 2210800/2210861     create_simple_object_with_constructor [7]
+[18]     3.9    0.01    0.13 2210861         get_prop_with_ic [18]
+                0.00    0.04 2210861/10162365     object_get_prop_address [16]
+                0.01    0.03 4421661/59847324     is_htag [9]
+                0.01    0.02 2210922/34195527     jsv_to_jsobject [8]
+                0.00    0.02 2210861/10162368     prop_index [30]
+                0.01    0.00 4421661/246023951     is_ptag [14]
+-----------------------------------------------
+                0.00    0.00       2/6633043     new_frame [152]
+                0.00    0.00       4/6633043     new_array_object [130]
+                0.00    0.00      13/6633043     allocate_flonum [132]
+                0.00    0.00      30/6633043     hash_put_transition [128]
+                0.00    0.00      41/6633043     reallocate_array_data [124]
+                0.00    0.00      48/6633043     hash_create [122]
+                0.00    0.00      65/6633043     new_property_map [108]
+                0.00    0.00      76/6633043     new_object_shape [76]
+                0.00    0.00     127/6633043     allocate_string [112]
+                0.00    0.00     127/6633043     string_table_put [113]
+                0.00    0.04 2210887/6633043     allocate_jsobject [25]
+                0.01    0.08 4421623/6633043     object_grow_shape [13]
+[19]     3.7    0.01    0.12 6633043         gc_malloc [19]
+                0.06    0.00 6633043/6633043     space_alloc [37]
+                0.00    0.05       2/2           start_garbage_collection [41]
+                0.01    0.00 6633043/6633044     check_gc_request(context*, int) [71]
+-----------------------------------------------
+                0.00    0.00       1/2210808     init_meta_objects [50]
+                0.00    0.00       1/2210808     new_function_object [139]
+                0.00    0.00       6/2210808     init_global_objects [81]
+                0.00    0.13 2210800/2210808     create_simple_object_with_prototype [15]
+[20]     3.7    0.00    0.13 2210808         new_simple_object [20]
+                0.04    0.06 2210808/2210887     allocate_jsobject [25]
+                0.01    0.02 2210808/2210808     ptr_to_normal_simple_object [56]
+-----------------------------------------------
+                0.00    0.00       1/4421610     get_jsbuiltin_constructor [154]
+                0.00    0.00       4/4421610     get_jsbuiltin_body [138]
+                0.00    0.00       5/4421610     get_jsbuiltin_nargs [137]
+                0.02    0.04 2210800/4421610     get_jsfunction_table_entry [31]
+                0.02    0.04 2210800/4421610     get_jsfunction_environment [28]
+[21]     3.4    0.03    0.09 4421610         jsv_to_jsobject [21]
+                0.00    0.07 8843230/13264840     is_htag [24]
+                0.01    0.00 8843230/53059360     is_ptag [40]
+                0.01    0.00 4421610/17686450     clear_ptag [52]
+-----------------------------------------------
+                0.05    0.00 74340020/159935646     jsv_to_jsobject [4]
+                0.06    0.00 85595626/159935646     get_htag [6]
+[22]     3.2    0.11    0.00 159935646         clear_ptag [22]
+-----------------------------------------------
+                0.04    0.07 13264840/13264840     is_htag [24]
+[23]     3.1    0.04    0.07 13264840         get_htag [23]
+                0.04    0.00 39794520/53059360     is_ptag [40]
+                0.02    0.00 13264840/17686450     clear_ptag [52]
+                0.00    0.01 13264840/15475640     gc_obj_header_type [67]
+-----------------------------------------------
+                0.00    0.00       1/13264840     get_jsbuiltin_constructor [154]
+                0.00    0.00       4/13264840     get_jsbuiltin_body [138]
+                0.00    0.00       5/13264840     get_jsbuiltin_nargs [137]
+                0.00    0.02 2210800/13264840     get_jsfunction_table_entry [31]
+                0.00    0.02 2210800/13264840     get_jsfunction_environment [28]
+                0.00    0.07 8843230/13264840     jsv_to_jsobject [21]
+[24]     3.1    0.00    0.11 13264840         is_htag [24]
+                0.04    0.07 13264840/13264840     get_htag [23]
+-----------------------------------------------
+                0.00    0.00       1/2210887     new_function_object [139]
+                0.00    0.00       1/2210887     new_number_object [147]
+                0.00    0.00       1/2210887     new_string_object [145]
+                0.00    0.00       1/2210887     new_boolean_object [51]
+                0.00    0.00       4/2210887     new_array_object [130]
+                0.00    0.00      71/2210887     new_builtin_object [102]
+                0.04    0.06 2210808/2210887     new_simple_object [20]
+[25]     2.9    0.04    0.06 2210887         allocate_jsobject [25]
+                0.00    0.04 2210887/6633043     gc_malloc [19]
+                0.01    0.00 2210887/8843317     hcprof_enter_shape [45]
+                0.00    0.00 2210887/61903307     gc_pop_checked [33]
+                0.00    0.00 2210887/61903307     gc_push_checked [34]
+-----------------------------------------------
+                0.03    0.07 1318975/1318975     create_simple_object_with_prototype [15]
+[26]     2.8    0.03    0.07 1318975         get_system_prop [26]
+                0.00    0.02 1318974/10162365     object_get_prop_address [16]
+                0.00    0.01 1318975/34195527     jsv_to_jsobject [8]
+                0.00    0.01 1318975/10162368     prop_index [30]
+                0.00    0.01 1318975/59847324     is_htag [9]
+                0.00    0.00 1318975/246023951     is_ptag [14]
+-----------------------------------------------
+                0.00    0.00 2210800/59074478     jsv_to_function_frame [77]
+                0.02    0.00 14665938/59074478     jsv_to_extension_prop [39]
+                0.06    0.00 42197740/59074478     vmrun_threaded [2]
+[27]     2.4    0.09    0.00 59074478         get_ptag [27]
+-----------------------------------------------
+                0.00    0.08 2210800/2210800     call_function [17]
+[28]     2.3    0.00    0.08 2210800         get_jsfunction_environment [28]
+                0.02    0.04 2210800/4421610     jsv_to_jsobject [21]
+                0.00    0.02 2210800/13264840     is_htag [24]
+                0.00    0.00 2210800/53059360     is_ptag [40]
+                0.00    0.00 2210800/2210800     get_function_ptr_environment [78]
+-----------------------------------------------
+                0.00    0.00 2210800/102472364     jsv_to_function_frame [77]
+                0.01    0.01 14665938/102472364     jsv_to_extension_prop [39]
+                0.03    0.03 85595626/102472364     get_htag [6]
+[29]     2.3    0.04    0.04 102472364         gc_obj_header_type [29]
+                0.04    0.00 102472364/102472364     space_get_cell_type [46]
+-----------------------------------------------
+                0.00    0.00       2/10162368     init_prop [155]
+                0.00    0.01 1318975/10162368     get_system_prop [26]
+                0.00    0.02 2210861/10162368     get_prop_with_ic [18]
+                0.01    0.05 6632530/10162368     set_prop_ [3]
+[30]     2.3    0.01    0.07 10162368         prop_index [30]
+                0.05    0.02 10162368/10162368     hash_get_with_attribute [32]
+-----------------------------------------------
+                0.00    0.08 2210800/2210800     call_function [17]
+[31]     2.3    0.00    0.08 2210800         get_jsfunction_table_entry [31]
+                0.02    0.04 2210800/4421610     jsv_to_jsobject [21]
+                0.00    0.02 2210800/13264840     is_htag [24]
+                0.00    0.00 2210800/53059360     is_ptag [40]
+                0.00    0.00 2210800/2210800     get_function_ptr_table_entry [166]
+-----------------------------------------------
+                0.05    0.02 10162368/10162368     prop_index [30]
+[32]     2.0    0.05    0.02 10162368         hash_get_with_attribute [32]
+                0.02    0.00 10162368/10162368     is_ptag [60]
+-----------------------------------------------
+                0.00    0.00       1/61903307     new_number_object [147]
+                0.00    0.00       1/61903307     new_string_object [145]
+                0.00    0.00       1/61903307     new_boolean_object [51]
+                0.00    0.00       2/61903307     new_function_object [139]
+                0.00    0.00       4/61903307     new_array_object [130]
+                0.00    0.00      30/61903307     property_map_add_transition [126]
+                0.00    0.00      76/61903307     new_object_shape [76]
+                0.00    0.00      90/61903307     extend_property_map [111]
+                0.00    0.00     182/61903307     set_array_element [93]
+                0.00    0.00     192/61903307     new_property_map [108]
+                0.00    0.00 2210887/61903307     allocate_jsobject [25]
+                0.01    0.00 6632401/61903307     create_simple_object_with_prototype [15]
+                0.02    0.00 13264860/61903307     object_grow_shape [13]
+                0.05    0.00 39794580/61903307     set_prop_ [3]
+[33]     2.0    0.07    0.00 61903307         gc_pop_checked [33]
+-----------------------------------------------
+                0.00    0.00       1/61903307     new_number_object [147]
+                0.00    0.00       1/61903307     new_string_object [145]
+                0.00    0.00       1/61903307     new_boolean_object [51]
+                0.00    0.00       2/61903307     new_function_object [139]
+                0.00    0.00       4/61903307     new_array_object [130]
+                0.00    0.00      30/61903307     property_map_add_transition [126]
+                0.00    0.00      76/61903307     new_object_shape [76]
+                0.00    0.00      90/61903307     extend_property_map [111]
+                0.00    0.00     182/61903307     set_array_element [93]
+                0.00    0.00     192/61903307     new_property_map [108]
+                0.00    0.00 2210887/61903307     allocate_jsobject [25]
+                0.01    0.00 6632401/61903307     create_simple_object_with_prototype [15]
+                0.01    0.00 13264860/61903307     object_grow_shape [13]
+                0.04    0.00 39794580/61903307     set_prop_ [3]
+[34]     1.9    0.07    0.00 61903307         gc_push_checked [34]
+-----------------------------------------------
+                0.00    0.00     900/7952377     jsv_to_array_data [96]
+                0.01    0.00 1318974/7952377     jsv_to_property_map [64]
+                0.05    0.00 6632503/7952377     jsv_to_extension_prop [38]
+[35]     1.9    0.07    0.00 7952377         get_ptag [35]
+-----------------------------------------------
+                0.00    0.00       1/94042852     jsv_to_normal_string [161]
+                0.02    0.00 34195527/94042852     jsv_to_jsobject [8]
+                0.04    0.00 59847324/94042852     get_htag [10]
+[36]     1.7    0.06    0.00 94042852         clear_ptag [36]
+-----------------------------------------------
+                                   4             space_alloc [37]
+                0.06    0.00 6633043/6633043     gc_malloc [19]
+[37]     1.7    0.06    0.00 6633043+4       space_alloc [37]
+                                   4             space_alloc [37]
+-----------------------------------------------
+                0.00    0.02 2210820/6632503     object_grow_shape [13]
+                0.00    0.04 4421683/6632503     object_get_prop_address [16]
+[38]     1.7    0.00    0.06 6632503         jsv_to_extension_prop [38]
+                0.05    0.00 6632503/7952377     get_ptag [35]
+                0.00    0.00 6632503/67799701     gc_obj_header_type [44]
+-----------------------------------------------
+                0.02    0.03 14665938/14665938     object_get_prop_address [12]
+[39]     1.5    0.02    0.03 14665938         jsv_to_extension_prop [39]
+                0.02    0.00 14665938/59074478     get_ptag [27]
+                0.01    0.01 14665938/102472364     gc_obj_header_type [29]
+-----------------------------------------------
+                0.00    0.00       1/53059360     get_jsbuiltin_constructor [154]
+                0.00    0.00       4/53059360     get_jsbuiltin_body [138]
+                0.00    0.00       5/53059360     get_jsbuiltin_nargs [137]
+                0.00    0.00 2210800/53059360     get_jsfunction_table_entry [31]
+                0.00    0.00 2210800/53059360     get_jsfunction_environment [28]
+                0.01    0.00 8843230/53059360     jsv_to_jsobject [21]
+                0.04    0.00 39794520/53059360     get_htag [23]
+[40]     1.4    0.05    0.00 53059360         is_ptag [40]
+-----------------------------------------------
+                0.00    0.05       2/2           gc_malloc [19]
+[41]     1.4    0.00    0.05       2         start_garbage_collection [41]
+                0.00    0.05       2/2           garbage_collection(context*) [42]
+-----------------------------------------------
+                0.00    0.05       2/2           start_garbage_collection [41]
+[42]     1.4    0.00    0.05       2         garbage_collection(context*) [42]
+                0.00    0.04       2/2           scavenge() [49]
+                0.01    0.00       2/2           rememberset_clear [70]
+                0.00    0.00       2/2           scan_init_area() [87]
+                0.00    0.00       2/2           void scan_roots<CacheCheney_Tracer>(context*) [97]
+                0.00    0.00       2/2           scan_remembered_set() [144]
+                0.00    0.00       4/4           print_cache_space_useage() [732]
+                0.00    0.00       2/2           need_major_gc() [734]
+                0.00    0.00       2/3           print_dram_space_usage() [733]
+-----------------------------------------------
+                0.00    0.01 2410700/7034608     cint_to_number [63]
+                0.01    0.03 4623908/7034608     vmrun_threaded [2]
+[43]     1.4    0.01    0.04 7034608         small_cint_to_fixnum [43]
+                0.04    0.00 7034608/7034608     put_ptag [47]
+-----------------------------------------------
+                0.00    0.00     900/67799701     jsv_to_array_data [96]
+                0.00    0.00 1318974/67799701     jsv_to_property_map [64]
+                0.00    0.00 6632503/67799701     jsv_to_extension_prop [38]
+                0.04    0.01 59847324/67799701     get_htag [10]
+[44]     1.4    0.04    0.01 67799701         gc_obj_header_type [44]
+                0.01    0.00 67799701/67799701     space_get_cell_type [72]
+-----------------------------------------------
+                0.01    0.00 2210887/8843317     allocate_jsobject [25]
+                0.03    0.00 6632430/8843317     object_grow_shape [13]
+[45]     1.3    0.05    0.00 8843317         hcprof_enter_shape [45]
+-----------------------------------------------
+                0.04    0.00 102472364/102472364     gc_obj_header_type [29]
+[46]     1.1    0.04    0.00 102472364         space_get_cell_type [46]
+-----------------------------------------------
+                0.04    0.00 7034608/7034608     small_cint_to_fixnum [43]
+[47]     1.1    0.04    0.00 7034608         put_ptag [47]
+-----------------------------------------------
+                0.00    0.00     790/801210      scan_init_area() [87]
+                0.00    0.04  800420/801210      scavenge() [49]
+[48]     1.1    0.00    0.04  801210         void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+                0.01    0.02  400036/400036      void NodeScanner::scan_SimpleObject<CacheCheney_Tracer>(jsobject_cell*) [55]
+                0.00    0.01  400032/400032      void NodeScanner::scan_Prop<CacheCheney_Tracer>(unsigned long*) [75]
+                0.00    0.00      96/96          void NodeScanner::scan_Hashtable<CacheCheney_Tracer>(hash_table*) [94]
+                0.00    0.00     142/142         void NodeScanner::scan_Builtin<CacheCheney_Tracer>(jsobject_cell*) [98]
+                0.00    0.00      96/96          void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*) [100]
+                0.00    0.00     152/152         void NodeScanner::scan_Shape<CacheCheney_Tracer>(shape*) [109]
+                0.00    0.00     254/254         void NodeScanner::scan_StrCons<CacheCheney_Tracer>(str_cons*) [115]
+                0.00    0.00      60/60          void NodeScanner::scan_TransitionTable<CacheCheney_Tracer>(transition_table*) [117]
+                0.00    0.00      34/34          void NodeScanner::scan_PropertyMapList<CacheCheney_Tracer>(property_map_list*) [123]
+                0.00    0.00       8/8           void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [125]
+                0.00    0.00       8/8           void NodeScanner::scan_ArrayData<CacheCheney_Tracer>(unsigned long*) [133]
+                0.00    0.00       2/2           void NodeScanner::scan_Function<CacheCheney_Tracer>(jsobject_cell*) [140]
+                0.00    0.00       2/2           void NodeScanner::scan_BoxedNumber<CacheCheney_Tracer>(jsobject_cell*) [141]
+                0.00    0.00       2/2           void NodeScanner::scan_BoxedString<CacheCheney_Tracer>(jsobject_cell*) [142]
+                0.00    0.00       2/2           void NodeScanner::scan_BoxedBoolean<CacheCheney_Tracer>(jsobject_cell*) [143]
+                0.00    0.00       4/4           void NodeScanner::scan_FunctionFrame<CacheCheney_Tracer>(function_frame*) [146]
+                0.00    0.00     254/254         void NodeScanner::scan_String<CacheCheney_Tracer>(string_cell*) [720]
+                0.00    0.00      26/26          void NodeScanner::scan_Flonum<CacheCheney_Tracer>(flonum_cell*) [724]
+-----------------------------------------------
+                0.00    0.04       2/2           garbage_collection(context*) [42]
+[49]     1.1    0.00    0.04       2         scavenge() [49]
+                0.00    0.04  800420/801210      void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+-----------------------------------------------
+                0.00    0.03       1/1           main [1]
+[50]     0.9    0.00    0.03       1         init_meta_objects [50]
+                0.00    0.03       1/1           new_boolean_object [51]
+                0.00    0.00      13/16          create_map_and_shape [80]
+                0.00    0.00      12/15          fill_builtin_properties [90]
+                0.00    0.00       7/71          new_builtin_object [102]
+                0.00    0.00       1/4           new_array_object [130]
+                0.00    0.00       1/1           new_string_object [145]
+                0.00    0.00       1/2210808     new_simple_object [20]
+                0.00    0.00       1/1           new_number_object [147]
+                0.00    0.00       1/48          new_property_map [108]
+                0.00    0.00       1/3           small_cint_to_fixnum [262]
+-----------------------------------------------
+                0.00    0.03       1/1           init_meta_objects [50]
+[51]     0.9    0.00    0.03       1         new_boolean_object [51]
+                0.03    0.00       1/1           is_boolean [54]
+                0.00    0.00       1/2210887     allocate_jsobject [25]
+                0.00    0.00       1/1           ptr_to_normal_boolean_object [156]
+                0.00    0.00       1/61903307     gc_pop_checked [33]
+                0.00    0.00       1/61903307     gc_push_checked [34]
+                0.00    0.00       1/1           set_boolean_object_ptr_value [289]
+-----------------------------------------------
+                0.01    0.00 4421610/17686450     jsv_to_jsobject [21]
+                0.02    0.00 13264840/17686450     get_htag [23]
+[52]     0.9    0.03    0.00 17686450         clear_ptag [52]
+-----------------------------------------------
+                0.00    0.00       1/600624      CacheCheney_Tracer::process_edge_function_frame(unsigned long&) [151]
+                0.01    0.00  200015/600624      CacheCheney_Tracer::process_edge_ex_JSValue_array(unsigned long&, unsigned long) [73]
+                0.01    0.00  200256/600624      CacheCheney_Tracer::process_edge(void*&) [66]
+                0.01    0.00  200352/600624      CacheCheney_Tracer::process_edge(unsigned long&) [65]
+[53]     0.9    0.03    0.00  600624         CacheCheney_Tracer::forward(unsigned long) [53]
+                0.00    0.00  600624/600624      CacheCheney_Tracer::in_dram_space(unsigned long) [710]
+                0.00    0.00  400216/400216      CacheCheney_Tracer::copy_to_dram(unsigned long, int) [715]
+-----------------------------------------------
+                0.03    0.00       1/1           new_boolean_object [51]
+[54]     0.9    0.03    0.00       1         is_boolean [54]
+-----------------------------------------------
+                0.01    0.02  400036/400036      void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[55]     0.9    0.01    0.02  400036         void NodeScanner::scan_SimpleObject<CacheCheney_Tracer>(jsobject_cell*) [55]
+                0.00    0.02  400036/400194      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+-----------------------------------------------
+                0.01    0.02 2210808/2210808     new_simple_object [20]
+[56]     0.9    0.01    0.02 2210808         ptr_to_normal_simple_object [56]
+                0.00    0.01 2210808/59847324     is_htag [9]
+                0.00    0.00 2210808/246023951     is_ptag [14]
+                0.00    0.00 2210808/2210992     put_ptag [164]
+-----------------------------------------------
+                0.02    0.01 5223802/5223802     vmrun_threaded [2]
+[57]     0.7    0.02    0.01 5223802         fixnum_to_cint [57]
+                0.01    0.00 5223802/336350700     is_ptag [11]
+-----------------------------------------------
+                0.02    0.00 2210800/2210800     vmrun_threaded [2]
+[58]     0.7    0.02    0.00 2210800         restore_special_registers [58]
+                0.00    0.00 2210800/2210800     jsv_to_function_frame [77]
+                0.00    0.00 2210800/2210800     jsv_to_noheap_ptr [168]
+-----------------------------------------------
+                0.01    0.00 4821978/11454508     vmrun_threaded [2]
+                0.01    0.00 6632530/11454508     set_prop_ [3]
+[59]     0.6    0.02    0.00 11454508         write_barrier [59]
+                0.00    0.00 11454508/11454508     is_ptag(unsigned long, PTag) [703]
+                0.00    0.00 1319492/1319492     clear_ptag(unsigned long) [708]
+                0.00    0.00 1319490/1319490     rememberset_add [170]
+-----------------------------------------------
+                0.02    0.00 10162368/10162368     hash_get_with_attribute [32]
+[60]     0.6    0.02    0.00 10162368         is_ptag [60]
+-----------------------------------------------
+                                                 <spontaneous>
+[61]     0.6    0.02    0.00                 double_to_number [61]
+-----------------------------------------------
+                0.00    0.00       2/400194      void NodeScanner::scan_Function<CacheCheney_Tracer>(jsobject_cell*) [140]
+                0.00    0.00       2/400194      void NodeScanner::scan_BoxedNumber<CacheCheney_Tracer>(jsobject_cell*) [141]
+                0.00    0.00       2/400194      void NodeScanner::scan_BoxedString<CacheCheney_Tracer>(jsobject_cell*) [142]
+                0.00    0.00       2/400194      void NodeScanner::scan_BoxedBoolean<CacheCheney_Tracer>(jsobject_cell*) [143]
+                0.00    0.00       8/400194      void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [125]
+                0.00    0.00     142/400194      void NodeScanner::scan_Builtin<CacheCheney_Tracer>(jsobject_cell*) [98]
+                0.00    0.02  400036/400194      void NodeScanner::scan_SimpleObject<CacheCheney_Tracer>(jsobject_cell*) [55]
+[62]     0.6    0.00    0.02  400194         void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+                0.00    0.01  400024/400032      CacheCheney_Tracer::process_edge_ex_JSValue_array(unsigned long&, unsigned long) [73]
+                0.00    0.01  800216/801254      CacheCheney_Tracer::process_edge(void*&) [66]
+                0.00    0.00     326/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00  400194/400370      void*& cast_process_edge_arg<shape>(shape*&) [713]
+                0.00    0.00  400022/400022      alloc_site_update_info(jsobject_cell*) [716]
+                0.00    0.00  400022/400442      void*& cast_process_edge_arg<property_map>(property_map*&) [711]
+                0.00    0.00     326/2778        cast_process_edge_arg(unsigned long&) [718]
+-----------------------------------------------
+                0.00    0.02 2410700/2410700     vmrun_threaded [2]
+[63]     0.5    0.00    0.02 2410700         cint_to_number [63]
+                0.00    0.01 2410700/7034608     small_cint_to_fixnum [43]
+-----------------------------------------------
+                0.00    0.01 1318974/1318974     create_simple_object_with_prototype [15]
+[64]     0.3    0.00    0.01 1318974         jsv_to_property_map [64]
+                0.01    0.00 1318974/7952377     get_ptag [35]
+                0.00    0.00 1318974/67799701     gc_obj_header_type [44]
+-----------------------------------------------
+                0.00    0.00       2/1203139     void NodeScanner::scan_Function<CacheCheney_Tracer>(jsobject_cell*) [140]
+                0.00    0.00       2/1203139     void NodeScanner::scan_BoxedNumber<CacheCheney_Tracer>(jsobject_cell*) [141]
+                0.00    0.00       2/1203139     void NodeScanner::scan_BoxedString<CacheCheney_Tracer>(jsobject_cell*) [142]
+                0.00    0.00       8/1203139     void scan_Context<CacheCheney_Tracer>(context*) [107]
+                0.00    0.00       8/1203139     void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [125]
+                0.00    0.00       8/1203139     void NodeScanner::scan_FunctionFrame<CacheCheney_Tracer>(function_frame*) [146]
+                0.00    0.00       9/1203139     scan_remembered_set() [144]
+                0.00    0.00      30/1203139     void scan_stack<CacheCheney_Tracer>(unsigned long*, int, int) [131]
+                0.00    0.00      62/1203139     void scan_function_table_entry<CacheCheney_Tracer>(function_table*) [110]
+                0.00    0.00      66/1203139     void NodeScanner::scan_TransitionTable<CacheCheney_Tracer>(transition_table*) [117]
+                0.00    0.00      96/1203139     void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*) [100]
+                0.00    0.00     102/1203139     void scan_roots<CacheCheney_Tracer>(context*) [97]
+                0.00    0.00     326/1203139     void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+                0.00    0.00     438/1203139     CacheCheney_Tracer::process_weak_edge(unsigned long&) [105]
+                0.00    0.00    1628/1203139     void NodeScanner::scan_Hashtable<CacheCheney_Tracer>(hash_table*) [94]
+                0.00    0.01 1200352/1203139     CacheCheney_Tracer::process_node_JSValue_array(unsigned long*) [74]
+[65]     0.3    0.00    0.01 1203139         CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.01    0.00  200352/600624      CacheCheney_Tracer::forward(unsigned long) [53]
+                0.00    0.00 2006228/2006244     is_ptag(unsigned long, PTag) [706]
+                0.00    0.00  402561/802593      clear_ptag(unsigned long) [709]
+                0.00    0.00  402561/1603849     CacheCheney_Tracer::in_cache_space(unsigned long) [707]
+                0.00    0.00  200352/400377      get_ptag(unsigned long) [712]
+                0.00    0.00  200352/400367      put_ptag(unsigned long, PTag) [714]
+-----------------------------------------------
+                0.00    0.00       2/801254      void scan_Context<CacheCheney_Tracer>(context*) [107]
+                0.00    0.00       4/801254      void NodeScanner::scan_StrCons<CacheCheney_Tracer>(str_cons*) [115]
+                0.00    0.00      28/801254      void scan_function_table_entry<CacheCheney_Tracer>(function_table*) [110]
+                0.00    0.00      54/801254      void scan_roots<CacheCheney_Tracer>(context*) [97]
+                0.00    0.00      56/801254      void NodeScanner::scan_Hashtable<CacheCheney_Tracer>(hash_table*) [94]
+                0.00    0.00     152/801254      void NodeScanner::scan_Shape<CacheCheney_Tracer>(shape*) [109]
+                0.00    0.00     190/801254      void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*) [100]
+                0.00    0.00     250/801254      void scan_string_table<CacheCheney_Tracer>(str_table*) [106]
+                0.00    0.00     302/801254      CacheCheney_Tracer::process_weak_edge(void*&) [104]
+                0.00    0.01  800216/801254      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+[66]     0.3    0.00    0.01  801254         CacheCheney_Tracer::process_edge(void*&) [66]
+                0.01    0.00  200256/600624      CacheCheney_Tracer::forward(unsigned long) [53]
+                0.00    0.00  801254/1603849     CacheCheney_Tracer::in_cache_space(unsigned long) [707]
+-----------------------------------------------
+                0.00    0.00 2210800/15475640     jsv_to_function_frame [79]
+                0.00    0.01 13264840/15475640     get_htag [23]
+[67]     0.3    0.00    0.01 15475640         gc_obj_header_type [67]
+                0.01    0.00 15475640/15475640     space_get_cell_type [68]
+-----------------------------------------------
+                0.01    0.00 15475640/15475640     gc_obj_header_type [67]
+[68]     0.3    0.01    0.00 15475640         space_get_cell_type [68]
+-----------------------------------------------
+                0.00    0.00       1/2210801     create_array_object [86]
+                0.01    0.00 2210800/2210801     create_simple_object_with_prototype [15]
+[69]     0.3    0.01    0.00 2210801         get_cached_shape [69]
+-----------------------------------------------
+                0.01    0.00       2/2           garbage_collection(context*) [42]
+[70]     0.3    0.01    0.00       2         rememberset_clear [70]
+-----------------------------------------------
+                0.00    0.00       1/6633044     enable_gc [162]
+                0.01    0.00 6633043/6633044     gc_malloc [19]
+[71]     0.3    0.01    0.00 6633044         check_gc_request(context*, int) [71]
+                0.00    0.00 6633044/6633044     space_check_gc_request() [704]
+-----------------------------------------------
+                0.01    0.00 67799701/67799701     gc_obj_header_type [44]
+[72]     0.3    0.01    0.00 67799701         space_get_cell_type [72]
+-----------------------------------------------
+                0.00    0.00       8/400032      void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [125]
+                0.00    0.01  400024/400032      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+[73]     0.3    0.00    0.01  400032         CacheCheney_Tracer::process_edge_ex_JSValue_array(unsigned long&, unsigned long) [73]
+                0.01    0.00  200015/600624      CacheCheney_Tracer::forward(unsigned long) [53]
+                0.00    0.00  400032/802593      clear_ptag(unsigned long) [709]
+                0.00    0.00  400032/1603849     CacheCheney_Tracer::in_cache_space(unsigned long) [707]
+                0.00    0.00  200015/400377      get_ptag(unsigned long) [712]
+                0.00    0.00  200015/400367      put_ptag(unsigned long, PTag) [714]
+-----------------------------------------------
+                0.00    0.00       8/400040      void NodeScanner::scan_ArrayData<CacheCheney_Tracer>(unsigned long*) [133]
+                0.00    0.01  400032/400040      void NodeScanner::scan_Prop<CacheCheney_Tracer>(unsigned long*) [75]
+[74]     0.3    0.00    0.01  400040         CacheCheney_Tracer::process_node_JSValue_array(unsigned long*) [74]
+                0.00    0.01 1200352/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+-----------------------------------------------
+                0.00    0.01  400032/400032      void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[75]     0.3    0.00    0.01  400032         void NodeScanner::scan_Prop<CacheCheney_Tracer>(unsigned long*) [75]
+                0.00    0.01  400032/400040      CacheCheney_Tracer::process_node_JSValue_array(unsigned long*) [74]
+-----------------------------------------------
+                0.00    0.00       1/76          create_array_object [86]
+                0.00    0.00       8/76          create_simple_object_with_prototype [15]
+                0.00    0.00      16/76          create_map_and_shape [80]
+                0.00    0.00      51/76          set_prop_ [3]
+[76]     0.1    0.01    0.00      76         new_object_shape [76]
+                0.00    0.00      76/6633043     gc_malloc [19]
+                0.00    0.00      76/61903307     gc_pop_checked [33]
+                0.00    0.00      76/61903307     gc_push_checked [34]
+-----------------------------------------------
+                0.00    0.00 2210800/2210800     restore_special_registers [58]
+[77]     0.1    0.00    0.00 2210800         jsv_to_function_frame [77]
+                0.00    0.00 2210800/59074478     get_ptag [27]
+                0.00    0.00 2210800/102472364     gc_obj_header_type [29]
+-----------------------------------------------
+                0.00    0.00 2210800/2210800     get_jsfunction_environment [28]
+[78]     0.0    0.00    0.00 2210800         get_function_ptr_environment [78]
+                0.00    0.00 2210800/2210800     jsv_to_function_frame [79]
+-----------------------------------------------
+                0.00    0.00 2210800/2210800     get_function_ptr_environment [78]
+[79]     0.0    0.00    0.00 2210800         jsv_to_function_frame [79]
+                0.00    0.00 2210800/15475640     gc_obj_header_type [67]
+                0.00    0.00 2210800/2210800     get_ptag [167]
+-----------------------------------------------
+                0.00    0.00       3/16          init_global_objects [81]
+                0.00    0.00      13/16          init_meta_objects [50]
+[80]     0.0    0.00    0.00      16         create_map_and_shape [80]
+                0.00    0.00      16/76          new_object_shape [76]
+                0.00    0.00      91/272         cstr_to_string_ool [99]
+                0.00    0.00      16/48          new_property_map [108]
+                0.00    0.00      91/121         property_map_add_property_entry [203]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[81]     0.0    0.00    0.00       1         init_global_objects [81]
+                0.00    0.00       3/16          create_map_and_shape [80]
+                0.00    0.00       3/15          fill_builtin_properties [90]
+                0.00    0.00       6/2210808     new_simple_object [20]
+-----------------------------------------------
+                0.00    0.00     800/800         vmrun_threaded [2]
+[82]     0.0    0.00    0.00     800         get_array_element [82]
+                0.00    0.00     800/800         get_array_element_no_proto [83]
+                0.00    0.00     800/59847324     is_htag [9]
+                0.00    0.00     800/246023951     is_ptag [14]
+-----------------------------------------------
+                0.00    0.00     800/800         get_array_element [82]
+[83]     0.0    0.00    0.00     800         get_array_element_no_proto [83]
+                0.00    0.00     800/900         get_jsarray_body [88]
+                0.00    0.00     800/1000        get_jsarray_size [89]
+                0.00    0.00     800/900         get_jsarray_length [91]
+                0.00    0.00     800/59847324     is_htag [9]
+                0.00    0.00     800/800         number_to_double [116]
+                0.00    0.00     800/246023951     is_ptag [14]
+-----------------------------------------------
+                0.00    0.00       5/5           vmrun_threaded [2]
+[84]     0.0    0.00    0.00       5         call_builtin [84]
+                0.00    0.00       1/1           array_constr [85]
+                0.00    0.00       5/5           get_jsbuiltin_nargs [137]
+                0.00    0.00       4/4           get_jsbuiltin_body [138]
+                0.00    0.00       1/1           get_jsbuiltin_constructor [154]
+                0.00    0.00       4/4           builtin_print [250]
+-----------------------------------------------
+                0.00    0.00       1/1           call_builtin [84]
+[85]     0.0    0.00    0.00       1         array_constr [85]
+                0.00    0.00       1/1           create_array_object [86]
+                0.00    0.00       1/22          is_ptag [232]
+                0.00    0.00       1/1           fixnum_to_cint [273]
+                0.00    0.00       1/1           gc_push_checked [275]
+                0.00    0.00       1/1           cint_to_number [270]
+                0.00    0.00       1/1           set_jsarray_length [292]
+                0.00    0.00       1/1           gc_pop_checked [274]
+-----------------------------------------------
+                0.00    0.00       1/1           array_constr [85]
+[86]     0.0    0.00    0.00       1         create_array_object [86]
+                0.00    0.00       1/76          new_object_shape [76]
+                0.00    0.00       1/4           new_array_object [130]
+                0.00    0.00       1/2210801     get_cached_shape [69]
+-----------------------------------------------
+                0.00    0.00       2/2           garbage_collection(context*) [42]
+[87]     0.0    0.00    0.00       2         scan_init_area() [87]
+                0.00    0.00     790/801210      void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+-----------------------------------------------
+                0.00    0.00     100/900         set_array_element [93]
+                0.00    0.00     800/900         get_array_element_no_proto [83]
+[88]     0.0    0.00    0.00     900         get_jsarray_body [88]
+                0.00    0.00     900/34195527     jsv_to_jsobject [8]
+                0.00    0.00     900/900         get_array_ptr_body [95]
+                0.00    0.00     900/59847324     is_htag [9]
+                0.00    0.00     900/246023951     is_ptag [14]
+-----------------------------------------------
+                0.00    0.00     200/1000        set_array_element [93]
+                0.00    0.00     800/1000        get_array_element_no_proto [83]
+[89]     0.0    0.00    0.00    1000         get_jsarray_size [89]
+                0.00    0.00    1000/34195527     jsv_to_jsobject [8]
+                0.00    0.00    1000/59847324     is_htag [9]
+                0.00    0.00    1000/246023951     is_ptag [14]
+                0.00    0.00    1000/1000        get_array_ptr_size [178]
+-----------------------------------------------
+                0.00    0.00       3/15          init_global_objects [81]
+                0.00    0.00      12/15          init_meta_objects [50]
+[90]     0.0    0.00    0.00      15         fill_builtin_properties [90]
+                0.00    0.00     100/6632530     set_prop_ [3]
+                0.00    0.00      64/71          new_builtin_object [102]
+                0.00    0.00     100/272         cstr_to_string_ool [99]
+                0.00    0.00      12/12          double_to_number [134]
+-----------------------------------------------
+                0.00    0.00     100/900         set_array_element [93]
+                0.00    0.00     800/900         get_array_element_no_proto [83]
+[91]     0.0    0.00    0.00     900         get_jsarray_length [91]
+                0.00    0.00     900/34195527     jsv_to_jsobject [8]
+                0.00    0.00     900/59847324     is_htag [9]
+                0.00    0.00     900/246023951     is_ptag [14]
+                0.00    0.00     900/900         get_array_ptr_length [179]
+-----------------------------------------------
+                0.00    0.00     100/100         vmrun_threaded [2]
+[92]     0.0    0.00    0.00     100         set_array_prop [92]
+                0.00    0.00     100/100         set_array_element [93]
+                0.00    0.00     100/246023951     is_ptag [14]
+                0.00    0.00     100/1000        fixnum_to_cint [118]
+-----------------------------------------------
+                0.00    0.00     100/100         set_array_prop [92]
+[93]     0.0    0.00    0.00     100         set_array_element [93]
+                0.00    0.00     200/1000        get_jsarray_size [89]
+                0.00    0.00     100/900         get_jsarray_body [88]
+                0.00    0.00     100/100         set_jsarray_length [114]
+                0.00    0.00     100/900         get_jsarray_length [91]
+                0.00    0.00      41/41          reallocate_array_data [124]
+                0.00    0.00     100/59847324     is_htag [9]
+                0.00    0.00     200/246023951     is_ptag [14]
+                0.00    0.00     182/61903307     gc_pop_checked [33]
+                0.00    0.00     182/61903307     gc_push_checked [34]
+                0.00    0.00     100/1000        fixnum_to_cint [118]
+                0.00    0.00     100/104         cint_to_number [205]
+-----------------------------------------------
+                0.00    0.00      96/96          void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[94]     0.0    0.00    0.00      96         void NodeScanner::scan_Hashtable<CacheCheney_Tracer>(hash_table*) [94]
+                0.00    0.00    1628/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00      56/801254      CacheCheney_Tracer::process_edge(void*&) [66]
+                0.00    0.00    1628/2778        cast_process_edge_arg(unsigned long&) [718]
+                0.00    0.00      56/56          void*& cast_process_edge_arg<transition_table>(transition_table*&) [722]
+-----------------------------------------------
+                0.00    0.00     900/900         get_jsarray_body [88]
+[95]     0.0    0.00    0.00     900         get_array_ptr_body [95]
+                0.00    0.00     900/900         jsv_to_array_data [96]
+-----------------------------------------------
+                0.00    0.00     900/900         get_array_ptr_body [95]
+[96]     0.0    0.00    0.00     900         jsv_to_array_data [96]
+                0.00    0.00     900/7952377     get_ptag [35]
+                0.00    0.00     900/67799701     gc_obj_header_type [44]
+-----------------------------------------------
+                0.00    0.00       2/2           garbage_collection(context*) [42]
+[97]     0.0    0.00    0.00       2         void scan_roots<CacheCheney_Tracer>(context*) [97]
+                0.00    0.00       2/2           void scan_string_table<CacheCheney_Tracer>(str_table*) [106]
+                0.00    0.00       2/2           void scan_Context<CacheCheney_Tracer>(context*) [107]
+                0.00    0.00     102/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00      54/801254      CacheCheney_Tracer::process_edge(void*&) [66]
+                0.00    0.00     102/2778        cast_process_edge_arg(unsigned long&) [718]
+                0.00    0.00      40/400442      void*& cast_process_edge_arg<property_map>(property_map*&) [711]
+                0.00    0.00      14/400370      void*& cast_process_edge_arg<shape>(shape*&) [713]
+-----------------------------------------------
+                0.00    0.00     142/142         void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[98]     0.0    0.00    0.00     142         void NodeScanner::scan_Builtin<CacheCheney_Tracer>(jsobject_cell*) [98]
+                0.00    0.00     142/400194      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+-----------------------------------------------
+                0.00    0.00       3/272         cint_to_string [148]
+                0.00    0.00      18/272         init_global_constants [129]
+                0.00    0.00      60/272         load_string_sbc [120]
+                0.00    0.00      91/272         create_map_and_shape [80]
+                0.00    0.00     100/272         fill_builtin_properties [90]
+[99]     0.0    0.00    0.00     272         cstr_to_string_ool [99]
+                0.00    0.00     122/127         allocate_string [112]
+                0.00    0.00     122/127         string_table_put [113]
+                0.00    0.00     272/282         update_hash [191]
+                0.00    0.00     272/277         finalise_hash [192]
+                0.00    0.00     272/277         string_table_lookup2 [193]
+                0.00    0.00     122/127         ptr_to_normal_string [199]
+                0.00    0.00     122/264         gc_push_checked [195]
+                0.00    0.00     122/264         gc_pop_checked [194]
+-----------------------------------------------
+                0.00    0.00      96/96          void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[100]    0.0    0.00    0.00      96         void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*) [100]
+                0.00    0.00     190/801254      CacheCheney_Tracer::process_edge(void*&) [66]
+                0.00    0.00      94/302         CacheCheney_Tracer::process_weak_edge(void*&) [104]
+                0.00    0.00      96/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00      96/96          void*& cast_process_edge_arg<hash_table>(hash_table*&) [721]
+                0.00    0.00      96/2778        cast_process_edge_arg(unsigned long&) [718]
+                0.00    0.00      94/400442      void*& cast_process_edge_arg<property_map>(property_map*&) [711]
+                0.00    0.00      94/400370      void*& cast_process_edge_arg<shape>(shape*&) [713]
+-----------------------------------------------
+                0.00    0.00      61/61          vmrun_threaded [2]
+[101]    0.0    0.00    0.00      61         get_object_prop [101]
+                0.00    0.00      61/61          get_prop_prototype_chain_with_ic [103]
+                0.00    0.00      61/246023951     is_ptag [14]
+-----------------------------------------------
+                0.00    0.00       7/71          init_meta_objects [50]
+                0.00    0.00      64/71          fill_builtin_properties [90]
+[102]    0.0    0.00    0.00      71         new_builtin_object [102]
+                0.00    0.00      71/2210887     allocate_jsobject [25]
+                0.00    0.00      71/71          ptr_to_normal_builtin [127]
+                0.00    0.00      71/71          set_builtin_ptr_body [209]
+                0.00    0.00      71/71          set_builtin_ptr_constructor [210]
+                0.00    0.00      71/71          set_builtin_ptr_nargs [211]
+-----------------------------------------------
+                0.00    0.00      61/61          get_object_prop [101]
+[103]    0.0    0.00    0.00      61         get_prop_prototype_chain_with_ic [103]
+                0.00    0.00      61/2210861     get_prop_with_ic [18]
+                0.00    0.00      61/246023951     is_ptag [14]
+-----------------------------------------------
+                0.00    0.00       2/302         void scan_Context<CacheCheney_Tracer>(context*) [107]
+                0.00    0.00      16/302         void scan_function_table_entry<CacheCheney_Tracer>(function_table*) [110]
+                0.00    0.00      58/302         void NodeScanner::scan_Shape<CacheCheney_Tracer>(shape*) [109]
+                0.00    0.00      66/302         void NodeScanner::scan_TransitionTable<CacheCheney_Tracer>(transition_table*) [117]
+                0.00    0.00      66/302         void NodeScanner::scan_PropertyMapList<CacheCheney_Tracer>(property_map_list*) [123]
+                0.00    0.00      94/302         void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*) [100]
+[104]    0.0    0.00    0.00     302         CacheCheney_Tracer::process_weak_edge(void*&) [104]
+                0.00    0.00     302/801254      CacheCheney_Tracer::process_edge(void*&) [66]
+-----------------------------------------------
+                0.00    0.00     184/438         void scan_function_table_entry<CacheCheney_Tracer>(function_table*) [110]
+                0.00    0.00     254/438         void NodeScanner::scan_StrCons<CacheCheney_Tracer>(str_cons*) [115]
+[105]    0.0    0.00    0.00     438         CacheCheney_Tracer::process_weak_edge(unsigned long&) [105]
+                0.00    0.00     438/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+-----------------------------------------------
+                0.00    0.00       2/2           void scan_roots<CacheCheney_Tracer>(context*) [97]
+[106]    0.0    0.00    0.00       2         void scan_string_table<CacheCheney_Tracer>(str_table*) [106]
+                0.00    0.00     250/801254      CacheCheney_Tracer::process_edge(void*&) [66]
+                0.00    0.00     250/254         void*& cast_process_edge_arg<str_cons>(str_cons*&) [719]
+-----------------------------------------------
+                0.00    0.00       2/2           void scan_roots<CacheCheney_Tracer>(context*) [97]
+[107]    0.0    0.00    0.00       2         void scan_Context<CacheCheney_Tracer>(context*) [107]
+                0.00    0.00     400/400         void scan_function_table_entry<CacheCheney_Tracer>(function_table*) [110]
+                0.00    0.00       2/2           void scan_stack<CacheCheney_Tracer>(unsigned long*, int, int) [131]
+                0.00    0.00       8/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00       2/801254      CacheCheney_Tracer::process_edge(void*&) [66]
+                0.00    0.00       2/302         CacheCheney_Tracer::process_weak_edge(void*&) [104]
+                0.00    0.00       8/2778        cast_process_edge_arg(unsigned long&) [718]
+                0.00    0.00       2/2           void*& cast_process_edge_arg<function_frame>(function_frame*&) [735]
+                0.00    0.00       2/34          void*& cast_process_edge_arg<property_map_list>(property_map_list*&) [723]
+-----------------------------------------------
+                0.00    0.00       1/48          init_meta_objects [50]
+                0.00    0.00       1/48          create_simple_object_with_prototype [15]
+                0.00    0.00      16/48          create_map_and_shape [80]
+                0.00    0.00      30/48          extend_property_map [111]
+[108]    0.0    0.00    0.00      48         new_property_map [108]
+                0.00    0.00      65/6633043     gc_malloc [19]
+                0.00    0.00      48/48          hash_create [122]
+                0.00    0.00     192/61903307     gc_pop_checked [33]
+                0.00    0.00     192/61903307     gc_push_checked [34]
+                0.00    0.00      18/18          hcprof_add_root_property_map [233]
+-----------------------------------------------
+                0.00    0.00     152/152         void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[109]    0.0    0.00    0.00     152         void NodeScanner::scan_Shape<CacheCheney_Tracer>(shape*) [109]
+                0.00    0.00     152/801254      CacheCheney_Tracer::process_edge(void*&) [66]
+                0.00    0.00      58/302         CacheCheney_Tracer::process_weak_edge(void*&) [104]
+                0.00    0.00     152/400442      void*& cast_process_edge_arg<property_map>(property_map*&) [711]
+                0.00    0.00      58/400370      void*& cast_process_edge_arg<shape>(shape*&) [713]
+-----------------------------------------------
+                0.00    0.00     400/400         void scan_Context<CacheCheney_Tracer>(context*) [107]
+[110]    0.0    0.00    0.00     400         void scan_function_table_entry<CacheCheney_Tracer>(function_table*) [110]
+                0.00    0.00     184/438         CacheCheney_Tracer::process_weak_edge(unsigned long&) [105]
+                0.00    0.00      62/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00      28/801254      CacheCheney_Tracer::process_edge(void*&) [66]
+                0.00    0.00      16/302         CacheCheney_Tracer::process_weak_edge(void*&) [104]
+                0.00    0.00     246/2778        cast_process_edge_arg(unsigned long&) [718]
+                0.00    0.00      34/400442      void*& cast_process_edge_arg<property_map>(property_map*&) [711]
+                0.00    0.00      10/400370      void*& cast_process_edge_arg<shape>(shape*&) [713]
+-----------------------------------------------
+                0.00    0.00      30/30          set_prop_ [3]
+[111]    0.0    0.00    0.00      30         extend_property_map [111]
+                0.00    0.00      30/48          new_property_map [108]
+                0.00    0.00      30/30          property_map_add_transition [126]
+                0.00    0.00      90/61903307     gc_pop_checked [33]
+                0.00    0.00      90/61903307     gc_push_checked [34]
+                0.00    0.00      30/30          hash_copy [231]
+                0.00    0.00      30/121         property_map_add_property_entry [203]
+-----------------------------------------------
+                0.00    0.00       5/127         string_concat_ool [135]
+                0.00    0.00     122/127         cstr_to_string_ool [99]
+[112]    0.0    0.00    0.00     127         allocate_string [112]
+                0.00    0.00     127/6633043     gc_malloc [19]
+                0.00    0.00     127/127         set_normal_string_ptr_length [201]
+-----------------------------------------------
+                0.00    0.00       5/127         string_concat_ool [135]
+                0.00    0.00     122/127         cstr_to_string_ool [99]
+[113]    0.0    0.00    0.00     127         string_table_put [113]
+                0.00    0.00     127/6633043     gc_malloc [19]
+                0.00    0.00     127/759         is_ptag [180]
+                0.00    0.00     127/264         gc_push_checked [195]
+                0.00    0.00     127/264         gc_pop_checked [194]
+-----------------------------------------------
+                0.00    0.00     100/100         set_array_element [93]
+[114]    0.0    0.00    0.00     100         set_jsarray_length [114]
+                0.00    0.00     100/34195527     jsv_to_jsobject [8]
+                0.00    0.00     100/59847324     is_htag [9]
+                0.00    0.00     100/246023951     is_ptag [14]
+                0.00    0.00     100/104         set_array_ptr_length [206]
+-----------------------------------------------
+                0.00    0.00     254/254         void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[115]    0.0    0.00    0.00     254         void NodeScanner::scan_StrCons<CacheCheney_Tracer>(str_cons*) [115]
+                0.00    0.00     254/438         CacheCheney_Tracer::process_weak_edge(unsigned long&) [105]
+                0.00    0.00       4/801254      CacheCheney_Tracer::process_edge(void*&) [66]
+                0.00    0.00     254/2778        cast_process_edge_arg(unsigned long&) [718]
+                0.00    0.00       4/254         void*& cast_process_edge_arg<str_cons>(str_cons*&) [719]
+-----------------------------------------------
+                0.00    0.00     800/800         get_array_element_no_proto [83]
+[116]    0.0    0.00    0.00     800         number_to_double [116]
+                0.00    0.00     800/246023951     is_ptag [14]
+                0.00    0.00     800/1000        fixnum_to_cint [118]
+-----------------------------------------------
+                0.00    0.00      60/60          void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[117]    0.0    0.00    0.00      60         void NodeScanner::scan_TransitionTable<CacheCheney_Tracer>(transition_table*) [117]
+                0.00    0.00      66/302         CacheCheney_Tracer::process_weak_edge(void*&) [104]
+                0.00    0.00      66/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00      66/2778        cast_process_edge_arg(unsigned long&) [718]
+                0.00    0.00      66/400442      void*& cast_process_edge_arg<property_map>(property_map*&) [711]
+-----------------------------------------------
+                0.00    0.00     100/1000        set_array_element [93]
+                0.00    0.00     100/1000        set_array_prop [92]
+                0.00    0.00     800/1000        number_to_double [116]
+[118]    0.0    0.00    0.00    1000         fixnum_to_cint [118]
+                0.00    0.00    1000/246023951     is_ptag [14]
+-----------------------------------------------
+                0.00    0.00     291/291         code_loader [121]
+[119]    0.0    0.00    0.00     291         insn_load_sbc [119]
+                0.00    0.00      60/60          load_string_sbc [120]
+                0.00    0.00     291/303         step_load_code [186]
+                0.00    0.00     291/291         init_alloc_site [189]
+                0.00    0.00     291/291         init_inline_cache [190]
+                0.00    0.00     291/291         find_insn [188]
+                0.00    0.00      60/60          calc_displacement [212]
+                0.00    0.00       3/3           specstr_to_jsvalue [263]
+-----------------------------------------------
+                0.00    0.00      60/60          insn_load_sbc [119]
+[120]    0.0    0.00    0.00      60         load_string_sbc [120]
+                0.00    0.00      60/272         cstr_to_string_ool [99]
+                0.00    0.00      60/60          load_const_sbc [214]
+                0.00    0.00      60/60          decode_escape_char [213]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[121]    0.0    0.00    0.00       1         code_loader [121]
+                0.00    0.00     291/291         insn_load_sbc [119]
+                0.00    0.00      12/303         step_load_code [186]
+                0.00    0.00      12/12          check_read_token [238]
+                0.00    0.00       2/2           set_function_table [268]
+-----------------------------------------------
+                0.00    0.00      48/48          new_property_map [108]
+[122]    0.0    0.00    0.00      48         hash_create [122]
+                0.00    0.00      48/6633043     gc_malloc [19]
+-----------------------------------------------
+                0.00    0.00      34/34          void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[123]    0.0    0.00    0.00      34         void NodeScanner::scan_PropertyMapList<CacheCheney_Tracer>(property_map_list*) [123]
+                0.00    0.00      66/302         CacheCheney_Tracer::process_weak_edge(void*&) [104]
+                0.00    0.00      34/400442      void*& cast_process_edge_arg<property_map>(property_map*&) [711]
+                0.00    0.00      32/34          void*& cast_process_edge_arg<property_map_list>(property_map_list*&) [723]
+-----------------------------------------------
+                0.00    0.00      41/41          set_array_element [93]
+[124]    0.0    0.00    0.00      41         reallocate_array_data [124]
+                0.00    0.00      41/6633043     gc_malloc [19]
+                0.00    0.00      41/41          get_jsarray_length [222]
+                0.00    0.00      41/41          number_to_double [226]
+                0.00    0.00      41/41          get_jsarray_size [223]
+                0.00    0.00      41/41          gc_push_checked [217]
+                0.00    0.00      41/41          get_jsarray_body [221]
+                0.00    0.00      41/41          gc_pop_checked [216]
+                0.00    0.00      41/41          set_jsarray_body [229]
+                0.00    0.00      41/41          set_jsarray_size [230]
+-----------------------------------------------
+                0.00    0.00       8/8           void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[125]    0.0    0.00    0.00       8         void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [125]
+                0.00    0.00       8/400194      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+                0.00    0.00       8/400032      CacheCheney_Tracer::process_edge_ex_JSValue_array(unsigned long&, unsigned long) [73]
+                0.00    0.00       8/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00       8/8           get_array_ptr_body(jsobject_cell*) [729]
+                0.00    0.00       8/8           get_array_ptr_size(jsobject_cell*) [730]
+                0.00    0.00       8/8           number_to_double(unsigned long) [727]
+                0.00    0.00       8/8           get_array_ptr_length(jsobject_cell*) [731]
+                0.00    0.00       8/2778        cast_process_edge_arg(unsigned long&) [718]
+-----------------------------------------------
+                0.00    0.00      30/30          extend_property_map [111]
+[126]    0.0    0.00    0.00      30         property_map_add_transition [126]
+                0.00    0.00      30/30          hash_put_transition [128]
+                0.00    0.00      30/61903307     gc_pop_checked [33]
+                0.00    0.00      30/61903307     gc_push_checked [34]
+-----------------------------------------------
+                0.00    0.00      71/71          new_builtin_object [102]
+[127]    0.0    0.00    0.00      71         ptr_to_normal_builtin [127]
+                0.00    0.00      71/59847324     is_htag [9]
+                0.00    0.00      71/246023951     is_ptag [14]
+                0.00    0.00      71/2210992     put_ptag [164]
+-----------------------------------------------
+                0.00    0.00      30/30          property_map_add_transition [126]
+[128]    0.0    0.00    0.00      30         hash_put_transition [128]
+                0.00    0.00      30/6633043     gc_malloc [19]
+                0.00    0.00      90/90          gc_push_checked [208]
+                0.00    0.00      90/90          gc_pop_checked [207]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[129]    0.0    0.00    0.00       1         init_global_constants [129]
+                0.00    0.00      18/272         cstr_to_string_ool [99]
+                0.00    0.00       3/13          allocate_flonum [132]
+                0.00    0.00       3/13          ptr_to_normal_flonum [236]
+-----------------------------------------------
+                0.00    0.00       1/4           init_meta_objects [50]
+                0.00    0.00       1/4           create_array_object [86]
+                0.00    0.00       2/4           reset_context [136]
+[130]    0.0    0.00    0.00       4         new_array_object [130]
+                0.00    0.00       4/2210887     allocate_jsobject [25]
+                0.00    0.00       4/6633043     gc_malloc [19]
+                0.00    0.00       4/4           ptr_to_normal_array [153]
+                0.00    0.00       4/61903307     gc_pop_checked [33]
+                0.00    0.00       4/61903307     gc_push_checked [34]
+                0.00    0.00       8/8           set_array_ptr_body [243]
+                0.00    0.00       4/4           set_array_ptr_size [258]
+                0.00    0.00       4/104         cint_to_number [205]
+                0.00    0.00       4/104         set_array_ptr_length [206]
+-----------------------------------------------
+                0.00    0.00       2/2           void scan_Context<CacheCheney_Tracer>(context*) [107]
+[131]    0.0    0.00    0.00       2         void scan_stack<CacheCheney_Tracer>(unsigned long*, int, int) [131]
+                0.00    0.00      30/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00       2/2           CacheCheney_Tracer::process_edge_function_frame(unsigned long&) [151]
+                0.00    0.00      30/2778        cast_process_edge_arg(unsigned long&) [718]
+-----------------------------------------------
+                0.00    0.00       3/13          init_global_constants [129]
+                0.00    0.00      10/13          double_to_number [134]
+[132]    0.0    0.00    0.00      13         allocate_flonum [132]
+                0.00    0.00      13/6633043     gc_malloc [19]
+                0.00    0.00      13/13          set_normal_flonum_ptr_value [237]
+-----------------------------------------------
+                0.00    0.00       8/8           void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[133]    0.0    0.00    0.00       8         void NodeScanner::scan_ArrayData<CacheCheney_Tracer>(unsigned long*) [133]
+                0.00    0.00       8/400040      CacheCheney_Tracer::process_node_JSValue_array(unsigned long*) [74]
+-----------------------------------------------
+                0.00    0.00      12/12          fill_builtin_properties [90]
+[134]    0.0    0.00    0.00      12         double_to_number [134]
+                0.00    0.00      10/13          allocate_flonum [132]
+                0.00    0.00      10/13          ptr_to_normal_flonum [236]
+                0.00    0.00       2/3           small_cint_to_fixnum [262]
+-----------------------------------------------
+                0.00    0.00       5/5           vmrun_threaded [2]
+[135]    0.0    0.00    0.00       5         string_concat_ool [135]
+                0.00    0.00       5/127         allocate_string [112]
+                0.00    0.00       5/127         string_table_put [113]
+                0.00    0.00      30/330         get_jsnormal_string_value [183]
+                0.00    0.00      15/264         gc_push_checked [195]
+                0.00    0.00      15/264         gc_pop_checked [194]
+                0.00    0.00      10/759         is_ptag [180]
+                0.00    0.00      10/10          get_jsnormal_string_length [240]
+                0.00    0.00      10/282         update_hash [191]
+                0.00    0.00       5/277         finalise_hash [192]
+                0.00    0.00       5/277         string_table_lookup2 [193]
+                0.00    0.00       5/127         ptr_to_normal_string [199]
+-----------------------------------------------
+                0.00    0.00       2/2           main [1]
+[136]    0.0    0.00    0.00       2         reset_context [136]
+                0.00    0.00       2/4           new_array_object [130]
+                0.00    0.00       2/2           new_frame [152]
+                0.00    0.00       2/2           init_special_registers [266]
+-----------------------------------------------
+                0.00    0.00       5/5           call_builtin [84]
+[137]    0.0    0.00    0.00       5         get_jsbuiltin_nargs [137]
+                0.00    0.00       5/4421610     jsv_to_jsobject [21]
+                0.00    0.00       5/13264840     is_htag [24]
+                0.00    0.00       5/53059360     is_ptag [40]
+                0.00    0.00       5/5           get_builtin_ptr_nargs [246]
+-----------------------------------------------
+                0.00    0.00       4/4           call_builtin [84]
+[138]    0.0    0.00    0.00       4         get_jsbuiltin_body [138]
+                0.00    0.00       4/4421610     jsv_to_jsobject [21]
+                0.00    0.00       4/13264840     is_htag [24]
+                0.00    0.00       4/53059360     is_ptag [40]
+                0.00    0.00       4/4           get_builtin_ptr_body [252]
+-----------------------------------------------
+                0.00    0.00       1/1           vmrun_threaded [2]
+[139]    0.0    0.00    0.00       1         new_function_object [139]
+                0.00    0.00       1/2210808     new_simple_object [20]
+                0.00    0.00       1/2210887     allocate_jsobject [25]
+                0.00    0.00       1/1           ptr_to_normal_function [157]
+                0.00    0.00       1/2           init_prop [155]
+                0.00    0.00       2/61903307     gc_pop_checked [33]
+                0.00    0.00       2/61903307     gc_push_checked [34]
+                0.00    0.00       1/1           set_function_ptr_table_entry [291]
+                0.00    0.00       1/1           set_function_ptr_environment [290]
+-----------------------------------------------
+                0.00    0.00       2/2           void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[140]    0.0    0.00    0.00       2         void NodeScanner::scan_Function<CacheCheney_Tracer>(jsobject_cell*) [140]
+                0.00    0.00       2/400194      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+                0.00    0.00       2/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00       2/2778        cast_process_edge_arg(unsigned long&) [718]
+-----------------------------------------------
+                0.00    0.00       2/2           void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[141]    0.0    0.00    0.00       2         void NodeScanner::scan_BoxedNumber<CacheCheney_Tracer>(jsobject_cell*) [141]
+                0.00    0.00       2/400194      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+                0.00    0.00       2/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00       2/2778        cast_process_edge_arg(unsigned long&) [718]
+-----------------------------------------------
+                0.00    0.00       2/2           void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[142]    0.0    0.00    0.00       2         void NodeScanner::scan_BoxedString<CacheCheney_Tracer>(jsobject_cell*) [142]
+                0.00    0.00       2/400194      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+                0.00    0.00       2/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00       2/2778        cast_process_edge_arg(unsigned long&) [718]
+-----------------------------------------------
+                0.00    0.00       2/2           void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[143]    0.0    0.00    0.00       2         void NodeScanner::scan_BoxedBoolean<CacheCheney_Tracer>(jsobject_cell*) [143]
+                0.00    0.00       2/400194      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+                0.00    0.00       2/2           is_boolean(unsigned long) [736]
+                0.00    0.00       2/2           get_number_object_ptr_value(jsobject_cell*) [738]
+-----------------------------------------------
+                0.00    0.00       2/2           garbage_collection(context*) [42]
+[144]    0.0    0.00    0.00       2         scan_remembered_set() [144]
+                0.00    0.00       9/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+-----------------------------------------------
+                0.00    0.00       1/1           init_meta_objects [50]
+[145]    0.0    0.00    0.00       1         new_string_object [145]
+                0.00    0.00       1/2210887     allocate_jsobject [25]
+                0.00    0.00       1/1           ptr_to_normal_string_object [159]
+                0.00    0.00       1/2           init_prop [155]
+                0.00    0.00       1/1           get_jsnormal_string_length [160]
+                0.00    0.00       1/246023951     is_ptag [14]
+                0.00    0.00       1/61903307     gc_pop_checked [33]
+                0.00    0.00       1/61903307     gc_push_checked [34]
+                0.00    0.00       1/1           set_string_object_ptr_value [294]
+                0.00    0.00       1/105         small_cint_to_fixnum [204]
+-----------------------------------------------
+                0.00    0.00       4/4           void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[146]    0.0    0.00    0.00       4         void NodeScanner::scan_FunctionFrame<CacheCheney_Tracer>(function_frame*) [146]
+                0.00    0.00       8/1203139     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00       8/2778        cast_process_edge_arg(unsigned long&) [718]
+-----------------------------------------------
+                0.00    0.00       1/1           init_meta_objects [50]
+[147]    0.0    0.00    0.00       1         new_number_object [147]
+                0.00    0.00       1/2210887     allocate_jsobject [25]
+                0.00    0.00       1/1           ptr_to_normal_number_object [158]
+                0.00    0.00       1/246023951     is_ptag [14]
+                0.00    0.00       1/61903307     gc_pop_checked [33]
+                0.00    0.00       1/61903307     gc_push_checked [34]
+                0.00    0.00       1/1           set_number_object_ptr_value [293]
+-----------------------------------------------
+                0.00    0.00       3/3           fixnum_to_string [149]
+[148]    0.0    0.00    0.00       3         cint_to_string [148]
+                0.00    0.00       3/272         cstr_to_string_ool [99]
+-----------------------------------------------
+                0.00    0.00       3/3           to_string [150]
+[149]    0.0    0.00    0.00       3         fixnum_to_string [149]
+                0.00    0.00       3/3           cint_to_string [148]
+                0.00    0.00       3/1224        is_ptag [173]
+                0.00    0.00       3/3           fixnum_to_cint [259]
+-----------------------------------------------
+                0.00    0.00       3/3           vmrun_threaded [2]
+[150]    0.0    0.00    0.00       3         to_string [150]
+                0.00    0.00       3/3           fixnum_to_string [149]
+                0.00    0.00       6/1224        is_ptag [173]
+-----------------------------------------------
+                0.00    0.00       2/2           void scan_stack<CacheCheney_Tracer>(unsigned long*, int, int) [131]
+[151]    0.0    0.00    0.00       2         CacheCheney_Tracer::process_edge_function_frame(unsigned long&) [151]
+                0.00    0.00       1/600624      CacheCheney_Tracer::forward(unsigned long) [53]
+                0.00    0.00       2/2           jsv_to_function_frame(unsigned long) [737]
+                0.00    0.00       2/1603849     CacheCheney_Tracer::in_cache_space(unsigned long) [707]
+-----------------------------------------------
+                0.00    0.00       2/2           reset_context [136]
+[152]    0.0    0.00    0.00       2         new_frame [152]
+                0.00    0.00       2/6633043     gc_malloc [19]
+                0.00    0.00       2/2           gc_push_checked [265]
+                0.00    0.00       2/2           gc_pop_checked [264]
+-----------------------------------------------
+                0.00    0.00       4/4           new_array_object [130]
+[153]    0.0    0.00    0.00       4         ptr_to_normal_array [153]
+                0.00    0.00       4/59847324     is_htag [9]
+                0.00    0.00       4/246023951     is_ptag [14]
+                0.00    0.00       4/2210992     put_ptag [164]
+-----------------------------------------------
+                0.00    0.00       1/1           call_builtin [84]
+[154]    0.0    0.00    0.00       1         get_jsbuiltin_constructor [154]
+                0.00    0.00       1/4421610     jsv_to_jsobject [21]
+                0.00    0.00       1/13264840     is_htag [24]
+                0.00    0.00       1/53059360     is_ptag [40]
+                0.00    0.00       1/1           get_builtin_ptr_constructor [278]
+-----------------------------------------------
+                0.00    0.00       1/2           new_function_object [139]
+                0.00    0.00       1/2           new_string_object [145]
+[155]    0.0    0.00    0.00       2         init_prop [155]
+                0.00    0.00       2/10162368     prop_index [30]
+-----------------------------------------------
+                0.00    0.00       1/1           new_boolean_object [51]
+[156]    0.0    0.00    0.00       1         ptr_to_normal_boolean_object [156]
+                0.00    0.00       1/59847324     is_htag [9]
+                0.00    0.00       1/246023951     is_ptag [14]
+                0.00    0.00       1/2210992     put_ptag [164]
+-----------------------------------------------
+                0.00    0.00       1/1           new_function_object [139]
+[157]    0.0    0.00    0.00       1         ptr_to_normal_function [157]
+                0.00    0.00       1/59847324     is_htag [9]
+                0.00    0.00       1/246023951     is_ptag [14]
+                0.00    0.00       1/2210992     put_ptag [164]
+-----------------------------------------------
+                0.00    0.00       1/1           new_number_object [147]
+[158]    0.0    0.00    0.00       1         ptr_to_normal_number_object [158]
+                0.00    0.00       1/59847324     is_htag [9]
+                0.00    0.00       1/246023951     is_ptag [14]
+                0.00    0.00       1/2210992     put_ptag [164]
+-----------------------------------------------
+                0.00    0.00       1/1           new_string_object [145]
+[159]    0.0    0.00    0.00       1         ptr_to_normal_string_object [159]
+                0.00    0.00       1/59847324     is_htag [9]
+                0.00    0.00       1/246023951     is_ptag [14]
+                0.00    0.00       1/2210992     put_ptag [164]
+-----------------------------------------------
+                0.00    0.00       1/1           new_string_object [145]
+[160]    0.0    0.00    0.00       1         get_jsnormal_string_length [160]
+                0.00    0.00       1/1           jsv_to_normal_string [161]
+                0.00    0.00       1/1           get_normal_string_ptr_length [279]
+-----------------------------------------------
+                0.00    0.00       1/1           get_jsnormal_string_length [160]
+[161]    0.0    0.00    0.00       1         jsv_to_normal_string [161]
+                0.00    0.00       1/246023951     is_ptag [14]
+                0.00    0.00       1/94042852     clear_ptag [36]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[162]    0.0    0.00    0.00       1         enable_gc [162]
+                0.00    0.00       1/6633044     check_gc_request(context*, int) [71]
+-----------------------------------------------
+                0.00    0.00 6632430/6632430     object_grow_shape [13]
+[163]    0.0    0.00    0.00 6632430         hcprof_leave_shape [163]
+-----------------------------------------------
+                0.00    0.00       1/2210992     ptr_to_normal_function [157]
+                0.00    0.00       1/2210992     ptr_to_normal_string_object [159]
+                0.00    0.00       1/2210992     ptr_to_normal_number_object [158]
+                0.00    0.00       1/2210992     ptr_to_normal_boolean_object [156]
+                0.00    0.00       4/2210992     ptr_to_normal_array [153]
+                0.00    0.00      71/2210992     ptr_to_normal_builtin [127]
+                0.00    0.00     105/2210992     small_cint_to_fixnum [204]
+                0.00    0.00 2210808/2210992     ptr_to_normal_simple_object [56]
+[164]    0.0    0.00    0.00 2210992         put_ptag [164]
+-----------------------------------------------
+                0.00    0.00       1/2210805     get_builtin_ptr_constructor [278]
+                0.00    0.00       4/2210805     get_builtin_ptr_body [252]
+                0.00    0.00 2210800/2210805     get_function_ptr_table_entry [166]
+[165]    0.0    0.00    0.00 2210805         jsv_to_noheap_ptr [165]
+-----------------------------------------------
+                0.00    0.00 2210800/2210800     get_jsfunction_table_entry [31]
+[166]    0.0    0.00    0.00 2210800         get_function_ptr_table_entry [166]
+                0.00    0.00 2210800/2210805     jsv_to_noheap_ptr [165]
+-----------------------------------------------
+                0.00    0.00 2210800/2210800     jsv_to_function_frame [79]
+[167]    0.0    0.00    0.00 2210800         get_ptag [167]
+-----------------------------------------------
+                0.00    0.00 2210800/2210800     restore_special_registers [58]
+[168]    0.0    0.00    0.00 2210800         jsv_to_noheap_ptr [168]
+-----------------------------------------------
+                0.00    0.00 2210800/2210800     call_function [17]
+[169]    0.0    0.00    0.00 2210800         save_special_registers [169]
+-----------------------------------------------
+                0.00    0.00 1319490/1319490     write_barrier [59]
+[170]    0.0    0.00    0.00 1319490         rememberset_add [170]
+-----------------------------------------------
+                0.00    0.00      41/4182        get_jsarray_size [223]
+                0.00    0.00      41/4182        set_jsarray_size [230]
+                0.00    0.00      41/4182        get_jsarray_body [221]
+                0.00    0.00      41/4182        set_jsarray_body [229]
+                0.00    0.00      41/4182        get_jsarray_length [222]
+                0.00    0.00      41/4182        fixnum_to_cint [215]
+                0.00    0.00      41/4182        number_to_double [226]
+                0.00    0.00     820/4182        jsv_to_jsobject [196]
+                0.00    0.00    3075/4182        get_htag [176]
+[171]    0.0    0.00    0.00    4182         is_ptag [171]
+-----------------------------------------------
+                0.00    0.00     205/1230        jsv_to_jsobject [196]
+                0.00    0.00    1025/1230        get_htag [176]
+[172]    0.0    0.00    0.00    1230         clear_ptag [172]
+-----------------------------------------------
+                0.00    0.00       3/1224        fixnum_to_cint [259]
+                0.00    0.00       3/1224        fixnum_to_string [149]
+                0.00    0.00       6/1224        to_string [150]
+                0.00    0.00    1212/1224        to_boolean [187]
+[173]    0.0    0.00    0.00    1224         is_ptag [173]
+-----------------------------------------------
+                0.00    0.00      41/1066        jsv_to_array_data [225]
+                0.00    0.00    1025/1066        get_htag [176]
+[174]    0.0    0.00    0.00    1066         gc_obj_header_type [174]
+                0.00    0.00    1066/1066        space_get_cell_type [175]
+-----------------------------------------------
+                0.00    0.00    1066/1066        gc_obj_header_type [174]
+[175]    0.0    0.00    0.00    1066         space_get_cell_type [175]
+-----------------------------------------------
+                0.00    0.00    1025/1025        is_htag [177]
+[176]    0.0    0.00    0.00    1025         get_htag [176]
+                0.00    0.00    3075/4182        is_ptag [171]
+                0.00    0.00    1025/1230        clear_ptag [172]
+                0.00    0.00    1025/1066        gc_obj_header_type [174]
+-----------------------------------------------
+                0.00    0.00      41/1025        get_jsarray_size [223]
+                0.00    0.00      41/1025        set_jsarray_size [230]
+                0.00    0.00      41/1025        get_jsarray_body [221]
+                0.00    0.00      41/1025        set_jsarray_body [229]
+                0.00    0.00      41/1025        get_jsarray_length [222]
+                0.00    0.00     820/1025        jsv_to_jsobject [196]
+[177]    0.0    0.00    0.00    1025         is_htag [177]
+                0.00    0.00    1025/1025        get_htag [176]
+-----------------------------------------------
+                0.00    0.00    1000/1000        get_jsarray_size [89]
+[178]    0.0    0.00    0.00    1000         get_array_ptr_size [178]
+-----------------------------------------------
+                0.00    0.00     900/900         get_jsarray_length [91]
+[179]    0.0    0.00    0.00     900         get_array_ptr_length [179]
+-----------------------------------------------
+                0.00    0.00      10/759         string_concat_ool [135]
+                0.00    0.00     127/759         ptr_to_normal_string [199]
+                0.00    0.00     127/759         string_table_put [113]
+                0.00    0.00     495/759         jsv_to_normal_string [182]
+[180]    0.0    0.00    0.00     759         is_ptag [180]
+-----------------------------------------------
+                0.00    0.00     495/495         jsv_to_normal_string [182]
+[181]    0.0    0.00    0.00     495         clear_ptag [181]
+-----------------------------------------------
+                0.00    0.00      10/495         get_jsnormal_string_length [240]
+                0.00    0.00     155/495         get_jsnormal_string_hash [197]
+                0.00    0.00     330/495         get_jsnormal_string_value [183]
+[182]    0.0    0.00    0.00     495         jsv_to_normal_string [182]
+                0.00    0.00     495/759         is_ptag [180]
+                0.00    0.00     495/495         clear_ptag [181]
+-----------------------------------------------
+                0.00    0.00      30/330         string_concat_ool [135]
+                0.00    0.00     300/330         string_table_lookup2 [193]
+[183]    0.0    0.00    0.00     330         get_jsnormal_string_value [183]
+                0.00    0.00     330/495         jsv_to_normal_string [182]
+                0.00    0.00     330/330         get_normal_string_ptr_value [184]
+-----------------------------------------------
+                0.00    0.00     330/330         get_jsnormal_string_value [183]
+[184]    0.0    0.00    0.00     330         get_normal_string_ptr_value [184]
+-----------------------------------------------
+                0.00    0.00     303/303         to_boolean [187]
+[185]    0.0    0.00    0.00     303         special_to_boolean [185]
+-----------------------------------------------
+                0.00    0.00      12/303         code_loader [121]
+                0.00    0.00     291/303         insn_load_sbc [119]
+[186]    0.0    0.00    0.00     303         step_load_code [186]
+-----------------------------------------------
+                0.00    0.00     303/303         vmrun_threaded [2]
+[187]    0.0    0.00    0.00     303         to_boolean [187]
+                0.00    0.00    1212/1224        is_ptag [173]
+                0.00    0.00     303/303         special_to_boolean [185]
+-----------------------------------------------
+                0.00    0.00     291/291         insn_load_sbc [119]
+[188]    0.0    0.00    0.00     291         find_insn [188]
+-----------------------------------------------
+                0.00    0.00     291/291         insn_load_sbc [119]
+[189]    0.0    0.00    0.00     291         init_alloc_site [189]
+-----------------------------------------------
+                0.00    0.00     291/291         insn_load_sbc [119]
+[190]    0.0    0.00    0.00     291         init_inline_cache [190]
+-----------------------------------------------
+                0.00    0.00      10/282         string_concat_ool [135]
+                0.00    0.00     272/282         cstr_to_string_ool [99]
+[191]    0.0    0.00    0.00     282         update_hash [191]
+-----------------------------------------------
+                0.00    0.00       5/277         string_concat_ool [135]
+                0.00    0.00     272/277         cstr_to_string_ool [99]
+[192]    0.0    0.00    0.00     277         finalise_hash [192]
+-----------------------------------------------
+                0.00    0.00       5/277         string_concat_ool [135]
+                0.00    0.00     272/277         cstr_to_string_ool [99]
+[193]    0.0    0.00    0.00     277         string_table_lookup2 [193]
+                0.00    0.00     300/330         get_jsnormal_string_value [183]
+                0.00    0.00     155/155         get_jsnormal_string_hash [197]
+-----------------------------------------------
+                0.00    0.00      15/264         string_concat_ool [135]
+                0.00    0.00     122/264         cstr_to_string_ool [99]
+                0.00    0.00     127/264         string_table_put [113]
+[194]    0.0    0.00    0.00     264         gc_pop_checked [194]
+-----------------------------------------------
+                0.00    0.00      15/264         string_concat_ool [135]
+                0.00    0.00     122/264         cstr_to_string_ool [99]
+                0.00    0.00     127/264         string_table_put [113]
+[195]    0.0    0.00    0.00     264         gc_push_checked [195]
+-----------------------------------------------
+                0.00    0.00      41/205         get_jsarray_size [223]
+                0.00    0.00      41/205         set_jsarray_size [230]
+                0.00    0.00      41/205         get_jsarray_body [221]
+                0.00    0.00      41/205         set_jsarray_body [229]
+                0.00    0.00      41/205         get_jsarray_length [222]
+[196]    0.0    0.00    0.00     205         jsv_to_jsobject [196]
+                0.00    0.00     820/4182        is_ptag [171]
+                0.00    0.00     820/1025        is_htag [177]
+                0.00    0.00     205/1230        clear_ptag [172]
+-----------------------------------------------
+                0.00    0.00     155/155         string_table_lookup2 [193]
+[197]    0.0    0.00    0.00     155         get_jsnormal_string_hash [197]
+                0.00    0.00     155/495         jsv_to_normal_string [182]
+                0.00    0.00     155/155         get_normal_string_ptr_hash [198]
+-----------------------------------------------
+                0.00    0.00     155/155         get_jsnormal_string_hash [197]
+[198]    0.0    0.00    0.00     155         get_normal_string_ptr_hash [198]
+-----------------------------------------------
+                0.00    0.00       5/127         string_concat_ool [135]
+                0.00    0.00     122/127         cstr_to_string_ool [99]
+[199]    0.0    0.00    0.00     127         ptr_to_normal_string [199]
+                0.00    0.00     127/127         put_ptag [200]
+                0.00    0.00     127/759         is_ptag [180]
+-----------------------------------------------
+                0.00    0.00     127/127         ptr_to_normal_string [199]
+[200]    0.0    0.00    0.00     127         put_ptag [200]
+-----------------------------------------------
+                0.00    0.00     127/127         allocate_string [112]
+[201]    0.0    0.00    0.00     127         set_normal_string_ptr_length [201]
+-----------------------------------------------
+                0.00    0.00     121/121         property_map_add_property_entry [203]
+[202]    0.0    0.00    0.00     121         hash_put_property [202]
+-----------------------------------------------
+                0.00    0.00      30/121         extend_property_map [111]
+                0.00    0.00      91/121         create_map_and_shape [80]
+[203]    0.0    0.00    0.00     121         property_map_add_property_entry [203]
+                0.00    0.00     121/121         hash_put_property [202]
+-----------------------------------------------
+                0.00    0.00       1/105         new_string_object [145]
+                0.00    0.00     104/105         cint_to_number [205]
+[204]    0.0    0.00    0.00     105         small_cint_to_fixnum [204]
+                0.00    0.00     105/2210992     put_ptag [164]
+-----------------------------------------------
+                0.00    0.00       4/104         new_array_object [130]
+                0.00    0.00     100/104         set_array_element [93]
+[205]    0.0    0.00    0.00     104         cint_to_number [205]
+                0.00    0.00     104/105         small_cint_to_fixnum [204]
+-----------------------------------------------
+                0.00    0.00       4/104         new_array_object [130]
+                0.00    0.00     100/104         set_jsarray_length [114]
+[206]    0.0    0.00    0.00     104         set_array_ptr_length [206]
+-----------------------------------------------
+                0.00    0.00      90/90          hash_put_transition [128]
+[207]    0.0    0.00    0.00      90         gc_pop_checked [207]
+-----------------------------------------------
+                0.00    0.00      90/90          hash_put_transition [128]
+[208]    0.0    0.00    0.00      90         gc_push_checked [208]
+-----------------------------------------------
+                0.00    0.00      71/71          new_builtin_object [102]
+[209]    0.0    0.00    0.00      71         set_builtin_ptr_body [209]
+-----------------------------------------------
+                0.00    0.00      71/71          new_builtin_object [102]
+[210]    0.0    0.00    0.00      71         set_builtin_ptr_constructor [210]
+-----------------------------------------------
+                0.00    0.00      71/71          new_builtin_object [102]
+[211]    0.0    0.00    0.00      71         set_builtin_ptr_nargs [211]
+-----------------------------------------------
+                0.00    0.00      60/60          insn_load_sbc [119]
+[212]    0.0    0.00    0.00      60         calc_displacement [212]
+-----------------------------------------------
+                0.00    0.00      60/60          load_string_sbc [120]
+[213]    0.0    0.00    0.00      60         decode_escape_char [213]
+-----------------------------------------------
+                0.00    0.00      60/60          load_string_sbc [120]
+[214]    0.0    0.00    0.00      60         load_const_sbc [214]
+-----------------------------------------------
+                0.00    0.00      41/41          number_to_double [226]
+[215]    0.0    0.00    0.00      41         fixnum_to_cint [215]
+                0.00    0.00      41/4182        is_ptag [171]
+-----------------------------------------------
+                0.00    0.00      41/41          reallocate_array_data [124]
+[216]    0.0    0.00    0.00      41         gc_pop_checked [216]
+-----------------------------------------------
+                0.00    0.00      41/41          reallocate_array_data [124]
+[217]    0.0    0.00    0.00      41         gc_push_checked [217]
+-----------------------------------------------
+                0.00    0.00      41/41          get_jsarray_body [221]
+[218]    0.0    0.00    0.00      41         get_array_ptr_body [218]
+                0.00    0.00      41/41          jsv_to_array_data [225]
+-----------------------------------------------
+                0.00    0.00      41/41          get_jsarray_length [222]
+[219]    0.0    0.00    0.00      41         get_array_ptr_length [219]
+-----------------------------------------------
+                0.00    0.00      41/41          get_jsarray_size [223]
+[220]    0.0    0.00    0.00      41         get_array_ptr_size [220]
+-----------------------------------------------
+                0.00    0.00      41/41          reallocate_array_data [124]
+[221]    0.0    0.00    0.00      41         get_jsarray_body [221]
+                0.00    0.00      41/4182        is_ptag [171]
+                0.00    0.00      41/1025        is_htag [177]
+                0.00    0.00      41/205         jsv_to_jsobject [196]
+                0.00    0.00      41/41          get_array_ptr_body [218]
+-----------------------------------------------
+                0.00    0.00      41/41          reallocate_array_data [124]
+[222]    0.0    0.00    0.00      41         get_jsarray_length [222]
+                0.00    0.00      41/4182        is_ptag [171]
+                0.00    0.00      41/1025        is_htag [177]
+                0.00    0.00      41/205         jsv_to_jsobject [196]
+                0.00    0.00      41/41          get_array_ptr_length [219]
+-----------------------------------------------
+                0.00    0.00      41/41          reallocate_array_data [124]
+[223]    0.0    0.00    0.00      41         get_jsarray_size [223]
+                0.00    0.00      41/4182        is_ptag [171]
+                0.00    0.00      41/1025        is_htag [177]
+                0.00    0.00      41/205         jsv_to_jsobject [196]
+                0.00    0.00      41/41          get_array_ptr_size [220]
+-----------------------------------------------
+                0.00    0.00      41/41          jsv_to_array_data [225]
+[224]    0.0    0.00    0.00      41         get_ptag [224]
+-----------------------------------------------
+                0.00    0.00      41/41          get_array_ptr_body [218]
+[225]    0.0    0.00    0.00      41         jsv_to_array_data [225]
+                0.00    0.00      41/41          get_ptag [224]
+                0.00    0.00      41/1066        gc_obj_header_type [174]
+-----------------------------------------------
+                0.00    0.00      41/41          reallocate_array_data [124]
+[226]    0.0    0.00    0.00      41         number_to_double [226]
+                0.00    0.00      41/4182        is_ptag [171]
+                0.00    0.00      41/41          fixnum_to_cint [215]
+-----------------------------------------------
+                0.00    0.00      41/41          set_jsarray_body [229]
+[227]    0.0    0.00    0.00      41         set_array_ptr_body [227]
+-----------------------------------------------
+                0.00    0.00      41/41          set_jsarray_size [230]
+[228]    0.0    0.00    0.00      41         set_array_ptr_size [228]
+-----------------------------------------------
+                0.00    0.00      41/41          reallocate_array_data [124]
+[229]    0.0    0.00    0.00      41         set_jsarray_body [229]
+                0.00    0.00      41/4182        is_ptag [171]
+                0.00    0.00      41/1025        is_htag [177]
+                0.00    0.00      41/205         jsv_to_jsobject [196]
+                0.00    0.00      41/41          set_array_ptr_body [227]
+-----------------------------------------------
+                0.00    0.00      41/41          reallocate_array_data [124]
+[230]    0.0    0.00    0.00      41         set_jsarray_size [230]
+                0.00    0.00      41/4182        is_ptag [171]
+                0.00    0.00      41/1025        is_htag [177]
+                0.00    0.00      41/205         jsv_to_jsobject [196]
+                0.00    0.00      41/41          set_array_ptr_size [228]
+-----------------------------------------------
+                0.00    0.00      30/30          extend_property_map [111]
+[231]    0.0    0.00    0.00      30         hash_copy [231]
+-----------------------------------------------
+                0.00    0.00       1/22          set_jsarray_length [292]
+                0.00    0.00       1/22          fixnum_to_cint [273]
+                0.00    0.00       1/22          array_constr [85]
+                0.00    0.00       4/22          jsv_to_jsobject [285]
+                0.00    0.00      15/22          get_htag [247]
+[232]    0.0    0.00    0.00      22         is_ptag [232]
+-----------------------------------------------
+                0.00    0.00      18/18          new_property_map [108]
+[233]    0.0    0.00    0.00      18         hcprof_add_root_property_map [233]
+-----------------------------------------------
+                0.00    0.00       3/16          small_cint_to_fixnum [262]
+                0.00    0.00      13/16          ptr_to_normal_flonum [236]
+[234]    0.0    0.00    0.00      16         put_ptag [234]
+-----------------------------------------------
+                0.00    0.00      13/13          ptr_to_normal_flonum [236]
+[235]    0.0    0.00    0.00      13         is_ptag [235]
+-----------------------------------------------
+                0.00    0.00       3/13          init_global_constants [129]
+                0.00    0.00      10/13          double_to_number [134]
+[236]    0.0    0.00    0.00      13         ptr_to_normal_flonum [236]
+                0.00    0.00      13/16          put_ptag [234]
+                0.00    0.00      13/13          is_ptag [235]
+-----------------------------------------------
+                0.00    0.00      13/13          allocate_flonum [132]
+[237]    0.0    0.00    0.00      13         set_normal_flonum_ptr_value [237]
+-----------------------------------------------
+                0.00    0.00      12/12          code_loader [121]
+[238]    0.0    0.00    0.00      12         check_read_token [238]
+-----------------------------------------------
+                0.00    0.00       2/10          jsv_to_function_frame(unsigned long) [737]
+                0.00    0.00       8/10          jsv_to_array_data(unsigned long) [728]
+[239]    0.0    0.00    0.00      10         gc_obj_header_type [239]
+                0.00    0.00      10/10          space_get_cell_type(unsigned long) [725]
+-----------------------------------------------
+                0.00    0.00      10/10          string_concat_ool [135]
+[240]    0.0    0.00    0.00      10         get_jsnormal_string_length [240]
+                0.00    0.00      10/495         jsv_to_normal_string [182]
+                0.00    0.00      10/10          get_normal_string_ptr_length [241]
+-----------------------------------------------
+                0.00    0.00      10/10          get_jsnormal_string_length [240]
+[241]    0.0    0.00    0.00      10         get_normal_string_ptr_length [241]
+-----------------------------------------------
+                0.00    0.00       4/8           jsv_to_normal_string [255]
+                0.00    0.00       4/8           print_value [256]
+[242]    0.0    0.00    0.00       8         is_ptag [242]
+-----------------------------------------------
+                0.00    0.00       8/8           new_array_object [130]
+[243]    0.0    0.00    0.00       8         set_array_ptr_body [243]
+-----------------------------------------------
+                0.00    0.00       1/6           jsv_to_jsobject [285]
+                0.00    0.00       5/6           get_htag [247]
+[244]    0.0    0.00    0.00       6         clear_ptag [244]
+-----------------------------------------------
+                0.00    0.00       5/5           get_htag [247]
+[245]    0.0    0.00    0.00       5         gc_obj_header_type [245]
+                0.00    0.00       5/5           space_get_cell_type [249]
+-----------------------------------------------
+                0.00    0.00       5/5           get_jsbuiltin_nargs [137]
+[246]    0.0    0.00    0.00       5         get_builtin_ptr_nargs [246]
+-----------------------------------------------
+                0.00    0.00       5/5           is_htag [248]
+[247]    0.0    0.00    0.00       5         get_htag [247]
+                0.00    0.00      15/22          is_ptag [232]
+                0.00    0.00       5/6           clear_ptag [244]
+                0.00    0.00       5/5           gc_obj_header_type [245]
+-----------------------------------------------
+                0.00    0.00       1/5           set_jsarray_length [292]
+                0.00    0.00       4/5           jsv_to_jsobject [285]
+[248]    0.0    0.00    0.00       5         is_htag [248]
+                0.00    0.00       5/5           get_htag [247]
+-----------------------------------------------
+                0.00    0.00       5/5           gc_obj_header_type [245]
+[249]    0.0    0.00    0.00       5         space_get_cell_type [249]
+-----------------------------------------------
+                0.00    0.00       4/4           call_builtin [84]
+[250]    0.0    0.00    0.00       4         builtin_print [250]
+                0.00    0.00       4/4           print_value_simple [257]
+-----------------------------------------------
+                0.00    0.00       4/4           jsv_to_normal_string [255]
+[251]    0.0    0.00    0.00       4         clear_ptag [251]
+-----------------------------------------------
+                0.00    0.00       4/4           get_jsbuiltin_body [138]
+[252]    0.0    0.00    0.00       4         get_builtin_ptr_body [252]
+                0.00    0.00       4/2210805     jsv_to_noheap_ptr [165]
+-----------------------------------------------
+                0.00    0.00       4/4           print_value [256]
+[253]    0.0    0.00    0.00       4         get_jsnormal_string_value [253]
+                0.00    0.00       4/4           jsv_to_normal_string [255]
+                0.00    0.00       4/4           get_normal_string_ptr_value [254]
+-----------------------------------------------
+                0.00    0.00       4/4           get_jsnormal_string_value [253]
+[254]    0.0    0.00    0.00       4         get_normal_string_ptr_value [254]
+-----------------------------------------------
+                0.00    0.00       4/4           get_jsnormal_string_value [253]
+[255]    0.0    0.00    0.00       4         jsv_to_normal_string [255]
+                0.00    0.00       4/8           is_ptag [242]
+                0.00    0.00       4/4           clear_ptag [251]
+-----------------------------------------------
+                0.00    0.00       4/4           print_value_simple [257]
+[256]    0.0    0.00    0.00       4         print_value [256]
+                0.00    0.00       4/8           is_ptag [242]
+                0.00    0.00       4/4           get_jsnormal_string_value [253]
+-----------------------------------------------
+                0.00    0.00       4/4           builtin_print [250]
+[257]    0.0    0.00    0.00       4         print_value_simple [257]
+                0.00    0.00       4/4           print_value [256]
+-----------------------------------------------
+                0.00    0.00       4/4           new_array_object [130]
+[258]    0.0    0.00    0.00       4         set_array_ptr_size [258]
+-----------------------------------------------
+                0.00    0.00       3/3           fixnum_to_string [149]
+[259]    0.0    0.00    0.00       3         fixnum_to_cint [259]
+                0.00    0.00       3/1224        is_ptag [173]
+-----------------------------------------------
+                0.00    0.00       3/3           vmrun_threaded [2]
+[260]    0.0    0.00    0.00       3         gc_pop_checked [260]
+-----------------------------------------------
+                0.00    0.00       3/3           vmrun_threaded [2]
+[261]    0.0    0.00    0.00       3         gc_push_checked [261]
+-----------------------------------------------
+                0.00    0.00       1/3           init_meta_objects [50]
+                0.00    0.00       2/3           double_to_number [134]
+[262]    0.0    0.00    0.00       3         small_cint_to_fixnum [262]
+                0.00    0.00       3/16          put_ptag [234]
+-----------------------------------------------
+                0.00    0.00       3/3           insn_load_sbc [119]
+[263]    0.0    0.00    0.00       3         specstr_to_jsvalue [263]
+-----------------------------------------------
+                0.00    0.00       2/2           new_frame [152]
+[264]    0.0    0.00    0.00       2         gc_pop_checked [264]
+-----------------------------------------------
+                0.00    0.00       2/2           new_frame [152]
+[265]    0.0    0.00    0.00       2         gc_push_checked [265]
+-----------------------------------------------
+                0.00    0.00       2/2           reset_context [136]
+[266]    0.0    0.00    0.00       2         init_special_registers [266]
+-----------------------------------------------
+                0.00    0.00       2/2           vmrun_threaded [2]
+[267]    0.0    0.00    0.00       2         make_ilabel [267]
+-----------------------------------------------
+                0.00    0.00       2/2           code_loader [121]
+[268]    0.0    0.00    0.00       2         set_function_table [268]
+-----------------------------------------------
+                0.00    0.00       1/1           init_context [281]
+[269]    0.0    0.00    0.00       1         allocate_context [269]
+-----------------------------------------------
+                0.00    0.00       1/1           array_constr [85]
+[270]    0.0    0.00    0.00       1         cint_to_number [270]
+                0.00    0.00       1/1           small_cint_to_fixnum [295]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[271]    0.0    0.00    0.00       1         end_code_loader [271]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[272]    0.0    0.00    0.00       1         file_type [272]
+-----------------------------------------------
+                0.00    0.00       1/1           array_constr [85]
+[273]    0.0    0.00    0.00       1         fixnum_to_cint [273]
+                0.00    0.00       1/22          is_ptag [232]
+-----------------------------------------------
+                0.00    0.00       1/1           array_constr [85]
+[274]    0.0    0.00    0.00       1         gc_pop_checked [274]
+-----------------------------------------------
+                0.00    0.00       1/1           array_constr [85]
+[275]    0.0    0.00    0.00       1         gc_push_checked [275]
+-----------------------------------------------
+                0.00    0.00       1/1           vmrun_threaded [2]
+[276]    0.0    0.00    0.00       1         gc_restore_root_stack [276]
+-----------------------------------------------
+                0.00    0.00       1/1           vmrun_threaded [2]
+[277]    0.0    0.00    0.00       1         gc_save_root_stack [277]
+-----------------------------------------------
+                0.00    0.00       1/1           get_jsbuiltin_constructor [154]
+[278]    0.0    0.00    0.00       1         get_builtin_ptr_constructor [278]
+                0.00    0.00       1/2210805     jsv_to_noheap_ptr [165]
+-----------------------------------------------
+                0.00    0.00       1/1           get_jsnormal_string_length [160]
+[279]    0.0    0.00    0.00       1         get_normal_string_ptr_length [279]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[280]    0.0    0.00    0.00       1         init_code_loader [280]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[281]    0.0    0.00    0.00       1         init_context [281]
+                0.00    0.00       1/1           allocate_context [269]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[282]    0.0    0.00    0.00       1         init_memory [282]
+                0.00    0.00       1/1           space_init [297]
+-----------------------------------------------
+                0.00    0.00       1/1           space_init [297]
+[283]    0.0    0.00    0.00       1         init_remembered_set [283]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[284]    0.0    0.00    0.00       1         init_string_table [284]
+-----------------------------------------------
+                0.00    0.00       1/1           set_jsarray_length [292]
+[285]    0.0    0.00    0.00       1         jsv_to_jsobject [285]
+                0.00    0.00       4/22          is_ptag [232]
+                0.00    0.00       4/5           is_htag [248]
+                0.00    0.00       1/6           clear_ptag [244]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[286]    0.0    0.00    0.00       1         process_options [286]
+-----------------------------------------------
+                0.00    0.00       1/1           small_cint_to_fixnum [295]
+[287]    0.0    0.00    0.00       1         put_ptag [287]
+-----------------------------------------------
+                0.00    0.00       1/1           set_jsarray_length [292]
+[288]    0.0    0.00    0.00       1         set_array_ptr_length [288]
+-----------------------------------------------
+                0.00    0.00       1/1           new_boolean_object [51]
+[289]    0.0    0.00    0.00       1         set_boolean_object_ptr_value [289]
+-----------------------------------------------
+                0.00    0.00       1/1           new_function_object [139]
+[290]    0.0    0.00    0.00       1         set_function_ptr_environment [290]
+-----------------------------------------------
+                0.00    0.00       1/1           new_function_object [139]
+[291]    0.0    0.00    0.00       1         set_function_ptr_table_entry [291]
+-----------------------------------------------
+                0.00    0.00       1/1           array_constr [85]
+[292]    0.0    0.00    0.00       1         set_jsarray_length [292]
+                0.00    0.00       1/22          is_ptag [232]
+                0.00    0.00       1/5           is_htag [248]
+                0.00    0.00       1/1           jsv_to_jsobject [285]
+                0.00    0.00       1/1           set_array_ptr_length [288]
+-----------------------------------------------
+                0.00    0.00       1/1           new_number_object [147]
+[293]    0.0    0.00    0.00       1         set_number_object_ptr_value [293]
+-----------------------------------------------
+                0.00    0.00       1/1           new_string_object [145]
+[294]    0.0    0.00    0.00       1         set_string_object_ptr_value [294]
+-----------------------------------------------
+                0.00    0.00       1/1           cint_to_number [270]
+[295]    0.0    0.00    0.00       1         small_cint_to_fixnum [295]
+                0.00    0.00       1/1           put_ptag [287]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[296]    0.0    0.00    0.00       1         space_free_dram_manager_init [296]
+-----------------------------------------------
+                0.00    0.00       1/1           init_memory [282]
+[297]    0.0    0.00    0.00       1         space_init [297]
+                0.00    0.00       1/1           init_remembered_set [283]
+                0.00    0.00       1/3           print_dram_space_usage() [733]
+-----------------------------------------------
+                0.00    0.00 11454508/11454508     write_barrier [59]
+[703]    0.0    0.00    0.00 11454508         is_ptag(unsigned long, PTag) [703]
+-----------------------------------------------
+                0.00    0.00 6633044/6633044     check_gc_request(context*, int) [71]
+[704]    0.0    0.00    0.00 6633044         space_check_gc_request() [704]
+-----------------------------------------------
+                0.00    0.00  800050/2800146     alloc_site_update_info(jsobject_cell*) [716]
+                0.00    0.00 2000096/2800146     find_lub(property_map*, property_map*) [717]
+[705]    0.0    0.00    0.00 2800146         GC_PM_EQ(property_map*, property_map*) [705]
+-----------------------------------------------
+                0.00    0.00       8/2006244     fixnum_to_cint(unsigned long) [726]
+                0.00    0.00       8/2006244     number_to_double(unsigned long) [727]
+                0.00    0.00 2006228/2006244     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+[706]    0.0    0.00    0.00 2006244         is_ptag(unsigned long, PTag) [706]
+-----------------------------------------------
+                0.00    0.00       2/1603849     CacheCheney_Tracer::process_edge_function_frame(unsigned long&) [151]
+                0.00    0.00  400032/1603849     CacheCheney_Tracer::process_edge_ex_JSValue_array(unsigned long&, unsigned long) [73]
+                0.00    0.00  402561/1603849     CacheCheney_Tracer::process_edge(unsigned long&) [65]
+                0.00    0.00  801254/1603849     CacheCheney_Tracer::process_edge(void*&) [66]
+[707]    0.0    0.00    0.00 1603849         CacheCheney_Tracer::in_cache_space(unsigned long) [707]
+-----------------------------------------------
+                0.00    0.00 1319492/1319492     write_barrier [59]
+[708]    0.0    0.00    0.00 1319492         clear_ptag(unsigned long) [708]
+-----------------------------------------------
+                0.00    0.00  400032/802593      CacheCheney_Tracer::process_edge_ex_JSValue_array(unsigned long&, unsigned long) [73]
+                0.00    0.00  402561/802593      CacheCheney_Tracer::process_edge(unsigned long&) [65]
+[709]    0.0    0.00    0.00  802593         clear_ptag(unsigned long) [709]
+-----------------------------------------------
+                0.00    0.00  600624/600624      CacheCheney_Tracer::forward(unsigned long) [53]
+[710]    0.0    0.00    0.00  600624         CacheCheney_Tracer::in_dram_space(unsigned long) [710]
+-----------------------------------------------
+                0.00    0.00      34/400442      void NodeScanner::scan_PropertyMapList<CacheCheney_Tracer>(property_map_list*) [123]
+                0.00    0.00      34/400442      void scan_function_table_entry<CacheCheney_Tracer>(function_table*) [110]
+                0.00    0.00      40/400442      void scan_roots<CacheCheney_Tracer>(context*) [97]
+                0.00    0.00      66/400442      void NodeScanner::scan_TransitionTable<CacheCheney_Tracer>(transition_table*) [117]
+                0.00    0.00      94/400442      void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*) [100]
+                0.00    0.00     152/400442      void NodeScanner::scan_Shape<CacheCheney_Tracer>(shape*) [109]
+                0.00    0.00  400022/400442      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+[711]    0.0    0.00    0.00  400442         void*& cast_process_edge_arg<property_map>(property_map*&) [711]
+-----------------------------------------------
+                0.00    0.00       2/400377      jsv_to_function_frame(unsigned long) [737]
+                0.00    0.00       8/400377      jsv_to_array_data(unsigned long) [728]
+                0.00    0.00  200015/400377      CacheCheney_Tracer::process_edge_ex_JSValue_array(unsigned long&, unsigned long) [73]
+                0.00    0.00  200352/400377      CacheCheney_Tracer::process_edge(unsigned long&) [65]
+[712]    0.0    0.00    0.00  400377         get_ptag(unsigned long) [712]
+-----------------------------------------------
+                0.00    0.00      10/400370      void scan_function_table_entry<CacheCheney_Tracer>(function_table*) [110]
+                0.00    0.00      14/400370      void scan_roots<CacheCheney_Tracer>(context*) [97]
+                0.00    0.00      58/400370      void NodeScanner::scan_Shape<CacheCheney_Tracer>(shape*) [109]
+                0.00    0.00      94/400370      void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*) [100]
+                0.00    0.00  400194/400370      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+[713]    0.0    0.00    0.00  400370         void*& cast_process_edge_arg<shape>(shape*&) [713]
+-----------------------------------------------
+                0.00    0.00  200015/400367      CacheCheney_Tracer::process_edge_ex_JSValue_array(unsigned long&, unsigned long) [73]
+                0.00    0.00  200352/400367      CacheCheney_Tracer::process_edge(unsigned long&) [65]
+[714]    0.0    0.00    0.00  400367         put_ptag(unsigned long, PTag) [714]
+-----------------------------------------------
+                0.00    0.00  400216/400216      CacheCheney_Tracer::forward(unsigned long) [53]
+[715]    0.0    0.00    0.00  400216         CacheCheney_Tracer::copy_to_dram(unsigned long, int) [715]
+-----------------------------------------------
+                0.00    0.00  400022/400022      void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+[716]    0.0    0.00    0.00  400022         alloc_site_update_info(jsobject_cell*) [716]
+                0.00    0.00  800050/2800146     GC_PM_EQ(property_map*, property_map*) [705]
+                0.00    0.00  400020/400020      find_lub(property_map*, property_map*) [717]
+-----------------------------------------------
+                0.00    0.00  400020/400020      alloc_site_update_info(jsobject_cell*) [716]
+[717]    0.0    0.00    0.00  400020         find_lub(property_map*, property_map*) [717]
+                0.00    0.00 2000096/2800146     GC_PM_EQ(property_map*, property_map*) [705]
+-----------------------------------------------
+                0.00    0.00       2/2778        void NodeScanner::scan_Function<CacheCheney_Tracer>(jsobject_cell*) [140]
+                0.00    0.00       2/2778        void NodeScanner::scan_BoxedNumber<CacheCheney_Tracer>(jsobject_cell*) [141]
+                0.00    0.00       2/2778        void NodeScanner::scan_BoxedString<CacheCheney_Tracer>(jsobject_cell*) [142]
+                0.00    0.00       8/2778        void scan_Context<CacheCheney_Tracer>(context*) [107]
+                0.00    0.00       8/2778        void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [125]
+                0.00    0.00       8/2778        void NodeScanner::scan_FunctionFrame<CacheCheney_Tracer>(function_frame*) [146]
+                0.00    0.00      30/2778        void scan_stack<CacheCheney_Tracer>(unsigned long*, int, int) [131]
+                0.00    0.00      66/2778        void NodeScanner::scan_TransitionTable<CacheCheney_Tracer>(transition_table*) [117]
+                0.00    0.00      96/2778        void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*) [100]
+                0.00    0.00     102/2778        void scan_roots<CacheCheney_Tracer>(context*) [97]
+                0.00    0.00     246/2778        void scan_function_table_entry<CacheCheney_Tracer>(function_table*) [110]
+                0.00    0.00     254/2778        void NodeScanner::scan_StrCons<CacheCheney_Tracer>(str_cons*) [115]
+                0.00    0.00     326/2778        void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [62]
+                0.00    0.00    1628/2778        void NodeScanner::scan_Hashtable<CacheCheney_Tracer>(hash_table*) [94]
+[718]    0.0    0.00    0.00    2778         cast_process_edge_arg(unsigned long&) [718]
+-----------------------------------------------
+                0.00    0.00       4/254         void NodeScanner::scan_StrCons<CacheCheney_Tracer>(str_cons*) [115]
+                0.00    0.00     250/254         void scan_string_table<CacheCheney_Tracer>(str_table*) [106]
+[719]    0.0    0.00    0.00     254         void*& cast_process_edge_arg<str_cons>(str_cons*&) [719]
+-----------------------------------------------
+                0.00    0.00     254/254         void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[720]    0.0    0.00    0.00     254         void NodeScanner::scan_String<CacheCheney_Tracer>(string_cell*) [720]
+-----------------------------------------------
+                0.00    0.00      96/96          void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*) [100]
+[721]    0.0    0.00    0.00      96         void*& cast_process_edge_arg<hash_table>(hash_table*&) [721]
+-----------------------------------------------
+                0.00    0.00      56/56          void NodeScanner::scan_Hashtable<CacheCheney_Tracer>(hash_table*) [94]
+[722]    0.0    0.00    0.00      56         void*& cast_process_edge_arg<transition_table>(transition_table*&) [722]
+-----------------------------------------------
+                0.00    0.00       2/34          void scan_Context<CacheCheney_Tracer>(context*) [107]
+                0.00    0.00      32/34          void NodeScanner::scan_PropertyMapList<CacheCheney_Tracer>(property_map_list*) [123]
+[723]    0.0    0.00    0.00      34         void*& cast_process_edge_arg<property_map_list>(property_map_list*&) [723]
+-----------------------------------------------
+                0.00    0.00      26/26          void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [48]
+[724]    0.0    0.00    0.00      26         void NodeScanner::scan_Flonum<CacheCheney_Tracer>(flonum_cell*) [724]
+-----------------------------------------------
+                0.00    0.00      10/10          gc_obj_header_type [239]
+[725]    0.0    0.00    0.00      10         space_get_cell_type(unsigned long) [725]
+-----------------------------------------------
+                0.00    0.00       8/8           number_to_double(unsigned long) [727]
+[726]    0.0    0.00    0.00       8         fixnum_to_cint(unsigned long) [726]
+                0.00    0.00       8/2006244     is_ptag(unsigned long, PTag) [706]
+-----------------------------------------------
+                0.00    0.00       8/8           void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [125]
+[727]    0.0    0.00    0.00       8         number_to_double(unsigned long) [727]
+                0.00    0.00       8/2006244     is_ptag(unsigned long, PTag) [706]
+                0.00    0.00       8/8           fixnum_to_cint(unsigned long) [726]
+-----------------------------------------------
+                0.00    0.00       8/8           get_array_ptr_body(jsobject_cell*) [729]
+[728]    0.0    0.00    0.00       8         jsv_to_array_data(unsigned long) [728]
+                0.00    0.00       8/400377      get_ptag(unsigned long) [712]
+                0.00    0.00       8/10          gc_obj_header_type [239]
+-----------------------------------------------
+                0.00    0.00       8/8           void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [125]
+[729]    0.0    0.00    0.00       8         get_array_ptr_body(jsobject_cell*) [729]
+                0.00    0.00       8/8           jsv_to_array_data(unsigned long) [728]
+-----------------------------------------------
+                0.00    0.00       8/8           void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [125]
+[730]    0.0    0.00    0.00       8         get_array_ptr_size(jsobject_cell*) [730]
+-----------------------------------------------
+                0.00    0.00       8/8           void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [125]
+[731]    0.0    0.00    0.00       8         get_array_ptr_length(jsobject_cell*) [731]
+-----------------------------------------------
+                0.00    0.00       4/4           garbage_collection(context*) [42]
+[732]    0.0    0.00    0.00       4         print_cache_space_useage() [732]
+-----------------------------------------------
+                0.00    0.00       1/3           space_init [297]
+                0.00    0.00       2/3           garbage_collection(context*) [42]
+[733]    0.0    0.00    0.00       3         print_dram_space_usage() [733]
+-----------------------------------------------
+                0.00    0.00       2/2           garbage_collection(context*) [42]
+[734]    0.0    0.00    0.00       2         need_major_gc() [734]
+-----------------------------------------------
+                0.00    0.00       2/2           void scan_Context<CacheCheney_Tracer>(context*) [107]
+[735]    0.0    0.00    0.00       2         void*& cast_process_edge_arg<function_frame>(function_frame*&) [735]
+-----------------------------------------------
+                0.00    0.00       2/2           void NodeScanner::scan_BoxedBoolean<CacheCheney_Tracer>(jsobject_cell*) [143]
+[736]    0.0    0.00    0.00       2         is_boolean(unsigned long) [736]
+-----------------------------------------------
+                0.00    0.00       2/2           CacheCheney_Tracer::process_edge_function_frame(unsigned long&) [151]
+[737]    0.0    0.00    0.00       2         jsv_to_function_frame(unsigned long) [737]
+                0.00    0.00       2/400377      get_ptag(unsigned long) [712]
+                0.00    0.00       2/10          gc_obj_header_type [239]
+-----------------------------------------------
+                0.00    0.00       2/2           void NodeScanner::scan_BoxedBoolean<CacheCheney_Tracer>(jsobject_cell*) [143]
+[738]    0.0    0.00    0.00       2         get_number_object_ptr_value(jsobject_cell*) [738]
+-----------------------------------------------
+
+ This table describes the call tree of the program, and was sorted by
+ the total amount of time spent in each function and its children.
+
+ Each entry in this table consists of several lines.  The line with the
+ index number at the left hand margin lists the current function.
+ The lines above it list the functions that called this function,
+ and the lines below it list the functions this one called.
+ This line lists:
+     index	A unique number given to each element of the table.
+		Index numbers are sorted numerically.
+		The index number is printed next to every function name so
+		it is easier to look up where the function is in the table.
+
+     % time	This is the percentage of the `total' time that was spent
+		in this function and its children.  Note that due to
+		different viewpoints, functions excluded by options, etc,
+		these numbers will NOT add up to 100%.
+
+     self	This is the total amount of time spent in this function.
+
+     children	This is the total amount of time propagated into this
+		function by its children.
+
+     called	This is the number of times the function was called.
+		If the function called itself recursively, the number
+		only includes non-recursive calls, and is followed by
+		a `+' and the number of recursive calls.
+
+     name	The name of the current function.  The index number is
+		printed after it.  If the function is a member of a
+		cycle, the cycle number is printed between the
+		function's name and the index number.
+
+
+ For the function's parents, the fields have the following meanings:
+
+     self	This is the amount of time that was propagated directly
+		from the function into this parent.
+
+     children	This is the amount of time that was propagated from
+		the function's children into this parent.
+
+     called	This is the number of times this parent called the
+		function `/' the total number of times the function
+		was called.  Recursive calls to the function are not
+		included in the number after the `/'.
+
+     name	This is the name of the parent.  The parent's index
+		number is printed after it.  If the parent is a
+		member of a cycle, the cycle number is printed between
+		the name and the index number.
+
+ If the parents of the function cannot be determined, the word
+ `<spontaneous>' is printed in the `name' field, and all the other
+ fields are blank.
+
+ For the function's children, the fields have the following meanings:
+
+     self	This is the amount of time that was propagated directly
+		from the child into the function.
+
+     children	This is the amount of time that was propagated from the
+		child's children to the function.
+
+     called	This is the number of times the function called
+		this child `/' the total number of times the child
+		was called.  Recursive calls by the child are not
+		listed in the number after the `/'.
+
+     name	This is the name of the child.  The child's index
+		number is printed after it.  If the child is a
+		member of a cycle, the cycle number is printed
+		between the name and the index number.
+
+ If there are any cycles (circles) in the call graph, there is an
+ entry for the cycle-as-a-whole.  This entry shows who called the
+ cycle (as parents) and the members of the cycle (as children.)
+ The `+' recursive calls entry shows the number of function calls that
+ were internal to the cycle, and the calls entry for each member shows,
+ for that member, how many times it was called from other members of
+ the cycle.
+
+Copyright (C) 2012-2020 Free Software Foundation, Inc.
+
+Copying and distribution of this file, with or without modification,
+are permitted in any medium without royalty provided the copyright
+notice and this notice are preserved.
+
+Index by function name
+
+  [97] void scan_roots<CacheCheney_Tracer>(context*) [259] fixnum_to_cint (types.h) [242] is_ptag (types-inl.h)
+ [131] void scan_stack<CacheCheney_Tracer>(unsigned long*, int, int) [118] fixnum_to_cint (types.h) [225] jsv_to_array_data (types-inl.h)
+  [48] void process_node<CacheCheney_Tracer>(cell_type_t, unsigned long) [57] fixnum_to_cint (types.h) [96] jsv_to_array_data (types-inl.h)
+ [107] void scan_Context<CacheCheney_Tracer>(context*) [149] fixnum_to_string [38] jsv_to_extension_prop (types-inl.h)
+ [734] need_major_gc()        [19] gc_malloc              [39] jsv_to_extension_prop (types-inl.h)
+  [87] scan_init_area()      [174] gc_obj_header_type (gc-inl.h) [79] jsv_to_function_frame (types-inl.h)
+  [71] check_gc_request(context*, int) [245] gc_obj_header_type (gc-inl.h) [77] jsv_to_function_frame (types-inl.h)
+ [106] void scan_string_table<CacheCheney_Tracer>(str_table*) [67] gc_obj_header_type (gc-inl.h) [196] jsv_to_jsobject (types-inl.h)
+  [42] garbage_collection(context*) [44] gc_obj_header_type (gc-inl.h) [285] jsv_to_jsobject (types-inl.h)
+ [144] scan_remembered_set()  [29] gc_obj_header_type (gc-inl.h) [21] jsv_to_jsobject (types-inl.h)
+ [721] void*& cast_process_edge_arg<hash_table>(hash_table*&) (gc-visitor-inl.h) [239] gc_obj_header_type (gc-inl.h) [8] jsv_to_jsobject (types-inl.h)
+ [711] void*& cast_process_edge_arg<property_map>(property_map*&) (gc-visitor-inl.h) [216] gc_pop_checked (gc-inl.h) [4] jsv_to_jsobject (types-inl.h)
+ [735] void*& cast_process_edge_arg<function_frame>(function_frame*&) (gc-visitor-inl.h) [274] gc_pop_checked (gc-inl.h) [165] jsv_to_noheap_ptr (types-inl.h)
+ [722] void*& cast_process_edge_arg<transition_table>(transition_table*&) (gc-visitor-inl.h) [264] gc_pop_checked (gc-inl.h) [168] jsv_to_noheap_ptr (types-inl.h)
+ [723] void*& cast_process_edge_arg<property_map_list>(property_map_list*&) (gc-visitor-inl.h) [207] gc_pop_checked (gc-inl.h) [182] jsv_to_normal_string (types-inl.h)
+ [713] void*& cast_process_edge_arg<shape>(shape*&) (gc-visitor-inl.h) [194] gc_pop_checked (gc-inl.h) [161] jsv_to_normal_string (types-inl.h)
+ [719] void*& cast_process_edge_arg<str_cons>(str_cons*&) (gc-visitor-inl.h) [33] gc_pop_checked (gc-inl.h) [255] jsv_to_normal_string (types-inl.h)
+ [716] alloc_site_update_info(jsobject_cell*) [260] gc_pop_checked (gc-inl.h) [64] jsv_to_property_map (types-inl.h)
+ [733] print_dram_space_usage() [217] gc_push_checked (gc-inl.h) [214] load_const_sbc
+ [732] print_cache_space_useage() [275] gc_push_checked (gc-inl.h) [120] load_string_sbc
+ [110] void scan_function_table_entry<CacheCheney_Tracer>(function_table*) [265] gc_push_checked (gc-inl.h) [267] make_ilabel
+ [717] find_lub(property_map*, property_map*) [208] gc_push_checked (gc-inl.h) [130] new_array_object
+  [49] scavenge()            [195] gc_push_checked (gc-inl.h) [51] new_boolean_object
+ [709] clear_ptag(unsigned long) (types-inl.h) [34] gc_push_checked (gc-inl.h) [102] new_builtin_object
+ [708] clear_ptag(unsigned long) (types-inl.h) [261] gc_push_checked (gc-inl.h) [152] new_frame
+ [736] is_boolean(unsigned long) (types.h) [276] gc_restore_root_stack (gc-inl.h) [139] new_function_object
+ [726] fixnum_to_cint(unsigned long) (types.h) [277] gc_save_root_stack (gc-inl.h) [147] new_number_object
+ [727] number_to_double(unsigned long) (types-inl.h) [82] get_array_element [76] new_object_shape
+ [728] jsv_to_array_data(unsigned long) (types-inl.h) [83] get_array_element_no_proto (object.c) [108] new_property_map
+ [729] get_array_ptr_body(jsobject_cell*) (types.h) [218] get_array_ptr_body (types.h) [20] new_simple_object
+ [730] get_array_ptr_size(jsobject_cell*) (types.h) [95] get_array_ptr_body (types.h) [145] new_string_object
+ [725] space_get_cell_type(unsigned long) (cache_dram_manager.h) [219] get_array_ptr_length (types.h) [226] number_to_double (types-inl.h)
+ [731] get_array_ptr_length(jsobject_cell*) (types.h) [179] get_array_ptr_length (types.h) [116] number_to_double (types-inl.h)
+ [718] cast_process_edge_arg(unsigned long&) (gc-visitor-inl.h) [220] get_array_ptr_size (types.h) [16] object_get_prop_address (types.h)
+ [737] jsv_to_function_frame(unsigned long) (types-inl.h) [178] get_array_ptr_size (types.h) [12] object_get_prop_address (types.h)
+ [704] space_check_gc_request() (cache_dram_manager.h) [252] get_builtin_ptr_body (types.h) [13] object_grow_shape (object.c)
+ [738] get_number_object_ptr_value(jsobject_cell*) (types.h) [278] get_builtin_ptr_constructor (types.h) [256] print_value
+ [706] is_ptag(unsigned long, PTag) (types-inl.h) [246] get_builtin_ptr_nargs (types.h) [257] print_value_simple
+ [703] is_ptag(unsigned long, PTag) (types-inl.h) [69] get_cached_shape (object.c) [286] process_options
+ [705] GC_PM_EQ(property_map*, property_map*) (cache_dram_manager.h) [78] get_function_ptr_environment (types.h) [30] prop_index (object.c)
+ [712] get_ptag(unsigned long) (types-inl.h) [166] get_function_ptr_table_entry (types.h) [203] property_map_add_property_entry
+ [714] put_ptag(unsigned long, PTag) (types-inl.h) [176] get_htag (types-inl.h) [126] property_map_add_transition
+ [125] void NodeScanner::scan_Array<CacheCheney_Tracer>(jsobject_cell*) [247] get_htag (types-inl.h) [153] ptr_to_normal_array (types-inl.h)
+ [109] void NodeScanner::scan_Shape<CacheCheney_Tracer>(shape*) [23] get_htag (types-inl.h) [156] ptr_to_normal_boolean_object (types-inl.h)
+ [724] void NodeScanner::scan_Flonum<CacheCheney_Tracer>(flonum_cell*) [10] get_htag (types-inl.h) [127] ptr_to_normal_builtin (types-inl.h)
+ [720] void NodeScanner::scan_String<CacheCheney_Tracer>(string_cell*) [6] get_htag (types-inl.h) [236] ptr_to_normal_flonum (types-inl.h)
+  [98] void NodeScanner::scan_Builtin<CacheCheney_Tracer>(jsobject_cell*) [221] get_jsarray_body (types.h) [157] ptr_to_normal_function (types-inl.h)
+ [115] void NodeScanner::scan_StrCons<CacheCheney_Tracer>(str_cons*) [88] get_jsarray_body (types.h) [158] ptr_to_normal_number_object (types-inl.h)
+ [140] void NodeScanner::scan_Function<CacheCheney_Tracer>(jsobject_cell*) [222] get_jsarray_length (types.h) [56] ptr_to_normal_simple_object (types-inl.h)
+ [133] void NodeScanner::scan_ArrayData<CacheCheney_Tracer>(unsigned long*) [91] get_jsarray_length (types.h) [199] ptr_to_normal_string (types-inl.h)
+  [94] void NodeScanner::scan_Hashtable<CacheCheney_Tracer>(hash_table*) [223] get_jsarray_size (types.h) [159] ptr_to_normal_string_object (types-inl.h)
+ [141] void NodeScanner::scan_BoxedNumber<CacheCheney_Tracer>(jsobject_cell*) [89] get_jsarray_size (types.h) [287] put_ptag (types-inl.h)
+ [142] void NodeScanner::scan_BoxedString<CacheCheney_Tracer>(jsobject_cell*) [138] get_jsbuiltin_body (types.h) [234] put_ptag (types-inl.h)
+ [100] void NodeScanner::scan_PropertyMap<CacheCheney_Tracer>(property_map*) [154] get_jsbuiltin_constructor (types.h) [200] put_ptag (types-inl.h)
+ [143] void NodeScanner::scan_BoxedBoolean<CacheCheney_Tracer>(jsobject_cell*) [137] get_jsbuiltin_nargs (types.h) [164] put_ptag (types-inl.h)
+  [55] void NodeScanner::scan_SimpleObject<CacheCheney_Tracer>(jsobject_cell*) [28] get_jsfunction_environment (types.h) [47] put_ptag (types-inl.h)
+ [146] void NodeScanner::scan_FunctionFrame<CacheCheney_Tracer>(function_frame*) [31] get_jsfunction_table_entry (types.h) [124] reallocate_array_data
+ [123] void NodeScanner::scan_PropertyMapList<CacheCheney_Tracer>(property_map_list*) [197] get_jsnormal_string_hash (types.h) [170] rememberset_add
+ [117] void NodeScanner::scan_TransitionTable<CacheCheney_Tracer>(transition_table*) [240] get_jsnormal_string_length (types.h) [70] rememberset_clear
+  [62] void NodeScanner::scan_object_properties<CacheCheney_Tracer>(jsobject_cell*) [160] get_jsnormal_string_length (types.h) [136] reset_context
+  [75] void NodeScanner::scan_Prop<CacheCheney_Tracer>(unsigned long*) [183] get_jsnormal_string_value (types.h) [58] restore_special_registers (context-inl.h)
+ [715] CacheCheney_Tracer::copy_to_dram(unsigned long, int) [253] get_jsnormal_string_value (types.h) [169] save_special_registers (context-inl.h)
+  [66] CacheCheney_Tracer::process_edge(void*&) [198] get_normal_string_ptr_hash (types.h) [93] set_array_element
+  [65] CacheCheney_Tracer::process_edge(unsigned long&) [241] get_normal_string_ptr_length (types.h) [92] set_array_prop
+ [710] CacheCheney_Tracer::in_dram_space(unsigned long) [279] get_normal_string_ptr_length (types.h) [227] set_array_ptr_body (types.h)
+ [707] CacheCheney_Tracer::in_cache_space(unsigned long) [184] get_normal_string_ptr_value (types.h) [243] set_array_ptr_body (types.h)
+ [104] CacheCheney_Tracer::process_weak_edge(void*&) [254] get_normal_string_ptr_value (types.h) [288] set_array_ptr_length (types.h)
+ [105] CacheCheney_Tracer::process_weak_edge(unsigned long&) [101] get_object_prop [206] set_array_ptr_length (types.h)
+  [74] CacheCheney_Tracer::process_node_JSValue_array(unsigned long*) [103] get_prop_prototype_chain_with_ic [228] set_array_ptr_size (types.h)
+ [151] CacheCheney_Tracer::process_edge_function_frame(unsigned long&) [18] get_prop_with_ic [258] set_array_ptr_size (types.h)
+  [73] CacheCheney_Tracer::process_edge_ex_JSValue_array(unsigned long&, unsigned long) [224] get_ptag (types-inl.h) [289] set_boolean_object_ptr_value (types.h)
+  [53] CacheCheney_Tracer::forward(unsigned long) [167] get_ptag (types-inl.h) [209] set_builtin_ptr_body (types.h)
+ [269] allocate_context (context.c) [35] get_ptag (types-inl.h) [210] set_builtin_ptr_constructor (types.h)
+ [132] allocate_flonum        [27] get_ptag (types-inl.h) [211] set_builtin_ptr_nargs (types.h)
+  [25] allocate_jsobject (object.c) [26] get_system_prop (object.c) [290] set_function_ptr_environment (types.h)
+ [112] allocate_string       [231] hash_copy             [291] set_function_ptr_table_entry (types.h)
+  [85] array_constr          [122] hash_create           [268] set_function_table
+ [250] builtin_print          [32] hash_get_with_attribute [229] set_jsarray_body (types.h)
+ [212] calc_displacement (codeloader.c) [202] hash_put_property [292] set_jsarray_length (types.h)
+  [84] call_builtin          [128] hash_put_transition   [114] set_jsarray_length (types.h)
+  [17] call_function         [233] hcprof_add_root_property_map (object.c) [230] set_jsarray_size (types.h)
+ [238] check_read_token       [45] hcprof_enter_shape (object.c) [237] set_normal_flonum_ptr_value (types.h)
+ [270] cint_to_number (types-inl.h) [163] hcprof_leave_shape (object.c) [201] set_normal_string_ptr_length (types.h)
+ [205] cint_to_number (types-inl.h) [189] init_alloc_site [293] set_number_object_ptr_value (types.h)
+  [63] cint_to_number (types-inl.h) [280] init_code_loader [3] set_prop_
+ [148] cint_to_string        [281] init_context          [294] set_string_object_ptr_value (types.h)
+ [172] clear_ptag (types-inl.h) [129] init_global_constants [295] small_cint_to_fixnum (types-inl.h)
+ [244] clear_ptag (types-inl.h) [81] init_global_objects [262] small_cint_to_fixnum (types-inl.h)
+  [52] clear_ptag (types-inl.h) [190] init_inline_cache  [204] small_cint_to_fixnum (types-inl.h)
+ [181] clear_ptag (types-inl.h) [282] init_memory         [43] small_cint_to_fixnum (types-inl.h)
+  [36] clear_ptag (types-inl.h) [50] init_meta_objects    [37] space_alloc
+  [22] clear_ptag (types-inl.h) [155] init_prop (object.c) [296] space_free_dram_manager_init
+ [251] clear_ptag (types-inl.h) [283] init_remembered_set [175] space_get_cell_type (cache_dram_manager.h)
+ [121] code_loader           [266] init_special_registers [249] space_get_cell_type (cache_dram_manager.h)
+  [86] create_array_object   [284] init_string_table      [68] space_get_cell_type (cache_dram_manager.h)
+  [80] create_map_and_shape (init.c) [119] insn_load_sbc  [72] space_get_cell_type (cache_dram_manager.h)
+   [7] create_simple_object_with_constructor [54] is_boolean (types.h) [46] space_get_cell_type (cache_dram_manager.h)
+  [15] create_simple_object_with_prototype [177] is_htag (types-inl.h) [297] space_init
+  [99] cstr_to_string_ool    [248] is_htag (types-inl.h) [185] special_to_boolean
+ [213] decode_escape_char     [24] is_htag (types-inl.h) [263] specstr_to_jsvalue
+ [134] double_to_number (types-inl.h) [9] is_htag (types-inl.h) [41] start_garbage_collection
+  [61] double_to_number (types-inl.h) [5] is_htag (types-inl.h) [186] step_load_code
+ [162] enable_gc             [171] is_ptag (types-inl.h) [135] string_concat_ool
+ [271] end_code_loader       [232] is_ptag (types-inl.h) [193] string_table_lookup2 (string.c)
+ [111] extend_property_map (object.c) [40] is_ptag (types-inl.h) [113] string_table_put (string.c)
+ [272] file_type             [173] is_ptag (types-inl.h) [187] to_boolean
+  [90] fill_builtin_properties (init.c) [60] is_ptag (types-inl.h) [150] to_string
+ [192] finalise_hash (string.c) [235] is_ptag (types-inl.h) [191] update_hash (string.c)
+ [188] find_insn             [180] is_ptag (types-inl.h)   [2] vmrun_threaded
+ [215] fixnum_to_cint (types.h) [14] is_ptag (types-inl.h) [59] write_barrier
+ [273] fixnum_to_cint (types.h) [11] is_ptag (types-inl.h)

@@ -14,7 +14,7 @@
 #include "header.h"
 #include "log.h"
 
-static Context *the_context;
+Context *the_context;
 #include "gc-visitor-inl.h"
 
 #ifdef AS_PROF

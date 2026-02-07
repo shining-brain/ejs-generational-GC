@@ -8,13 +8,27 @@
 
 RememberedSet remembered_set;
 
+#define HASH_TABLE_SIZE 128
+//only use the bits of 3-6 as hash value
+#define MASK_HASH(ptr) (((ptr) >> 3) & (HASH_TABLE_SIZE - 1))
+
 // Initialize the remembered set,and adjust cache_space.end accordingly, adjust total_size too
 void init_remembered_set() {
     remembered_set.count = 0;
     remembered_set.capacity = 24*1024/8; // Can remember 24*1024/8 = 3K objects
+    // remembered_set.capacity = 24*1024/8*200; // Can remember 128*1024/8 = 600K objects
     remembered_set.buffer = (uintptr_t *)(cache_space.end - remembered_set.capacity* sizeof(uintptr_t));
     cache_space.end -= remembered_set.capacity* sizeof(uintptr_t);
     cache_space.total_size -= remembered_set.capacity* sizeof(uintptr_t);
+
+    // set up hash table for quick lookup
+    remembered_set.size_of_hash_table = HASH_TABLE_SIZE;
+    remembered_set.hash_table = (uintptr_t *)(cache_space.end - remembered_set.size_of_hash_table * sizeof(uintptr_t));
+    cache_space.end -= remembered_set.size_of_hash_table * sizeof(uintptr_t);
+    cache_space.total_size -= remembered_set.size_of_hash_table * sizeof(uintptr_t);
+
+    memset(remembered_set.hash_table, 0, remembered_set.size_of_hash_table * sizeof(uintptr_t));
+    
     printf("init_info: remembered set initialized with capacity %d , new cache_space.end at %p\n",
            remembered_set.capacity, (void*)cache_space.end);
     
@@ -26,13 +40,26 @@ void rememberset_add(uintptr_t obj_ptr) {
         exit(1);
     }
 
-    //test: avoid duplicate entries
-    //efficiency now is very low
-    for(int i=0; i< remembered_set.count; i++){
-        if(remembered_set.buffer[i] == obj_ptr){
-            return;
-        }
+    // test: avoid duplicate entries
+    // efficiency now is very low
+    // for(int i=0; i< remembered_set.count; i++){
+    //     if(remembered_set.buffer[i] == obj_ptr){
+    //         return;
+    //     }
+    // }
+
+    if (remembered_set.hash_table[MASK_HASH(obj_ptr)] != obj_ptr) {
+        remembered_set.hash_table[MASK_HASH(obj_ptr)] = obj_ptr;
+    } else {
+        return;
     }
+    
+
+
+
+
+
+
 
     remembered_set.buffer[remembered_set.count] = obj_ptr;
     remembered_set.count += 1;
@@ -41,6 +68,7 @@ void rememberset_add(uintptr_t obj_ptr) {
 
 void rememberset_clear() {
     remembered_set.count = 0;
+    memset(remembered_set.hash_table, 0, remembered_set.size_of_hash_table * sizeof(uintptr_t));
 }
 
 void write_barrier(JSValue* ptr, JSValue value){

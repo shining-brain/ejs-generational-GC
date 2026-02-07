@@ -144,6 +144,8 @@ void init_memory(size_t bytes, size_t threshold_bytes)
 void* gc_malloc(Context *ctx, uintptr_t request_bytes, cell_type_t type)
 {
   // printf("gc_malloc: req %lu bytes type %d\n", request_bytes, type);
+  extern Context *the_context;
+  the_context = ctx;
   void *addr;
 #ifdef DEBUG
   static int count;

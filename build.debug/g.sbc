@@ -1,18 +1,697 @@
 fingerprint 36
-funcLength 1
+funcLength 2
 callentry 0
 sendentry 1
 numberOfLocals 0
-numberOfInstructions 11
-numberOfConstants 2
-setfl 8
-setfl 8
-string 1 #0="print"
-getglobal 1 1
-string 2 #1="space"
-move 8 2
+numberOfInstructions 650
+numberOfConstants 103
+setfl 16
+setfl 16
+makeclosure 1 0
+string 2 #0="triggerGC"
+setglobal 2 1
+string 3 #1="print"
+getglobal 1 3
+string 4 #2="==========\sGC\sReference\sTest\s=========="
+move 16 4
 call 1 1
-setfl 8
+setfl 16
+string 1 #3="Object"
+getglobal 4 1
+new 1 4
+move 16 1
+newsend 4 0
+setfl 16
+geta 1
+setpropregstrstr 1 #4="name" #5="old1"
+setpropregstrfix 1 #6="value" 100
+string 4 #7="oldObj1"
+setglobal 4 1
+string 1 #3="Object"
+getglobal 5 1
+new 1 5
+move 16 1
+newsend 5 0
+setfl 16
+geta 1
+setpropregstrstr 1 #4="name" #8="old2"
+setpropregstrfix 1 #6="value" 200
+string 5 #9="oldObj2"
+setglobal 5 1
+string 1 #10="Array"
+getglobal 6 1
+fixnum 7 5
+new 1 6
+move 15 1
+move 16 7
+newsend 6 1
+setfl 16
+geta 1
+setpropregfixfix 1 0 1
+setpropregfixfix 1 1 2
+setpropregfixfix 1 2 3
+setpropregfixfix 1 3 4
+setpropregfixfix 1 4 5
+string 6 #11="oldArray"
+setglobal 6 1
+getglobal 1 3
+string 7 #12="Created\sold\sobjects\sduring\sinit\sphase"
+move 16 7
+call 1 1
+setfl 16
+getglobal 1 3
+string 7 #13="\n---\sTriggering\sfirst\sGC\s---"
+move 16 7
+call 1 1
+setfl 16
+getglobal 1 2
+call 1 0
+setfl 16
+getglobal 1 3
+string 7 #14="\n---\sVerifying\sold\sobjects\safter\sfirst\sGC\s---"
+move 16 7
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 7 4
+getpropregstr 7 7 #4="name"
+addstrreg 7 #15="oldObj1.name\s=\s" 7
+addregstr 7 7 #16="\s(expected:\sold1)"
+move 16 7
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 7 4
+getpropregstr 7 7 #6="value"
+addstrreg 7 #17="oldObj1.value\s=\s" 7
+addregstr 7 7 #18="\s(expected:\s100)"
+move 16 7
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 7 5
+getpropregstr 7 7 #4="name"
+addstrreg 7 #19="oldObj2.name\s=\s" 7
+addregstr 7 7 #20="\s(expected:\sold2)"
+move 16 7
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 7 5
+getpropregstr 7 7 #6="value"
+addstrreg 7 #21="oldObj2.value\s=\s" 7
+addregstr 7 7 #22="\s(expected:\s200)"
+move 16 7
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 7 6
+fixnum 8 0
+getpropregfix 7 7 0
+addstrreg 7 #23="oldArray[0]\s=\s" 7
+addregstr 7 7 #24="\s(expected:\s1)"
+move 16 7
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 6 6
+getpropregfix 6 6 4
+addstrreg 6 #25="oldArray[4]\s=\s" 6
+addregstr 6 6 #26="\s(expected:\s5)"
+move 16 6
+call 1 1
+setfl 16
+getglobal 1 3
+string 6 #27="\n---\sCreating\sYoung\sobjects\sand\slinking\sfrom\sOld\s---"
+move 16 6
+call 1 1
+setfl 16
+string 1 #3="Object"
+getglobal 6 1
+new 1 6
+move 16 1
+newsend 6 0
+setfl 16
+geta 1
+setpropregstrstr 1 #4="name" #28="young1"
+setpropregstrfix 1 #6="value" 999
+string 6 #29="youngObj1"
+setglobal 6 1
+string 1 #3="Object"
+getglobal 7 1
+new 1 7
+move 16 1
+newsend 7 0
+setfl 16
+geta 1
+setpropregstrstr 1 #4="name" #30="young2"
+setpropregstrfix 1 #6="value" 888
+string 7 #31="youngObj2"
+setglobal 7 1
+string 1 #10="Array"
+getglobal 9 1
+fixnum 10 3
+new 1 9
+move 15 1
+move 16 10
+newsend 9 1
+setfl 16
+geta 1
+setpropregfixfix 1 0 10
+setpropregfixfix 1 1 20
+setpropregfixfix 1 2 30
+string 9 #32="youngArray"
+setglobal 9 1
+getglobal 1 6
+getglobal 6 4
+setpropregstrreg 6 #33="child" 1
+getglobal 1 7
+getglobal 6 5
+setpropregstrreg 6 #33="child" 1
+getglobal 1 9
+getglobal 6 4
+setpropregstrreg 6 #34="arr" 1
+getglobal 1 3
+string 6 #35="Created\sOld->Young\sreferences\s(should\strigger\swrite\sbarrier)"
+move 16 6
+call 1 1
+setfl 16
+getglobal 1 3
+string 6 #36="\n---\sTriggering\ssecond\sGC\s(with\sremembered\sset)\s---"
+move 16 6
+call 1 1
+setfl 16
+getglobal 1 2
+call 1 0
+setfl 16
+getglobal 1 3
+string 6 #37="\n---\sVerifying\sOld->Young\sreferences\safter\sGC\s---"
+move 16 6
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 6 4
+getpropregstr 6 6 #33="child"
+getpropregstr 6 6 #4="name"
+addstrreg 6 #38="oldObj1.child.name\s=\s" 6
+addregstr 6 6 #39="\s(expected:\syoung1)"
+move 16 6
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 6 4
+getpropregstr 6 6 #33="child"
+getpropregstr 6 6 #6="value"
+addstrreg 6 #40="oldObj1.child.value\s=\s" 6
+addregstr 6 6 #41="\s(expected:\s999)"
+move 16 6
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 6 5
+getpropregstr 6 6 #33="child"
+getpropregstr 6 6 #4="name"
+addstrreg 6 #42="oldObj2.child.name\s=\s" 6
+addregstr 6 6 #43="\s(expected:\syoung2)"
+move 16 6
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 5 5
+getpropregstr 5 5 #33="child"
+getpropregstr 5 5 #6="value"
+addstrreg 5 #44="oldObj2.child.value\s=\s" 5
+addregstr 5 5 #45="\s(expected:\s888)"
+move 16 5
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 5 4
+getpropregstr 5 5 #34="arr"
+getpropregfix 5 5 0
+addstrreg 5 #46="oldObj1.arr[0]\s=\s" 5
+addregstr 5 5 #47="\s(expected:\s10)"
+move 16 5
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 5 4
+getpropregstr 5 5 #34="arr"
+getpropregfix 5 5 2
+addstrreg 5 #48="oldObj1.arr[2]\s=\s" 5
+addregstr 5 5 #49="\s(expected:\s30)"
+move 16 5
+call 1 1
+setfl 16
+getglobal 1 3
+string 5 #50="\n---\sTesting\sreference\schains\s---"
+move 16 5
+call 1 1
+setfl 16
+string 1 #3="Object"
+getglobal 5 1
+new 1 5
+move 16 1
+newsend 5 0
+setfl 16
+geta 1
+setpropregstrfix 1 #51="level" 1
+string 5 #52="chain1"
+setglobal 5 1
+string 6 #3="Object"
+getglobal 7 6
+new 1 7
+move 16 1
+newsend 7 0
+setfl 16
+geta 1
+setpropregstrfix 1 #51="level" 2
+getglobal 6 5
+setpropregstrreg 1 #53="parent" 6
+string 5 #54="chain2"
+setglobal 5 1
+string 6 #3="Object"
+getglobal 6 6
+new 1 6
+move 16 1
+newsend 6 0
+setfl 16
+geta 1
+setpropregstrfix 1 #51="level" 3
+getglobal 6 5
+setpropregstrreg 1 #53="parent" 6
+string 5 #55="chain3"
+setglobal 5 1
+getglobal 1 5
+getglobal 5 4
+setpropregstrreg 5 #56="chain" 1
+getglobal 1 3
+string 5 #57="Triggering\sGC\swith\sreference\schain..."
+move 16 5
+call 1 1
+setfl 16
+getglobal 1 2
+call 1 0
+setfl 16
+getglobal 1 3
+getglobal 2 4
+getpropregstr 2 2 #56="chain"
+getpropregstr 2 2 #51="level"
+addstrreg 2 #58="oldObj1.chain.level\s=\s" 2
+addregstr 2 2 #59="\s(expected:\s3)"
+move 16 2
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 2 4
+getpropregstr 2 2 #56="chain"
+getpropregstr 2 2 #53="parent"
+getpropregstr 2 2 #51="level"
+addstrreg 2 #60="oldObj1.chain.parent.level\s=\s" 2
+addregstr 2 2 #61="\s(expected:\s2)"
+move 16 2
+call 1 1
+setfl 16
+getglobal 1 3
+getglobal 2 4
+getpropregstr 2 2 #56="chain"
+getpropregstr 2 2 #53="parent"
+getpropregstr 2 2 #53="parent"
+getpropregstr 2 2 #51="level"
+addstrreg 2 #62="oldObj1.chain.parent.parent.level\s=\s" 2
+addregstr 2 2 #24="\s(expected:\s1)"
+move 16 2
+call 1 1
+setfl 16
+getglobal 1 3
+string 2 #63="\n---\sTesting\sarray\swith\sobject\sreferences\s---"
+move 16 2
+call 1 1
+setfl 16
+string 1 #10="Array"
+getglobal 2 1
+new 1 2
+move 15 1
+move 16 8
+newsend 2 1
+setfl 16
+geta 1
+string 2 #64="objArray"
+setglobal 2 1
+string 1 #65="i"
+setglobal 1 8
+jump 23
+string 1 #64="objArray"
+getglobal 1 1
+getpropregstr 2 1 #66="push"
+string 3 #3="Object"
+getglobal 3 3
+new 4 3
+move 16 4
+newsend 3 0
+setfl 16
+geta 4
+getglobal 3 5
+setpropregstrreg 4 #67="id" 3
+getglobal 3 5
+addstrreg 3 #68="item" 3
+setpropregstrreg 4 #69="data" 3
+move 15 1
+move 16 4
+send 2 1
+setfl 16
+getglobal 1 5
+addregfix 1 1 1
+setglobal 5 1
+string 5 #65="i"
+getglobal 1 5
+lessthanregfix 1 1 10
+jumptrue 1 -25
+string 1 #64="objArray"
+getglobal 1 1
+string 2 #9="oldObj2"
+getglobal 2 2
+setpropregstrreg 2 #70="items" 1
+string 1 #0="triggerGC"
+getglobal 1 1
+call 1 0
+setfl 16
+string 1 #1="print"
+getglobal 1 1
+string 2 #71="Verifying\sarray\sobjects\safter\sGC:"
+move 16 2
+call 1 1
+setfl 16
+fixnum 1 0
+setglobal 5 1
+jump 39
+string 1 #9="oldObj2"
+getglobal 1 1
+getpropregstr 1 1 #70="items"
+getglobal 3 2
+getprop 1 1 3
+string 3 #68="item"
+setglobal 3 1
+getglobal 1 3
+getpropregstr 1 1 #67="id"
+getglobal 4 2
+eq 1 1 4
+not 1 1
+jumptrue 1 7
+getglobal 1 3
+getpropregstr 1 1 #69="data"
+getglobal 4 2
+addstrreg 4 #68="item" 4
+eq 1 1 4
+not 1 1
+jumpfalse 1 16
+string 1 #1="print"
+getglobal 1 1
+getglobal 4 2
+addstrreg 4 #72="ERROR:\sitem[" 4
+addregstr 4 4 #73="]\scorrupted!\sid="
+getglobal 5 3
+getpropregstr 5 5 #67="id"
+add 4 4 5
+addregstr 4 4 #74="\sdata="
+getglobal 3 3
+getpropregstr 3 3 #69="data"
+add 3 4 3
+move 16 3
+call 1 1
+setfl 16
+getglobal 1 2
+addregfix 1 1 1
+setglobal 2 1
+string 2 #65="i"
+getglobal 1 2
+lessthanregfix 1 1 10
+jumptrue 1 -41
+string 2 #1="print"
+getglobal 1 2
+string 3 #75="Array\sobjects\sverified\ssuccessfully"
+move 16 3
+call 1 1
+setfl 16
+getglobal 1 2
+string 3 #76="\n---\sTesting\scircular\sreferences\s---"
+move 16 3
+call 1 1
+setfl 16
+string 3 #3="Object"
+getglobal 4 3
+new 1 4
+move 16 1
+newsend 4 0
+setfl 16
+geta 1
+string 3 #77="circA"
+setpropregstrstr 1 #4="name" #77="circA"
+setglobal 3 1
+string 4 #3="Object"
+getglobal 4 4
+new 1 4
+move 16 1
+newsend 4 0
+setfl 16
+geta 1
+string 4 #78="circB"
+setpropregstrstr 1 #4="name" #78="circB"
+setglobal 4 1
+getglobal 1 4
+getglobal 5 3
+setpropregstrreg 5 #79="ref" 1
+getglobal 1 3
+getglobal 4 4
+setpropregstrreg 4 #79="ref" 1
+getglobal 1 3
+string 3 #7="oldObj1"
+getglobal 4 3
+setpropregstrreg 4 #80="circular" 1
+string 1 #0="triggerGC"
+getglobal 1 1
+call 1 0
+setfl 16
+getglobal 1 2
+getglobal 4 3
+getpropregstr 4 4 #80="circular"
+getpropregstr 4 4 #79="ref"
+getpropregstr 4 4 #4="name"
+addstrreg 4 #81="circA.ref.name\s=\s" 4
+addregstr 4 4 #82="\s(expected:\scircB)"
+move 16 4
+call 1 1
+setfl 16
+getglobal 1 2
+getglobal 4 3
+getpropregstr 4 4 #80="circular"
+getpropregstr 4 4 #79="ref"
+getpropregstr 4 4 #79="ref"
+getpropregstr 4 4 #4="name"
+addstrreg 4 #83="circA.ref.ref.name\s=\s" 4
+addregstr 4 4 #84="\s(expected:\scircA)"
+move 16 4
+call 1 1
+setfl 16
+getglobal 1 2
+string 4 #85="\n==========\sFinal\sVerification\s=========="
+move 16 4
+call 1 1
+setfl 16
+specconst 1 true
+string 4 #86="allPassed"
+setglobal 4 1
+getglobal 1 3
+getpropregstr 1 1 #4="name"
+eqregstr 1 1 #5="old1"
+not 1 1
+jumpfalse 1 8
+getglobal 1 2
+string 5 #87="FAIL:\soldObj1.name"
+move 16 5
+call 1 1
+setfl 16
+specconst 1 false
+setglobal 4 1
+getglobal 1 3
+getpropregstr 1 1 #6="value"
+eqregfix 1 1 100
+not 1 1
+jumpfalse 1 8
+getglobal 1 2
+string 5 #88="FAIL:\soldObj1.value"
+move 16 5
+call 1 1
+setfl 16
+specconst 1 false
+setglobal 4 1
+getglobal 1 3
+getpropregstr 1 1 #33="child"
+getpropregstr 1 1 #4="name"
+eqregstr 1 1 #28="young1"
+not 1 1
+jumpfalse 1 8
+getglobal 1 2
+string 5 #89="FAIL:\soldObj1.child.name"
+move 16 5
+call 1 1
+setfl 16
+specconst 1 false
+setglobal 4 1
+getglobal 1 3
+getpropregstr 1 1 #33="child"
+getpropregstr 1 1 #6="value"
+eqregfix 1 1 999
+not 1 1
+jumpfalse 1 8
+getglobal 1 2
+string 5 #90="FAIL:\soldObj1.child.value"
+move 16 5
+call 1 1
+setfl 16
+specconst 1 false
+setglobal 4 1
+string 1 #9="oldObj2"
+getglobal 1 1
+getpropregstr 1 1 #33="child"
+getpropregstr 1 1 #4="name"
+eqregstr 1 1 #30="young2"
+not 1 1
+jumpfalse 1 8
+getglobal 1 2
+string 5 #91="FAIL:\soldObj2.child.name"
+move 16 5
+call 1 1
+setfl 16
+specconst 1 false
+setglobal 4 1
+getglobal 1 3
+getpropregstr 1 1 #34="arr"
+getpropregfix 1 1 1
+eqregfix 1 1 20
+not 1 1
+jumpfalse 1 8
+getglobal 1 2
+string 5 #92="FAIL:\soldObj1.arr[1]"
+move 16 5
+call 1 1
+setfl 16
+specconst 1 false
+setglobal 4 1
+getglobal 1 3
+getpropregstr 1 1 #56="chain"
+getpropregstr 1 1 #53="parent"
+getpropregstr 1 1 #53="parent"
+getpropregstr 1 1 #51="level"
+eqregfix 1 1 1
+not 1 1
+jumpfalse 1 8
+getglobal 1 2
+string 5 #93="FAIL:\schain\sreference"
+move 16 5
+call 1 1
+setfl 16
+specconst 1 false
+setglobal 4 1
+getglobal 1 3
+getpropregstr 1 1 #80="circular"
+getpropregstr 1 1 #79="ref"
+getpropregstr 1 1 #79="ref"
+getpropregstr 1 1 #4="name"
+eqregstr 1 1 #77="circA"
+not 1 1
+jumpfalse 1 8
+getglobal 1 2
+string 3 #94="FAIL:\scircular\sreference"
+move 16 3
+call 1 1
+setfl 16
+specconst 1 false
+setglobal 4 1
+getglobal 1 4
+jumpfalse 1 38
+getglobal 1 2
+string 3 #95="\n***\sALL\sTESTS\sPASSED!\s***"
+move 16 3
+call 1 1
+setfl 16
+getglobal 1 2
+string 3 #96="GC\scorrectly\supdates\sall\sreferences\sincluding:"
+move 16 3
+call 1 1
+setfl 16
+getglobal 1 2
+string 3 #97="\s\s-\sOld\sobject\sinternal\sreferences"
+move 16 3
+call 1 1
+setfl 16
+getglobal 1 2
+string 3 #98="\s\s-\sOld->Young\sreferences\s(remembered\sset)"
+move 16 3
+call 1 1
+setfl 16
+getglobal 1 2
+string 3 #99="\s\s-\sReference\schains"
+move 16 3
+call 1 1
+setfl 16
+getglobal 1 2
+string 3 #100="\s\s-\sArray\sobject\sreferences"
+move 16 3
+call 1 1
+setfl 16
+getglobal 1 2
+string 2 #101="\s\s-\sCircular\sreferences"
+move 16 2
+call 1 1
+setfl 16
+geta 1
+jump 7
+getglobal 1 2
+string 2 #102="\n***\sSOME\sTESTS\sFAILED!\s***"
+move 16 2
+call 1 1
+setfl 16
 geta 1
 seta 1
+ret
+callentry 0
+sendentry 1
+numberOfLocals 0
+numberOfInstructions 35
+numberOfConstants 6
+setfl 11
+setfl 11
+string 1 #0="Array"
+getglobal 1 1
+fixnum 2 0
+new 3 1
+move 10 3
+move 11 2
+newsend 1 1
+setfl 11
+geta 3
+jump 19
+getpropregstr 1 3 #1="push"
+string 4 #2="Object"
+getglobal 4 4
+new 5 4
+move 11 5
+newsend 4 0
+setfl 11
+geta 5
+move 4 2
+setpropregstrreg 5 #3="x" 4
+mulregfix 4 2 2
+setpropregstrreg 5 #4="y" 4
+move 10 3
+move 11 5
+send 1 1
+setfl 11
+addregfix 1 2 1
+move 2 1
+lessthanregfix 1 2 5000
+jumptrue 1 -19
+getpropregstr 3 3 #5="length"
+seta 3
 ret
