@@ -87,7 +87,39 @@ void write_barrier(JSValue* ptr, JSValue value){
         // Not pointing to young object, do nothing
         return;
     }
+
+        // printf("write_barrier: slot=%p (in %s), value=%p (in cache)\n", 
+        //    (void*)obj_ptr, 
+        //    (obj_ptr >= dram_space.begin && obj_ptr < dram_space.end) ? "DRAM" : 
+        //    (obj_ptr >= cache_space.begin && obj_ptr < cache_space.work_begin) ? "init" : "???",
+        //    (void*)obj_addr);
     // printf("write_barrier: Remembering object at %p pointing to young object at %p\n", (void*)obj_ptr, (void*)obj_addr);
+    rememberset_add(obj_ptr);
+}
+
+void write_barrier_ptr(void** ptr, void* value){
+    // printf("write_barrier called, slot = %p\n", (void*)ptr);
+    if (value == NULL){
+        // Not a pointer, do nothing
+        return;
+    }
+    uintptr_t obj_ptr = (uintptr_t)ptr;
+    uintptr_t val_ptr = (uintptr_t)value;
+    if(!(val_ptr >= cache_space.work_begin && val_ptr < cache_space.end)){
+        // Not pointing to young object, do nothing
+        return;
+    }
+    if(obj_ptr >= cache_space.work_begin && obj_ptr < cache_space.end){
+        // Inside cache, do nothing
+        return;
+    }
+
+        printf("write_barrier_ptr: slot=%p (in %s), value=%p (in cache)\n", 
+           (void*)obj_ptr, 
+           (obj_ptr >= dram_space.begin && obj_ptr < dram_space.end) ? "DRAM" : 
+           (obj_ptr >= cache_space.begin && obj_ptr < cache_space.work_begin) ? "init" : "???",
+           (void*)val_ptr);
+    // printf("write_barrier: Remembering object at %p pointing to young object at %p\n", (void*)obj_ptr, (void*)val_ptr);
     rememberset_add(obj_ptr);
 }
 

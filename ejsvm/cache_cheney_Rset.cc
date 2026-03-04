@@ -107,6 +107,12 @@ void write_barrier_ptr(void** ptr, void* value){
         // Inside cache, do nothing
         return;
     }
+
+        printf("write_barrier_ptr: slot=%p (in %s), value=%p (in cache)\n", 
+           (void*)obj_ptr, 
+           (obj_ptr >= dram_space.begin && obj_ptr < dram_space.end) ? "DRAM" : 
+           (obj_ptr >= cache_space.begin && obj_ptr < cache_space.work_begin) ? "init" : "???",
+           (void*)val_ptr);
     // printf("write_barrier: Remembering object at %p pointing to young object at %p\n", (void*)obj_ptr, (void*)val_ptr);
     rememberset_add(obj_ptr);
 }

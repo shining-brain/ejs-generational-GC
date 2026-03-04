@@ -133,6 +133,13 @@ void reallocate_array_data(Context *ctx, JSValue a, int newsize)
   for (; i < newsize; i++)
     body[i] = JS_UNDEFINED;
   set_jsarray_body(a, body);
+#ifdef remembered_set
+  {
+    JSValue *slot = (JSValue *)&(jsv_to_jsobject(a)->eprop[array_body_index]);
+    write_barrier_ptr((void **)slot, (void *)body);
+  }
+#endif /* remembered_set */
+
   set_jsarray_size(a, newsize);
 }
 
@@ -171,6 +178,12 @@ void allocate_iterator_data(Context *ctx, JSValue a, int size)
   GC_POP(a);
   for (i = 0; i < size; i++) body[i] = JS_UNDEFINED; 
   set_jsnormal_iterator_body(a, body);
+#ifdef remembered_set
+  {
+    Iterator *iter = jsv_to_normal_iterator(a);
+    write_barrier_ptr((void **)&iter->body, (void *)body);
+  }
+#endif /* remembered_set */
   set_jsnormal_iterator_size(a, size);
   set_jsnormal_iterator_index(a, 0);
 }

@@ -34,9 +34,18 @@ TLnewframe:
     body = get_jsarray_body(args);
     for (i = 0; i < num_of_args; i++) {
       body[i] = regbase[i + 2];
+#ifdef remembered_set
+        write_barrier(&body[i], regbase[i + 2]);
+#endif /* remembered_set */
     }
     fframe_arguments(fr) = args;
+#ifdef remembered_set
+    write_barrier((JSValue *) &fframe_arguments(fr), args);
+#endif /* remembered_set */
     fframe_locals_idx(fr, 0) = args;
+#ifdef remembered_set
+    write_barrier(&fframe_locals_idx(fr, 0), args);
+#endif /* remembered_set */
   }
 /* Local Variables:      */
 /* mode: c               */

@@ -59,8 +59,12 @@ BUILTIN_FUNCTION(array_constr)
   if (na >= 2) {
     int i;
     JSValue *body = get_jsarray_body(rsv);
-    for (i = 0; i < length; i++)
+    for (i = 0; i < length; i++){
       body[i] = args[i + 1];
+      #ifdef remembered_set
+      write_barrier(&body[i], args[i + 1]);
+      #endif /* remembered_set */
+    }
   }
   /* set as the return value */
   set_a(context, rsv);

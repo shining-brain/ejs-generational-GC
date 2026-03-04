@@ -79,6 +79,7 @@ extern void init_remembered_set();
 extern void rememberset_add(uintptr_t obj_ptr);
 extern void rememberset_clear();
 extern void write_barrier(JSValue *ptr, JSValue value);
+extern void write_barrier_ptr(void** ptr, void* value);
 
 
 

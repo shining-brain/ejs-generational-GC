@@ -108,6 +108,9 @@ void hash_put_transition(Context *ctx, HashTable *table,
   ttable->transition[i].pm = pm;
   ttable->n_transitions = n_transitions;
   table->transitions = ttable;
+#ifdef remembered_set
+  write_barrier_ptr((void **) &table->transitions, (void *) ttable);
+#endif /* remembered_set */
 }
 
 /*

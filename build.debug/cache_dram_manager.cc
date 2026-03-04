@@ -530,9 +530,21 @@ void scan_remembered_set() {
         //     continue;
         // }
 
+        printf("RS[%d]: slot_addr=%p, value=%lx\n", i, (void*)slot_addr, (unsigned long)*slot);
+
+
+        bool in_dram = (slot_addr >= dram_space.begin && slot_addr < dram_space.end);
+        bool in_init = (slot_addr >= cache_space.begin && slot_addr < cache_space.work_begin);
+        if (!in_dram && !in_init) {
+            printf("  WARNING: slot_addr not in DRAM or init area!\n");
+        }
+
+
         // printf("value=%lx\n", *slot);
-        printf("Scanning remembered set object %d at address %p, value=%lx\n", i, (void*)slot_addr, *slot);
+        // printf("Scanning remembered set object %d at address %p, value=%lx\n", i, (void*)slot_addr, *slot);
         CacheCheney_Tracer::process_edge(*slot);
+
+        printf(", value_after=%lx\n", (unsigned long)*slot);
     }
     // printf("scan_remembered_set finished, processed %d remembered objects\n", remembered_set.count);
     

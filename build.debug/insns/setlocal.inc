@@ -25,6 +25,9 @@ TLsetlocal_function:
   fr = get_lp(context);
   for (i = 0; i < link; i++) fr = fframe_prev(fr);
   fframe_locals_idx(fr, index) = src;
+#ifdef remembered_set
+  write_barrier(&fframe_locals_idx(fr, index), src);
+#endif /* remembered_set */
 }
 #undef link
 #undef index
