@@ -61,9 +61,9 @@ BUILTIN_FUNCTION(array_constr)
     JSValue *body = get_jsarray_body(rsv);
     for (i = 0; i < length; i++){
       body[i] = args[i + 1];
-      #ifdef remembered_set
+      #ifdef USE_REMEMBERED_SET
       write_barrier(&body[i], args[i + 1]);
-      #endif /* remembered_set */
+      #endif /* USE_REMEMBERED_SET */
     }
   }
   /* set as the return value */

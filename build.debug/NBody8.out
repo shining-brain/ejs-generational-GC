@@ -1,0 +1,209 @@
+Starting NBody benchmark ...
+
+NBody: iterations=1 runtime: 6483000us
+
+NBody: iterations=1 runtime: 6375000us
+
+NBody: iterations=1 runtime: 6372000us
+
+NBody: iterations=1 runtime: 6371000us
+
+NBody: iterations=1 runtime: 6419000us
+
+NBody: iterations=1 runtime: 6373000us
+
+NBody: iterations=1 runtime: 6365000us
+
+NBody: iterations=1 runtime: 6376000us
+
+NBody: iterations=1 runtime: 6377000us
+
+NBody: iterations=1 runtime: 6424000us
+
+NBody: iterations=1 runtime: 6374000us
+
+NBody: iterations=1 runtime: 6382000us
+
+NBody: iterations=1 runtime: 6446000us
+
+NBody: iterations=1 runtime: 6518000us
+
+NBody: iterations=1 runtime: 6514000us
+
+NBody: iterations=1 runtime: 6543000us
+
+NBody: iterations=1 runtime: 6528000us
+
+NBody: iterations=1 runtime: 6520000us
+
+NBody: iterations=1 runtime: 6359000us
+
+NBody: iterations=1 runtime: 6528000us
+
+NBody: iterations=1 runtime: 6499000us
+
+NBody: iterations=1 runtime: 6523000us
+
+NBody: iterations=1 runtime: 6531000us
+
+NBody: iterations=1 runtime: 6387000us
+
+NBody: iterations=1 runtime: 6367000us
+
+NBody: iterations=1 runtime: 6371000us
+
+NBody: iterations=1 runtime: 6377000us
+
+NBody: iterations=1 runtime: 6372000us
+
+NBody: iterations=1 runtime: 6379000us
+
+NBody: iterations=1 runtime: 6372000us
+
+NBody: iterations=1 runtime: 6390000us
+
+NBody: iterations=1 runtime: 6430000us
+
+NBody: iterations=1 runtime: 6522000us
+
+NBody: iterations=1 runtime: 6550000us
+
+NBody: iterations=1 runtime: 6505000us
+
+NBody: iterations=1 runtime: 6524000us
+
+NBody: iterations=1 runtime: 6510000us
+
+NBody: iterations=1 runtime: 6313000us
+
+NBody: iterations=1 runtime: 6539000us
+
+NBody: iterations=1 runtime: 6505000us
+
+NBody: iterations=1 runtime: 6533000us
+
+NBody: iterations=1 runtime: 6362000us
+
+NBody: iterations=1 runtime: 6527000us
+
+NBody: iterations=1 runtime: 6345000us
+
+NBody: iterations=1 runtime: 6347000us
+
+NBody: iterations=1 runtime: 6348000us
+
+NBody: iterations=1 runtime: 6347000us
+
+NBody: iterations=1 runtime: 6371000us
+
+NBody: iterations=1 runtime: 6486000us
+
+NBody: iterations=1 runtime: 6365000us
+
+NBody: iterations=1 runtime: 6373000us
+
+NBody: iterations=1 runtime: 6364000us
+
+NBody: iterations=1 runtime: 6284000us
+
+NBody: iterations=1 runtime: 6341000us
+
+NBody: iterations=1 runtime: 6360000us
+
+NBody: iterations=1 runtime: 6345000us
+
+NBody: iterations=1 runtime: 6281000us
+
+NBody: iterations=1 runtime: 6335000us
+
+NBody: iterations=1 runtime: 6361000us
+
+NBody: iterations=1 runtime: 6353000us
+
+NBody: iterations=1 runtime: 6285000us
+
+NBody: iterations=1 runtime: 6359000us
+
+NBody: iterations=1 runtime: 6342000us
+
+NBody: iterations=1 runtime: 6350000us
+
+NBody: iterations=1 runtime: 6340000us
+
+NBody: iterations=1 runtime: 6255000us
+
+NBody: iterations=1 runtime: 6295000us
+
+NBody: iterations=1 runtime: 6275000us
+
+NBody: iterations=1 runtime: 6265000us
+
+NBody: iterations=1 runtime: 6332000us
+
+NBody: iterations=1 runtime: 6352000us
+
+NBody: iterations=1 runtime: 6383000us
+
+NBody: iterations=1 runtime: 6371000us
+
+NBody: iterations=1 runtime: 6375000us
+
+NBody: iterations=1 runtime: 6379000us
+
+NBody: iterations=1 runtime: 6367000us
+
+NBody: iterations=1 runtime: 6372000us
+
+NBody: iterations=1 runtime: 6383000us
+
+NBody: iterations=1 runtime: 6381000us
+
+NBody: iterations=1 runtime: 6376000us
+
+NBody: iterations=1 runtime: 6401000us
+
+NBody: iterations=1 runtime: 6359000us
+
+NBody: iterations=1 runtime: 6374000us
+
+NBody: iterations=1 runtime: 6371000us
+
+NBody: iterations=1 runtime: 6384000us
+
+NBody: iterations=1 runtime: 6334000us
+
+NBody: iterations=1 runtime: 6371000us
+
+NBody: iterations=1 runtime: 6363000us
+
+NBody: iterations=1 runtime: 6365000us
+
+NBody: iterations=1 runtime: 6380000us
+
+NBody: iterations=1 runtime: 6376000us
+
+NBody: iterations=1 runtime: 6448000us
+
+NBody: iterations=1 runtime: 6371000us
+
+NBody: iterations=1 runtime: 6372000us
+
+NBody: iterations=1 runtime: 6368000us
+
+NBody: iterations=1 runtime: 6367000us
+
+NBody: iterations=1 runtime: 6396000us
+
+NBody: iterations=1 runtime: 6370000us
+
+NBody: iterations=1 runtime: 6355000us
+
+NBody: iterations=1 runtime: 6361000us
+
+NBody: iterations=100 average: 6393640us total: 639364000us
+
+
+
+
+Total Runtime: 639364000us
+

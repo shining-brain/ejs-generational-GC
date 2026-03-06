@@ -1,0 +1,224 @@
+object_header size: 16 bytes
+init_info: remembered set initialized with capacity 3072 , new cache_space.end at 0x7f3e74853010
+init info: cache_space.begin=0x7f3e747e1010, cache_space.end=0x7f3e74853010, total_size=456KB, threshold_size=0MB
+Now we are using cache_cheney GC. Cache DRAM Manager initialized: Cache size 0 Mbytes, DRAM size 2047 Mbytes
+DRAM address info: begin=0x7f3df47e0010, end=0x7f3e747e000f, total_size=2097151KB
+init_info: init object alloc over, now used bytes in cache space: 20.812500 KB
+init_info: after init object alloc, cache_space.work_begin moved to 0x7f3e747e6350
+Starting NBody benchmark ...
+
+NBody: iterations=1 runtime: 101051000us
+
+NBody: iterations=1 runtime: 99403000us
+
+NBody: iterations=1 runtime: 99371000us
+
+NBody: iterations=1 runtime: 99313000us
+
+NBody: iterations=1 runtime: 99397000us
+
+NBody: iterations=1 runtime: 99384000us
+
+NBody: iterations=1 runtime: 99320000us
+
+NBody: iterations=1 runtime: 99291000us
+
+NBody: iterations=1 runtime: 99346000us
+
+NBody: iterations=1 runtime: 99342000us
+
+NBody: iterations=1 runtime: 99355000us
+
+NBody: iterations=1 runtime: 99265000us
+
+NBody: iterations=1 runtime: 99427000us
+
+NBody: iterations=1 runtime: 99401000us
+
+NBody: iterations=1 runtime: 99151000us
+
+NBody: iterations=1 runtime: 98951000us
+
+NBody: iterations=1 runtime: 99064000us
+
+NBody: iterations=1 runtime: 98925000us
+
+NBody: iterations=1 runtime: 98938000us
+
+NBody: iterations=1 runtime: 98851000us
+
+NBody: iterations=1 runtime: 98843000us
+
+NBody: iterations=1 runtime: 98863000us
+
+NBody: iterations=1 runtime: 98779000us
+
+NBody: iterations=1 runtime: 98871000us
+
+NBody: iterations=1 runtime: 98898000us
+
+NBody: iterations=1 runtime: 98895000us
+
+NBody: iterations=1 runtime: 98868000us
+
+NBody: iterations=1 runtime: 98846000us
+
+NBody: iterations=1 runtime: 98877000us
+
+NBody: iterations=1 runtime: 98832000us
+
+NBody: iterations=1 runtime: 98718000us
+
+NBody: iterations=1 runtime: 98779000us
+
+NBody: iterations=1 runtime: 98810000us
+
+NBody: iterations=1 runtime: 98863000us
+
+NBody: iterations=1 runtime: 98865000us
+
+NBody: iterations=1 runtime: 98885000us
+
+NBody: iterations=1 runtime: 98822000us
+
+NBody: iterations=1 runtime: 98894000us
+
+NBody: iterations=1 runtime: 98802000us
+
+NBody: iterations=1 runtime: 98864000us
+
+NBody: iterations=1 runtime: 98890000us
+
+NBody: iterations=1 runtime: 98875000us
+
+NBody: iterations=1 runtime: 98824000us
+
+NBody: iterations=1 runtime: 98893000us
+
+NBody: iterations=1 runtime: 98839000us
+
+NBody: iterations=1 runtime: 98783000us
+
+NBody: iterations=1 runtime: 98865000us
+
+NBody: iterations=1 runtime: 98756000us
+
+NBody: iterations=1 runtime: 98830000us
+
+NBody: iterations=1 runtime: 98863000us
+
+NBody: iterations=1 runtime: 98956000us
+
+NBody: iterations=1 runtime: 98964000us
+
+NBody: iterations=1 runtime: 98909000us
+
+NBody: iterations=1 runtime: 98957000us
+
+NBody: iterations=1 runtime: 98941000us
+
+NBody: iterations=1 runtime: 99014000us
+
+NBody: iterations=1 runtime: 98989000us
+
+NBody: iterations=1 runtime: 98888000us
+
+NBody: iterations=1 runtime: 98991000us
+
+NBody: iterations=1 runtime: 98924000us
+
+NBody: iterations=1 runtime: 98879000us
+
+NBody: iterations=1 runtime: 99045000us
+
+NBody: iterations=1 runtime: 98885000us
+
+NBody: iterations=1 runtime: 98888000us
+
+NBody: iterations=1 runtime: 98875000us
+
+NBody: iterations=1 runtime: 98949000us
+
+NBody: iterations=1 runtime: 98877000us
+
+NBody: iterations=1 runtime: 98913000us
+
+NBody: iterations=1 runtime: 98877000us
+
+NBody: iterations=1 runtime: 99458000us
+
+NBody: iterations=1 runtime: 99371000us
+
+NBody: iterations=1 runtime: 99604000us
+
+NBody: iterations=1 runtime: 99439000us
+
+NBody: iterations=1 runtime: 99565000us
+
+NBody: iterations=1 runtime: 99234000us
+
+NBody: iterations=1 runtime: 99144000us
+
+NBody: iterations=1 runtime: 99281000us
+
+NBody: iterations=1 runtime: 99137000us
+
+NBody: iterations=1 runtime: 99181000us
+
+NBody: iterations=1 runtime: 99083000us
+
+NBody: iterations=1 runtime: 99060000us
+
+NBody: iterations=1 runtime: 99143000us
+
+NBody: iterations=1 runtime: 99071000us
+
+NBody: iterations=1 runtime: 98895000us
+
+NBody: iterations=1 runtime: 99094000us
+
+NBody: iterations=1 runtime: 99177000us
+
+NBody: iterations=1 runtime: 99111000us
+
+NBody: iterations=1 runtime: 99123000us
+
+NBody: iterations=1 runtime: 99131000us
+
+NBody: iterations=1 runtime: 99135000us
+
+NBody: iterations=1 runtime: 99143000us
+
+NBody: iterations=1 runtime: 99157000us
+
+NBody: iterations=1 runtime: 98915000us
+
+NBody: iterations=1 runtime: 98851000us
+
+NBody: iterations=1 runtime: 98856000us
+
+NBody: iterations=1 runtime: 98943000us
+
+NBody: iterations=1 runtime: 98870000us
+
+NBody: iterations=1 runtime: 98808000us
+
+NBody: iterations=1 runtime: 98655000us
+
+NBody: iterations=1 runtime: 98809000us
+
+NBody: iterations=100 average: 99040030us total: 9904003000us
+
+
+
+
+Total Runtime: 9904003000us
+
+========== GC Status ==========
+Minor GC count: 439871
+Init area scanned objects count: 0
+average per GC: 0.000000
+Write barrier total calls: 70
+Write barrier duplicates filtered: 53 (74.6%)
+Avg WB calls per GC: 0.0
+===================================

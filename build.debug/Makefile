@@ -20,9 +20,9 @@ SUPERINSNTYPE = 4
 # CXXFLAGS for C++ compiler
 # CPPFLAGS for C and  C++ compilers and preprocessor
 
-# CPPFLAGS = -O2 -DNDEBUG -UDEBUG $(HEAPSIZE)
+CPPFLAGS = -O2 -DNDEBUG -UDEBUG $(HEAPSIZE)
 # CPPFLAGS = -Os -DNDEBUG -UDEBUG $(HEAPSIZE)
-CPPFLAGS = -O0 -g -DDEBUG $(HEAPSIZE)
+# CPPFLAGS = -O0 -g -DDEBUG $(HEAPSIZE)
 CFLAGS +=
 CXXFLAGS =
 INSNGEN_FLAGS = -Xgen:pad_cases true -Xcmp:opt_pass MR:S -Xcmp:rand_seed 0
@@ -66,8 +66,8 @@ LIBS =
 
 OPT_REGEXP    = none
 # OPT_REGEXP    = oniguruma
-# OPT_GC        = native
-OPT_GC        = cache_cheney
+OPT_GC        = native
+# OPT_GC        = cache_cheney
 # OPT_GC        = bibop
 # OPT_GC        = copy
 #OPT_GC        = none
@@ -153,7 +153,7 @@ CPPFLAGS       += -DBIBOP_FREELIST
 CPPFLAGS       += -DVERIFY_BIBOP
 
 ifeq ($(OPT_GC),cache_cheney)
-	CPPFLAGS += -Dremember_set
+	CPPFLAGS += -DUSE_REMEMBERED_SET
 endif
 
 ##

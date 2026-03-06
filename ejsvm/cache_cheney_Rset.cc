@@ -5,11 +5,13 @@
 #include "header.h"
 #include "cache_dram_manager.h"
 
+extern long write_barrier_calls;
+extern long write_barrier_duplicate_filtered;
 
 RememberedSet remembered_set;
 
-#define HASH_TABLE_SIZE 128
-//only use the bits of 3-6 as hash value
+#define HASH_TABLE_SIZE 4096  
+//only use the bits of 3-14 as hash value
 #define MASK_HASH(ptr) (((ptr) >> 3) & (HASH_TABLE_SIZE - 1))
 
 // Initialize the remembered set,and adjust cache_space.end accordingly, adjust total_size too
@@ -40,30 +42,32 @@ void rememberset_add(uintptr_t obj_ptr) {
         exit(1);
     }
 
-    // test: avoid duplicate entries
-    // efficiency now is very low
-    // for(int i=0; i< remembered_set.count; i++){
-    //     if(remembered_set.buffer[i] == obj_ptr){
-    //         return;
-    //     }
-    // }
 
-    if (remembered_set.hash_table[MASK_HASH(obj_ptr)] != obj_ptr) {
-        remembered_set.hash_table[MASK_HASH(obj_ptr)] = obj_ptr;
-    } else {
-        return;
+    unsigned int hash_idx = MASK_HASH(obj_ptr);
+    
+    
+    for (int probe = 0; probe < 8; probe++) {
+        unsigned int idx = (hash_idx + probe) & (HASH_TABLE_SIZE - 1);
+        uintptr_t existing = remembered_set.hash_table[idx];
+        
+        if (existing == obj_ptr) {
+            
+            write_barrier_duplicate_filtered++;
+            return;
+        }
+        
+        if (existing == 0) {
+       
+            remembered_set.hash_table[idx] = obj_ptr;
+            remembered_set.buffer[remembered_set.count] = obj_ptr;
+            remembered_set.count += 1;
+            return;
+        }
     }
     
-
-
-
-
-
-
-
+  
     remembered_set.buffer[remembered_set.count] = obj_ptr;
     remembered_set.count += 1;
-    // printf("remembered set add: added object at %p, total remembered objects: %d\n", (void*)obj_ptr, remembered_set.count);
 }   
 
 void rememberset_clear() {
@@ -72,48 +76,53 @@ void rememberset_clear() {
 }
 
 void write_barrier(JSValue* ptr, JSValue value){
-    // printf("write_barrier called, slot = %p\n", (void*)ptr);
+   
+    
+  
+    uintptr_t obj_addr = (uintptr_t)value;
+    if (obj_addr < cache_space.work_begin || obj_addr >= cache_space.end) {
+   
+        return;
+    }
+    
     uintptr_t obj_ptr = (uintptr_t)ptr;
-    if(!is_object(value)){
-            // Not a pointer, do nothing
-            return;
-        }
     if(obj_ptr >= cache_space.work_begin && obj_ptr < cache_space.end){
-        // Inside cache, do nothing
+     
         return;
     }
-    uintptr_t obj_addr = clear_ptag(value);
-    if (!(obj_addr >= cache_space.work_begin && obj_addr < cache_space.end)) {
-        // Not pointing to young object, do nothing
+    
+
+    if(!is_object(value)){
         return;
     }
-    // printf("write_barrier: Remembering object at %p pointing to young object at %p\n", (void*)obj_ptr, (void*)obj_addr);
+    
+    write_barrier_calls++; 
+    
+   
+    obj_addr = clear_ptag(value);
+    if (obj_addr < cache_space.work_begin || obj_addr >= cache_space.end) {
+        return;
+    }
+    
     rememberset_add(obj_ptr);
 }
 
 void write_barrier_ptr(void** ptr, void* value){
-    // printf("write_barrier called, slot = %p\n", (void*)ptr);
-    if (value == NULL){
-        // Not a pointer, do nothing
-        return;
-    }
-    uintptr_t obj_ptr = (uintptr_t)ptr;
+    
     uintptr_t val_ptr = (uintptr_t)value;
-    if(!(val_ptr >= cache_space.work_begin && val_ptr < cache_space.end)){
-        // Not pointing to young object, do nothing
-        return;
-    }
-    if(obj_ptr >= cache_space.work_begin && obj_ptr < cache_space.end){
-        // Inside cache, do nothing
+    if(val_ptr < cache_space.work_begin || val_ptr >= cache_space.end){
+       
         return;
     }
 
-        printf("write_barrier_ptr: slot=%p (in %s), value=%p (in cache)\n", 
-           (void*)obj_ptr, 
-           (obj_ptr >= dram_space.begin && obj_ptr < dram_space.end) ? "DRAM" : 
-           (obj_ptr >= cache_space.begin && obj_ptr < cache_space.work_begin) ? "init" : "???",
-           (void*)val_ptr);
-    // printf("write_barrier: Remembering object at %p pointing to young object at %p\n", (void*)obj_ptr, (void*)val_ptr);
+    uintptr_t obj_ptr = (uintptr_t)ptr;
+    if(obj_ptr >= cache_space.work_begin && obj_ptr < cache_space.end){
+
+        return;
+    }
+    
+    write_barrier_calls++; 
+    
     rememberset_add(obj_ptr);
 }
 

@@ -728,9 +728,9 @@ static void property_map_install___proto__(PropertyMap *pm, JSValue __proto__)
   if (pm->__proto__ != JS_EMPTY)
     return;
   pm->__proto__ = __proto__;
-#ifdef remembered_set
+#ifdef USE_REMEMBERED_SET
   write_barrier_ptr((void **) &pm->__proto__, (void *) __proto__);
-#endif /* remembered_set */
+#endif /* USE_REMEMBERED_SET */
   HashTransitionIterator iter = createHashTransitionIterator(pm->map);
   HashTransitionCell *p;
   while (nextHashTransitionCell(pm->map, &iter, &p) != FAIL)
@@ -804,9 +804,9 @@ Shape *new_object_shape(Context *ctx, char *name, PropertyMap *pm,
     if (p == NULL || p->n_embedded_slots < num_embedded) {
       s->next = *pp;
       *pp = s;
-#ifdef remembered_set
+#ifdef USE_REMEMBERED_SET
       write_barrier_ptr((void **) pp, (void *) s);
-#endif /* remembered_set */
+#endif /* USE_REMEMBERED_SET */
       break;
     }
   }
@@ -855,10 +855,10 @@ static void object_grow_shape(Context *ctx, JSValue obj, Shape *os)
     for (; i < new_size; i++)
       extension[i] = JS_EMPTY;
     p->eprop[extension_index] = (JSValue) (uintjsv_t) (uintptr_t) extension;
-#ifdef remembered_set
+#ifdef USE_REMEMBERED_SET
     write_barrier_ptr((void **) &p->eprop[extension_index],
                       (void *) extension);
-#endif /* remembered_set */
+#endif /* USE_REMEMBERED_SET */
 #ifdef AS_PROF
     if (os->alloc_site != NULL)
       os->alloc_site->copy_words += current_size;
@@ -867,9 +867,9 @@ static void object_grow_shape(Context *ctx, JSValue obj, Shape *os)
 
   /* 2. Assign new shape */
   p->shape = os;
-#ifdef remembered_set
+#ifdef USE_REMEMBERED_SET
       write_barrier_ptr((void **) &p->shape, (void *) os);
-#endif /* remembered_set */
+#endif /* USE_REMEMBERED_SET */
 
   HC_PROF_ENTER_SHAPE(os);
   GC_POP2(os, p);
@@ -1000,9 +1000,9 @@ JSValue create_simple_object_with_prototype(Context *ctx, JSValue prototype)
           pm->shapes = new_object_shape(ctx, DEBUG_NAME(debug_name),
                                         pm, n_props, 0);
 #endif /* ALLOC_SITE_CACHE */
-#ifdef remembered_set
+#ifdef USE_REMEMBERED_SET
           write_barrier_ptr((void **) &pm->shapes, (void *) pm->shapes);
-#endif /* remembered_set */
+#endif /* USE_REMEMBERED_SET */
         }
         /* 3. Create a link from the prototype object to the PM so that
          *    this function can find it in the following calls. */
@@ -1294,9 +1294,9 @@ void set_array_element(Context *ctx, JSValue array, cint index, JSValue v)
   if (0 <= index && index < get_jsarray_size(array)) {
     JSValue *storage = get_jsarray_body(array);
     storage[index] = v;
-#ifdef remembered_set
+#ifdef USE_REMEMBERED_SET
     write_barrier(&storage[index], v);
-#endif /* remembered_set */
+#endif /* USE_REMEMBERED_SET */
   } else {
     /* 3. otherwise, store it as a property */
     JSValue prop;
@@ -1348,9 +1348,9 @@ remove_and_convert_numerical_properties(Context *ctx, JSValue array,
         JSValue v = object_get_prop(array, index);
         JSValue *storage = get_jsarray_body(array);
         storage[index] = v;
-#ifdef remembered_set
+#ifdef USE_REMEMBERED_SET
         write_barrier_ptr((void **) &storage[index], (void *) v);
-#endif /* remembered_set */
+#endif /* USE_REMEMBERED_SET */
       }
       set_prop(ctx, array, key, JS_EMPTY, ATTR_NONE);
     }

@@ -375,7 +375,7 @@ static inline JSValue *object_get_prop_address(JSValue obj, int index)
 // #define object_set_prop(obj, index, v) \
 //   *(object_get_prop_address(obj, index)) = v
   
-#ifdef remember_set
+#ifdef USE_REMEMBERED_SET
 #define object_set_prop(obj, index, v) do { \
   JSValue *addr = object_get_prop_address(obj, index); \
   write_barrier(addr, v); \

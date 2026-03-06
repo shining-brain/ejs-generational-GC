@@ -6,7 +6,7 @@
   fr = get_lp(context);
   for (i = 0; i < link; i++) fr = fframe_prev(fr);
   fframe_locals_idx(fr, index) = src;
-#ifdef remembered_set
+#ifdef USE_REMEMBERED_SET
   write_barrier(&fframe_locals_idx(fr, index), src);
-#endif /* remembered_set */
+#endif /* USE_REMEMBERED_SET */
 \}

@@ -1,6 +1,7 @@
 #include <exception>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 #include "prefix.h"
 #define EXTERN extern
 #include "header.h"
@@ -17,6 +18,22 @@ Dram_space dram_space;
 int initial_alloc_bytes;
 int minor_gc_count = 0;
 long pass_the_remember_set_count = 0;
+long write_barrier_calls = 0;
+long write_barrier_duplicate_filtered = 0;
+
+// Performance profiling: GC breakdown
+long long total_scan_roots_time = 0;
+long long total_scan_rs_time = 0;
+long long total_scavenge_time = 0;
+
+// Performance profiling: allocation and forward ops (avoid conflict with GC_PROF)
+long long generational_alloc_count = 0;
+long long generational_alloc_bytes = 0;
+long long generational_forward_count = 0;
+
+// Performance profiling: overall timing
+struct timespec program_start_time;
+struct timespec program_end_time;
 
 void scavenge();
 void scan_init_area();
@@ -52,12 +69,15 @@ class CacheCheney_Tracer
 {
 private:
 
-    static bool in_cache_space(uintptr_t ptr) {
-        return cache_space.work_begin <= ptr && ptr < cache_space.end;
+    // Inline and optimize cache space check - called billions of times!
+    static inline bool in_cache_space(uintptr_t ptr) {
+        // Use unsigned arithmetic to optimize range check into single comparison
+        // This converts two comparisons into one subtraction + comparison
+        return (ptr - cache_space.work_begin) < (cache_space.end - cache_space.work_begin);
     }
 
-    static bool in_dram_space(uintptr_t ptr) {
-        return dram_space.begin <= ptr && ptr < dram_space.begin + dram_space.total_size;
+    static inline bool in_dram_space(uintptr_t ptr) {
+        return (ptr - dram_space.begin) < dram_space.total_size;
     }
 
     //ptr include header and payload, size don't include header
@@ -89,6 +109,8 @@ public:
 
     //ptr point to payload
     static uintptr_t forward(uintptr_t ptr) {
+        generational_forward_count++;  // Count forwarding operations
+        
         // if (ptr == 0)
         // {
         //     return 0;
@@ -117,15 +139,19 @@ public:
 
     //this function move the object from cache space to dram space, but just move, not update the references
     static void process_edge(JSValue &v) {
-        // printf("process JSValue &v edge\n");
+        // Fast path: check if it's an immediate value first (most common in registers)
         if (is_fixnum(v) || is_special(v))
             return;
 
-
         uintptr_t ptr = (uintptr_t) clear_ptag(v);
         
-        //use remember set
-        # ifdef remember_set
+        // Fast path: for generational GC, most pointers (especially in function table)
+        // are in old generation (DRAM). Check this FIRST before cache check.
+        # ifdef USE_REMEMBERED_SET
+        // Single range check - if in DRAM, nothing to do
+        if (in_dram_space(ptr))
+            return;
+        // If not in cache work area (might be in init area or invalid), skip
         if (!in_cache_space(ptr))
             return;
         # endif
@@ -136,11 +162,12 @@ public:
         v = put_ptag(to, tag);
     }
     static void process_edge(void *&p) {
-        // printf("process void *&p edge\n");
         uintptr_t ptr = (uintptr_t) p;
 
-        //use remember set
-        # ifdef remember_set
+        // Fast path: most void* pointers in function table point to DRAM
+        # ifdef USE_REMEMBERED_SET
+        if (in_dram_space(ptr))
+            return;
         if (!in_cache_space(ptr))
             return;
         # endif
@@ -155,7 +182,7 @@ public:
         uintptr_t ptr = (uintptr_t) p;
         
         //use remember set
-        # ifdef remember_set
+        # ifdef USE_REMEMBERED_SET
         if (!in_cache_space(ptr))
             return;
         # endif
@@ -176,7 +203,7 @@ public:
         uintptr_t ptr = (uintptr_t) array;
         
         //use remember set
-        # ifdef remember_set
+        # ifdef USE_REMEMBERED_SET
         if (!in_cache_space(ptr))
             return;
         # endif
@@ -198,7 +225,7 @@ public:
         uintptr_t ptr = (uintptr_t) array;
         
         //use remember set
-        # ifdef remember_set
+        # ifdef USE_REMEMBERED_SET
         if (!in_cache_space(ptr))
             return;
         # endif
@@ -244,7 +271,7 @@ public:
             return;
         uintptr_t ptr = (uintptr_t) array;
         //use remember set
-        # ifdef remember_set
+        # ifdef USE_REMEMBERED_SET
         if (!in_cache_space(ptr))
             return;
         # endif
@@ -302,6 +329,73 @@ CacheCheney_Tracer::~CacheCheney_Tracer()
 {
 }
 
+// Optimized root scanning for generational GC: skip function table to avoid 
+// scanning thousands of inline caches that mostly point to old generation
+static void scan_roots_generational(Context *ctx) {
+    // Scan global variables
+    {
+        struct global_constant_objects *gconstsp = &gconsts;
+        JSValue *p;
+        for (p = (JSValue *) gconstsp; p < (JSValue *) (gconstsp + 1); p++)
+            CacheCheney_Tracer::process_edge(*p);
+    }
+    {
+        struct global_property_maps *gpmsp = &gpms;
+        PropertyMap **p;
+        for (p = (PropertyMap **) gpmsp; p < (PropertyMap **) (gpmsp + 1); p++) {
+            void *ptr = (void*)*p;
+            CacheCheney_Tracer::process_edge(ptr);
+            *p = (PropertyMap*)ptr;
+        }
+    }
+    {
+        struct global_object_shapes *gshapesp = &gshapes;
+        Shape** p;
+        for (p = (Shape **) gshapesp; p < (Shape **) (gshapesp + 1); p++) {
+            void *ptr = (void*)*p;
+            CacheCheney_Tracer::process_edge(ptr);
+            *p = (Shape*)ptr;
+        }
+    }
+
+    // Scan Context (global, special registers, stack, exception handlers)
+    CacheCheney_Tracer::process_edge(ctx->global);
+    // SKIP function table scanning - it's treated as old generation!
+    {
+        void *ptr = (void*)ctx->spreg.lp;
+        CacheCheney_Tracer::process_edge(ptr);
+        ctx->spreg.lp = (FunctionFrame*)ptr;
+    }
+    CacheCheney_Tracer::process_edge(ctx->spreg.a);
+    CacheCheney_Tracer::process_edge(ctx->spreg.err);
+    if (ctx->exhandler_stack_top != NULL) {
+        void *ptr = (void*)ctx->exhandler_stack_top;
+        CacheCheney_Tracer::process_edge(ptr);
+        ctx->exhandler_stack_top = (UnwindProtect*)ptr;
+    }
+    CacheCheney_Tracer::process_edge(ctx->lcall_stack);
+
+    // Scan stack
+    JSValue* stack = ctx->stack;
+    int sp = ctx->spreg.sp;
+    int fp = ctx->spreg.fp;
+    while (1) {
+        while (sp >= fp) {
+            CacheCheney_Tracer::process_edge(stack[sp]);
+            sp--;
+        }
+        if (sp < 0)
+            break;
+        fp = stack[sp--]; /* FP */
+        CacheCheney_Tracer::process_edge_function_frame(stack[sp--]); /* LP */
+        sp--; /* PC */
+        sp--; /* CF */
+    }
+
+    // Scan GC_PUSH'ed roots
+    for (int i = 0; i < gc_root_stack_ptr; i++)
+        CacheCheney_Tracer::process_edge(*(gc_root_stack[i]));
+}
 
 
 void space_init(size_t bytes, size_t threshold_bytes)
@@ -358,6 +452,9 @@ void space_init(size_t bytes, size_t threshold_bytes)
 
 void *space_alloc(uintptr_t request_bytes, cell_type_t type)
 {
+    // Count allocations for performance analysis
+    generational_alloc_count++;
+    generational_alloc_bytes += request_bytes;
     
     // printf("Cache DRAM Manager allocating %lu bytes, type is %#x\n", request_bytes, type);
     // printf("allocate at address %p\n", (void*) (cache_space.current + sizeof(object_header)));
@@ -424,20 +521,36 @@ void garbage_collection(Context *ctx)
     minor_gc_count++;
     // printf("Minor GC count: %d, size of rememberset %d\n", minor_gc_count, remembered_set.count);
 
+    struct timespec t1, t2, t3, t4;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
     scan_roots<CacheCheney_Tracer>(ctx);
+    clock_gettime(CLOCK_MONOTONIC, &t2);
 
-    scan_init_area();
-
-    #ifdef remember_set
-    scan_remembered_set();
-    // #else
     // scan_init_area();
+
+    #ifdef USE_REMEMBERED_SET
+    scan_remembered_set();
+    clock_gettime(CLOCK_MONOTONIC, &t3);
+    #else
+    scan_init_area();
+    clock_gettime(CLOCK_MONOTONIC, &t3);
     #endif
         pass_the_remember_set_count++;
 
     dram_space.current = scan_start;
-    printf("there are %d items between dram_space.current and dram_space.free to scavenge\n",
-           (int)((dram_space.free - dram_space.current)/8));
+    // printf("there are %d items between dram_space.current and dram_space.free to scavenge\n",
+    //        (int)((dram_space.free - dram_space.current)/8));
+    scavenge();
+    clock_gettime(CLOCK_MONOTONIC, &t4);
+
+    // Accumulate timing
+    total_scan_roots_time += (t2.tv_sec - t1.tv_sec) * 1000000000LL + (t2.tv_nsec - t1.tv_nsec);
+    total_scan_rs_time += (t3.tv_sec - t2.tv_sec) * 1000000000LL + (t3.tv_nsec - t2.tv_nsec);
+    total_scavenge_time += (t4.tv_sec - t3.tv_sec) * 1000000000LL + (t4.tv_nsec - t3.tv_nsec);
+
+    dram_space.current = scan_start;
+    // printf("there are %d items between dram_space.current and dram_space.free to scavenge\n",
+    //        (int)((dram_space.free - dram_space.current)/8));
     scavenge();
 
     // scan_init_area();
@@ -480,7 +593,7 @@ void garbage_collection(Context *ctx)
 
 
 
-    #ifdef remember_set
+    #ifdef USE_REMEMBERED_SET
     rememberset_clear();
     // printf("remembered set cleared\n");
     #endif
@@ -525,37 +638,90 @@ void scan_remembered_set() {
     for (int i = 0; i < remembered_set.count; i++) {
         uintptr_t slot_addr = remembered_set.buffer[i];
         JSValue* slot = (JSValue*) slot_addr;
-        // if(slot_addr < cache_space.work_begin || slot_addr >= cache_space.end){
-        //     printf("INVALID ADDRESS in remembered set: %p, skip it\n", (void*)slot_addr);
-        //     continue;
-        // }
-
-        printf("RS[%d]: slot_addr=%p, value=%lx\n", i, (void*)slot_addr, (unsigned long)*slot);
-
 
         bool in_dram = (slot_addr >= dram_space.begin && slot_addr < dram_space.end);
         bool in_init = (slot_addr >= cache_space.begin && slot_addr < cache_space.work_begin);
         if (!in_dram && !in_init) {
-            printf("  WARNING: slot_addr not in DRAM or init area!\n");
+            printf("RS[%d]: WARNING: slot_addr=%p not in DRAM or init area!\n", i, (void*)slot_addr);
         }
 
-
-        // printf("value=%lx\n", *slot);
-        // printf("Scanning remembered set object %d at address %p, value=%lx\n", i, (void*)slot_addr, *slot);
         CacheCheney_Tracer::process_edge(*slot);
-
-        printf(", value_after=%lx\n", (unsigned long)*slot);
     }
-    // printf("scan_remembered_set finished, processed %d remembered objects\n", remembered_set.count);
-    
 }
 
 static void print_gc_status(){
-    printf("========== GC Status ==========\n");
-    printf("Minor GC count: %d\n", minor_gc_count);
-    printf("Init area scanned objects count: %ld\n", scan_init_objects_count);
-    printf("average per GC: %f\n", (float)scan_init_objects_count / (float)minor_gc_count);
-    printf("===================================\n");
+    // Capture end time for overall profiling
+    clock_gettime(CLOCK_MONOTONIC, &program_end_time);
+    
+    printf("\n");
+    printf("========================================\n");
+    printf("===   Performance Analysis Report    ===\n");
+    printf("========================================\n\n");
+    
+    // Calculate total elapsed time
+    double total_elapsed = (program_end_time.tv_sec - program_start_time.tv_sec) +
+                          (program_end_time.tv_nsec - program_start_time.tv_nsec) / 1e9;
+    
+    // Calculate GC time breakdown
+    double total_gc_time = (total_scan_roots_time + total_scan_rs_time + total_scavenge_time) / 1e9;
+    double business_logic_time = total_elapsed - total_gc_time;
+    
+    printf("=== Overall Runtime ===\n");
+    printf("Total execution:     %.3f sec (100.0%%)\n", total_elapsed);
+    printf("  Business logic:    %.3f sec (%.1f%%)\n", 
+           business_logic_time, 
+           100.0 * business_logic_time / total_elapsed);
+    printf("  GC overhead:       %.3f sec (%.1f%%)\n", 
+           total_gc_time, 
+           100.0 * total_gc_time / total_elapsed);
+    
+    printf("\n=== GC Statistics ===\n");
+    printf("Minor GC count:      %d\n", minor_gc_count);
+    if (minor_gc_count > 0) {
+        printf("Avg GC pause:        %.3f ms\n", 1000.0 * total_gc_time / minor_gc_count);
+        printf("GC frequency:        %.1f GC/sec\n", minor_gc_count / total_elapsed);
+    }
+    printf("Init area objects:   %ld (avg %.1f per GC)\n", 
+           scan_init_objects_count,
+           (float)scan_init_objects_count / (minor_gc_count > 0 ? minor_gc_count : 1));
+    
+    #ifdef USE_REMEMBERED_SET
+    printf("\n=== Remembered Set ===\n");
+    printf("Write barrier calls: %ld\n", write_barrier_calls);
+    if (write_barrier_calls > 0) {
+        printf("  Duplicates:        %ld (%.1f%%)\n", 
+               write_barrier_duplicate_filtered,
+               100.0 * write_barrier_duplicate_filtered / write_barrier_calls);
+        printf("  Avg per GC:        %.1f\n", (float)write_barrier_calls / minor_gc_count);
+    }
+    #endif
+    
+    printf("\n=== Allocation Statistics ===\n");
+    printf("Total allocations:   %lld\n", generational_alloc_count);
+    printf("Total alloc bytes:   %.2f MB\n", generational_alloc_bytes / (1024.0 * 1024.0));
+    if (generational_alloc_count > 0) {
+        printf("Avg alloc size:      %.1f bytes\n", (double)generational_alloc_bytes / generational_alloc_count);
+        printf("Allocs per GC:       %.1f\n", (double)generational_alloc_count / minor_gc_count);
+    }
+    printf("Forward operations:  %lld\n", generational_forward_count);
+    if (generational_forward_count > 0) {
+        printf("  Forward per GC:    %.1f\n", (double)generational_forward_count / minor_gc_count);
+    }
+    
+    if (minor_gc_count > 0 && total_gc_time > 0) {
+        printf("\n=== GC Time Breakdown ===\n");
+        printf("scan_roots:          %.3f sec (%.1f%% of GC)\n", 
+               total_scan_roots_time / 1e9, 
+               100.0 * total_scan_roots_time / (total_scan_roots_time + total_scan_rs_time + total_scavenge_time));
+        printf("scan_RS:             %.3f sec (%.1f%% of GC)\n", 
+               total_scan_rs_time / 1e9,
+               100.0 * total_scan_rs_time / (total_scan_roots_time + total_scan_rs_time + total_scavenge_time));
+        printf("scavenge:            %.3f sec (%.1f%% of GC)\n", 
+               total_scavenge_time / 1e9,
+               100.0 * total_scavenge_time / (total_scan_roots_time + total_scan_rs_time + total_scavenge_time));
+    }
+    
+    printf("\n========================================\n");
 }
 
 
@@ -565,8 +731,9 @@ extern "C" void space_free_dram_manager_init(){
     cache_space.work_begin = cache_space.current;
     init_finish = 1;
     printf("init_info: after init object alloc, cache_space.work_begin moved to %p\n",
-           (void*)cache_space.work_begin);
-}
+           (void*)cache_space.work_begin);    
+    // Start profiling timer after initialization
+    clock_gettime(CLOCK_MONOTONIC, &program_start_time);}
 
 extern "C" void space_print_memory_status() {
     printf("========== Memory Status ==========\n");
