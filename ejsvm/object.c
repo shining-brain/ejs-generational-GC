@@ -655,6 +655,9 @@ PropertyMap *new_property_map(Context *ctx, char *name,
                                    CELLT_PROPERTY_MAP_LIST);
     p->pm = m;
     p->next = ctx->property_map_roots;
+#ifdef USE_REMEMBERED_SET
+    write_barrier_ptr((void **) &ctx->property_map_roots, (void *) p);
+#endif /* USE_REMEMBERED_SET */
     ctx->property_map_roots = p;
   }
   GC_POP(m);
@@ -729,7 +732,7 @@ static void property_map_install___proto__(PropertyMap *pm, JSValue __proto__)
     return;
   pm->__proto__ = __proto__;
 #ifdef USE_REMEMBERED_SET
-  write_barrier_ptr((void **) &pm->__proto__, (void *) __proto__);
+  write_barrier((JSValue *) &pm->__proto__, __proto__);
 #endif /* USE_REMEMBERED_SET */
   HashTransitionIterator iter = createHashTransitionIterator(pm->map);
   HashTransitionCell *p;
@@ -1349,7 +1352,7 @@ remove_and_convert_numerical_properties(Context *ctx, JSValue array,
         JSValue *storage = get_jsarray_body(array);
         storage[index] = v;
 #ifdef USE_REMEMBERED_SET
-        write_barrier_ptr((void **) &storage[index], (void *) v);
+  write_barrier(&storage[index], v);
 #endif /* USE_REMEMBERED_SET */
       }
       set_prop(ctx, array, key, JS_EMPTY, ATTR_NONE);

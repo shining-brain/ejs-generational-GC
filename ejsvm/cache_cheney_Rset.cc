@@ -13,6 +13,7 @@ RememberedSet remembered_set;
 #define HASH_TABLE_SIZE 4096  
 //only use the bits of 3-14 as hash value
 #define MASK_HASH(ptr) (((ptr) >> 3) & (HASH_TABLE_SIZE - 1))
+#define RS_PTR_SLOT_TAG ((uintptr_t)1)
 
 // Initialize the remembered set,and adjust cache_space.end accordingly, adjust total_size too
 void init_remembered_set() {
@@ -76,53 +77,50 @@ void rememberset_clear() {
 }
 
 void write_barrier(JSValue* ptr, JSValue value){
-   
-    
-  
-    uintptr_t obj_addr = (uintptr_t)value;
-    if (obj_addr < cache_space.work_begin || obj_addr >= cache_space.end) {
-   
+    if (is_fixnum(value) || is_special(value)) {
         return;
     }
-    
-    uintptr_t obj_ptr = (uintptr_t)ptr;
-    if(obj_ptr >= cache_space.work_begin && obj_ptr < cache_space.end){
-     
-        return;
-    }
-    
 
-    if(!is_object(value)){
+    uintptr_t obj_ptr = (uintptr_t)ptr;
+    if (obj_ptr >= cache_space.work_begin && obj_ptr < cache_space.end) {
         return;
     }
-    
-    write_barrier_calls++; 
-    
-   
-    obj_addr = clear_ptag(value);
+    bool slot_in_dram = (obj_ptr >= dram_space.begin && obj_ptr < dram_space.end);
+    bool slot_in_init = (obj_ptr >= cache_space.begin && obj_ptr < cache_space.work_begin);
+    if (!slot_in_dram && !slot_in_init) {
+        return;
+    }
+
+    uintptr_t obj_addr = clear_ptag(value);
     if (obj_addr < cache_space.work_begin || obj_addr >= cache_space.end) {
         return;
     }
-    
+
+    write_barrier_calls++;
     rememberset_add(obj_ptr);
 }
 
 void write_barrier_ptr(void** ptr, void* value){
-    
     uintptr_t val_ptr = (uintptr_t)value;
-    if(val_ptr < cache_space.work_begin || val_ptr >= cache_space.end){
-       
+    if (val_ptr == 0) {
+        return;
+    }
+
+    if (val_ptr < cache_space.work_begin || val_ptr >= cache_space.end) {
         return;
     }
 
     uintptr_t obj_ptr = (uintptr_t)ptr;
-    if(obj_ptr >= cache_space.work_begin && obj_ptr < cache_space.end){
-
+    if (obj_ptr >= cache_space.work_begin && obj_ptr < cache_space.end) {
         return;
     }
-    
-    write_barrier_calls++; 
-    
-    rememberset_add(obj_ptr);
+    bool slot_in_dram = (obj_ptr >= dram_space.begin && obj_ptr < dram_space.end);
+    bool slot_in_init = (obj_ptr >= cache_space.begin && obj_ptr < cache_space.work_begin);
+    if (!slot_in_dram && !slot_in_init) {
+        return;
+    }
+
+    write_barrier_calls++;
+    rememberset_add(obj_ptr | RS_PTR_SLOT_TAG);
 }
 

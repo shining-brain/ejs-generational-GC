@@ -79,6 +79,9 @@ int hash_put_property(Context *ctx, HashTable *table,
   
   if (is_readonly(table->entry[index].attr))
     return HASH_PUT_FAILED;
+#ifdef USE_REMEMBERED_SET
+  write_barrier(&table->entry[index].key, key);
+#endif /* USE_REMEMBERED_SET */
   table->entry[index].key = key;
   table->entry[index].attr = attr;
   return HASH_PUT_SUCCESS;
@@ -135,6 +138,9 @@ int hash_copy(Context *ctx, HashTable *from, HashTable *to)
   for (i = 0; i < from->n_props; i++) {
     if (from->entry[i].key != JS_UNDEFINED) {
       n++;
+#ifdef USE_REMEMBERED_SET
+      write_barrier(&to->entry[i].key, from->entry[i].key);
+#endif /* USE_REMEMBERED_SET */
       to->entry[i].key = from->entry[i].key;
     }
   }

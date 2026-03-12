@@ -414,9 +414,32 @@ static inline void set_js##OT##_##field(JSValue v, FT val)      \
   set_##OT##_ptr_##field(p, val);                               \
 }
 
+#ifdef USE_REMEMBERED_SET
+#define ACCESSOR_WB_JSVALUE(slot, value) do {                           \
+  extern void write_barrier(JSValue *ptr, JSValue value);               \
+  write_barrier((slot), (value));                                       \
+} while (0)
+#define ACCESSOR_WB_PTR(slot, value) do {                               \
+  extern void write_barrier_ptr(void **ptr, void *value);               \
+  write_barrier_ptr((void **)(slot), (void *)(value));                  \
+} while (0)
+#else
+#define ACCESSOR_WB_JSVALUE(slot, value) ((void)0)
+#define ACCESSOR_WB_PTR(slot, value) ((void)0)
+#endif
+
 /* for JSValues */
-#define DEFINE_ACCESSORS_J(OT, index, field)    \
-  DEFINE_ACCESSORS_I(OT, index, JSValue, field) \
+#define DEFINE_ACCESSORS_J(OT, index, field)                    \
+static inline JSValue get_##OT##_ptr_##field(JSObject *p)       \
+{                                                               \
+  return p->eprop[index];                                       \
+}                                                               \
+static inline void set_##OT##_ptr_##field(JSObject *p, JSValue val) \
+{                                                               \
+  ACCESSOR_WB_JSVALUE(&p->eprop[index], val);                  \
+  p->eprop[index] = val;                                        \
+}                                                               \
+DEFINE_COMMON_ACCESSORS(OT, index, JSValue, field)              \
 static const size_t OT##_##field##_index = index;
 
 /* for pointers (references) to (no-JS) heap object  */
@@ -427,6 +450,7 @@ static inline FT get_##OT##_ptr_##field(JSObject *p)            \
 }                                                               \
 static inline void set_##OT##_ptr_##field(JSObject *p, FT val)  \
 {                                                               \
+  ACCESSOR_WB_PTR(&p->eprop[index], val);                       \
   p->eprop[index] = (JSValue) (uintjsv_t) (uintptr_t) val;      \
 }                                                               \
 DEFINE_COMMON_ACCESSORS(OT, index, FT, field)                   \

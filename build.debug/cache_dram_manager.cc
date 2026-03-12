@@ -431,21 +431,34 @@ void space_init(size_t bytes, size_t threshold_bytes)
            (void*)cache_space.begin, (void*)cache_space.end, cache_space.total_size/1024, cache_space.threshold_size/1024/1024);
 
 
-    //initial dram space
-    //test: modify DRAM to the biggist size
-    //now is the maximum number of int32_t
-    bytes = 0x7fffffff; //16GB
-    dram_space.begin = (uintptr_t) malloc(bytes);
+    // Keep cache size unchanged; allocate the largest feasible DRAM region.
+    const size_t dram_candidates[] = {
+        (size_t)128ULL * 1024ULL * 1024ULL * 1024ULL, // 128GB
+        (size_t)64ULL  * 1024ULL * 1024ULL * 1024ULL, // 64GB
+        (size_t)32ULL  * 1024ULL * 1024ULL * 1024ULL, // 32GB
+        (size_t)16ULL  * 1024ULL * 1024ULL * 1024ULL  // 16GB
+    };
+    dram_space.begin = 0;
+    for (size_t i = 0; i < sizeof(dram_candidates) / sizeof(dram_candidates[0]); i++) {
+        bytes = dram_candidates[i];
+        dram_space.begin = (uintptr_t) malloc(bytes);
+        if (dram_space.begin != 0)
+            break;
+    }
+    if (dram_space.begin == 0) {
+        perror("malloc(dram_space)");
+        exit(1);
+    }
     dram_space.free = dram_space.begin;
     dram_space.current = dram_space.begin;
     dram_space.total_size = bytes;
     dram_space.available_bytes = bytes;
     dram_space.end = dram_space.begin + dram_space.total_size;
 
-    printf("Now we are using cache_cheney GC. Cache DRAM Manager initialized: Cache size %d Mbytes, DRAM size %d Mbytes\n",
-           cache_space.total_size / (1024 * 1024), dram_space.total_size / (1024 * 1024));
-    printf("DRAM address info: begin=%p, end=%p, total_size=%dKB\n",
-           (void*)dram_space.begin, (void*)dram_space.end, dram_space.total_size/1024);
+        printf("Now we are using cache_cheney GC. Cache DRAM Manager initialized: Cache size %d Mbytes, DRAM size %zu Mbytes\n",
+            cache_space.total_size / (1024 * 1024), dram_space.total_size / (1024 * 1024));
+        printf("DRAM address info: begin=%p, end=%p, total_size=%zuKB\n",
+            (void*)dram_space.begin, (void*)dram_space.end, dram_space.total_size/1024);
 
     print_dram_space_usage();
 }
@@ -548,15 +561,10 @@ void garbage_collection(Context *ctx)
     total_scan_rs_time += (t3.tv_sec - t2.tv_sec) * 1000000000LL + (t3.tv_nsec - t2.tv_nsec);
     total_scavenge_time += (t4.tv_sec - t3.tv_sec) * 1000000000LL + (t4.tv_nsec - t3.tv_nsec);
 
-    dram_space.current = scan_start;
-    // printf("there are %d items between dram_space.current and dram_space.free to scavenge\n",
-    //        (int)((dram_space.free - dram_space.current)/8));
-    scavenge();
-
     // scan_init_area();
     // printf("scavenge finished\n");
 
-    // weak_clear<CacheCheney_Tracer>(ctx);
+    weak_clear<CacheCheney_Tracer>(ctx);
     // printf("weak_clear finished\n");
 
 
@@ -636,16 +644,25 @@ void scan_init_area() {
 
 void scan_remembered_set() {
     for (int i = 0; i < remembered_set.count; i++) {
-        uintptr_t slot_addr = remembered_set.buffer[i];
-        JSValue* slot = (JSValue*) slot_addr;
+        uintptr_t raw_slot = remembered_set.buffer[i];
+        bool is_ptr_slot = (raw_slot & 1) != 0;
+        uintptr_t slot_addr = raw_slot & ~(uintptr_t)1;
 
         bool in_dram = (slot_addr >= dram_space.begin && slot_addr < dram_space.end);
         bool in_init = (slot_addr >= cache_space.begin && slot_addr < cache_space.work_begin);
         if (!in_dram && !in_init) {
-            printf("RS[%d]: WARNING: slot_addr=%p not in DRAM or init area!\n", i, (void*)slot_addr);
+            continue;
         }
 
-        CacheCheney_Tracer::process_edge(*slot);
+        if (is_ptr_slot) {
+            void **slot = (void **) slot_addr;
+            void *value = *slot;
+            CacheCheney_Tracer::process_edge(value);
+            *slot = value;
+        } else {
+            JSValue *slot = (JSValue *) slot_addr;
+            CacheCheney_Tracer::process_edge(*slot);
+        }
     }
 }
 
@@ -688,11 +705,16 @@ static void print_gc_status(){
     #ifdef USE_REMEMBERED_SET
     printf("\n=== Remembered Set ===\n");
     printf("Write barrier calls: %ld\n", write_barrier_calls);
-    if (write_barrier_calls > 0) {
+    if (write_barrier_calls > 0 && minor_gc_count > 0) {
         printf("  Duplicates:        %ld (%.1f%%)\n", 
                write_barrier_duplicate_filtered,
                100.0 * write_barrier_duplicate_filtered / write_barrier_calls);
         printf("  Avg per GC:        %.1f\n", (float)write_barrier_calls / minor_gc_count);
+    } else if (write_barrier_calls > 0) {
+        printf("  Duplicates:        %ld (%.1f%%)\n", 
+               write_barrier_duplicate_filtered,
+               100.0 * write_barrier_duplicate_filtered / write_barrier_calls);
+        printf("  Avg per GC:        N/A (no GC yet)\n");
     }
     #endif
     
@@ -701,11 +723,16 @@ static void print_gc_status(){
     printf("Total alloc bytes:   %.2f MB\n", generational_alloc_bytes / (1024.0 * 1024.0));
     if (generational_alloc_count > 0) {
         printf("Avg alloc size:      %.1f bytes\n", (double)generational_alloc_bytes / generational_alloc_count);
-        printf("Allocs per GC:       %.1f\n", (double)generational_alloc_count / minor_gc_count);
+        if (minor_gc_count > 0)
+            printf("Allocs per GC:       %.1f\n", (double)generational_alloc_count / minor_gc_count);
+        else
+            printf("Allocs per GC:       N/A (no GC yet)\n");
     }
     printf("Forward operations:  %lld\n", generational_forward_count);
-    if (generational_forward_count > 0) {
+    if (generational_forward_count > 0 && minor_gc_count > 0) {
         printf("  Forward per GC:    %.1f\n", (double)generational_forward_count / minor_gc_count);
+    } else if (generational_forward_count > 0) {
+        printf("  Forward per GC:    N/A (no GC yet)\n");
     }
     
     if (minor_gc_count > 0 && total_gc_time > 0) {

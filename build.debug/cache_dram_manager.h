@@ -40,8 +40,8 @@ typedef struct
     uintptr_t free;
     uintptr_t current;
     uintptr_t end;
-    int total_size;
-    int available_bytes;
+    size_t total_size;
+    size_t available_bytes;
 } Dram_space;
 
 extern Cache_space cache_space;

@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cd /home/qiancheng/ejs-new/build\\.debug/benchmarks && bash run_benchmarks\\.sh$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
