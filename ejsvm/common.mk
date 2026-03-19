@@ -356,9 +356,15 @@ ifeq ($(OPT_GC),compact)
     HFILES+=markcompact-collector.h markcompact-collector-inl.h mark-tracer
 endif
 ifeq ($(OPT_GC),cache_cheney)
-    CPPFLAGS+=-DUSE_NATIVEGC=1 -DCACHE_CHENEY
-    CXX_FILES+=cache_dram_manager.cc cache_cheney_Rset.cc
-    OFILES+=cache_dram_manager.o cache_cheney_Rset.o
+	CPPFLAGS+=-DUSE_NATIVEGC=1 -DCACHE_CHENEY -DUSE_REMEMBERED_SET
+	CXX_FILES+=cache_dram_manager.cc cache_cheney_Rset.cc
+	OFILES+=cache_dram_manager.o cache_cheney_Rset.o
+	HFILES+=cache_dram_manager.h
+endif
+ifeq ($(OPT_GC),giy)
+	CPPFLAGS+=-DUSE_NATIVEGC=1 -DCACHE_CHENEY -DUSE_REMEMBERED_SET -DUSE_GIY_MINOR
+	CXX_FILES+=giy_dram_manager.cc giy_rset.cc GiY.cc
+	OFILES+=giy_dram_manager.o giy_rset.o GiY.o
     HFILES+=cache_dram_manager.h
 endif
 

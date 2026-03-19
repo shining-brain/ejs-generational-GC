@@ -7,6 +7,7 @@
 
 extern long write_barrier_calls;
 extern long write_barrier_duplicate_filtered;
+extern int in_minor_gc;
 
 RememberedSet remembered_set;
 
@@ -14,11 +15,14 @@ RememberedSet remembered_set;
 //only use the bits of 3-14 as hash value
 #define MASK_HASH(ptr) (((ptr) >> 3) & (HASH_TABLE_SIZE - 1))
 #define RS_PTR_SLOT_TAG ((uintptr_t)1)
+#define REMEMBERED_SET_CAPACITY_BYTES (24 * 1024)
 
 // Initialize the remembered set,and adjust cache_space.end accordingly, adjust total_size too
 void init_remembered_set() {
     remembered_set.count = 0;
-    remembered_set.capacity = 24*1024/8; // Can remember 24*1024/8 = 3K objects
+
+    // Keep RS size identical between Cheney and GiY for fair comparison.
+    remembered_set.capacity = REMEMBERED_SET_CAPACITY_BYTES / (int) sizeof(uintptr_t);
     // remembered_set.capacity = 24*1024/8*200; // Can remember 128*1024/8 = 600K objects
     remembered_set.buffer = (uintptr_t *)(cache_space.end - remembered_set.capacity* sizeof(uintptr_t));
     cache_space.end -= remembered_set.capacity* sizeof(uintptr_t);
@@ -38,6 +42,10 @@ void init_remembered_set() {
 }
 
 void rememberset_add(uintptr_t obj_ptr) {
+    if (in_minor_gc) {
+        return;
+    }
+
     if (remembered_set.count >= remembered_set.capacity) {
         printf("Error: Remembered set full, cannot add more remembered objects!\n");
         exit(1);
@@ -77,6 +85,10 @@ void rememberset_clear() {
 }
 
 void write_barrier(JSValue* ptr, JSValue value){
+    if (in_minor_gc) {
+        return;
+    }
+
     if (is_fixnum(value) || is_special(value)) {
         return;
     }
@@ -101,6 +113,10 @@ void write_barrier(JSValue* ptr, JSValue value){
 }
 
 void write_barrier_ptr(void** ptr, void* value){
+    if (in_minor_gc) {
+        return;
+    }
+
     uintptr_t val_ptr = (uintptr_t)value;
     if (val_ptr == 0) {
         return;

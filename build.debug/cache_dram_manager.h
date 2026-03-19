@@ -80,11 +80,20 @@ extern void rememberset_add(uintptr_t obj_ptr);
 extern void rememberset_clear();
 extern void write_barrier(JSValue *ptr, JSValue value);
 extern void write_barrier_ptr(void** ptr, void* value);
+extern int in_minor_gc;
 
 
 
 #ifdef __cplusplus
 }
+
+// C++ GiY path entry point used by cache_cheney minor GC.
+void giy_minor_collect(Context *ctx,
+                       long long *scan_roots_ns,
+                       long long *scan_rs_ns,
+                       long long *young_trace_ns);
+void giy_weak_clear(Context *ctx);
+void giy_bind_stack_to_cache();
 #endif
 
 

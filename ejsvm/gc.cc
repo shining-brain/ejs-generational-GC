@@ -74,6 +74,14 @@ STATIC int gc_disabled = 1;
 int generation = 0;
 int gc_sec;
 int gc_usec;
+
+#ifdef MARKSWEEP
+static void print_marksweep_gc_count_at_exit(void)
+{
+  int gc_count = generation > 0 ? generation - 1 : 0;
+  printf("[GC] MarkSweep triggered count: %d\n", gc_count);
+}
+#endif /* MARKSWEEP */
 #ifdef GC_PROF
 uint64_t total_alloc_bytes;
 uint64_t total_alloc_count;
@@ -139,6 +147,9 @@ void init_memory(size_t bytes, size_t threshold_bytes)
   generation = 1;
   gc_sec = 0;
   gc_usec = 0;
+#ifdef MARKSWEEP
+  atexit(print_marksweep_gc_count_at_exit);
+#endif /* MARKSWEEP */
 }
 
 void* gc_malloc(Context *ctx, uintptr_t request_bytes, cell_type_t type)

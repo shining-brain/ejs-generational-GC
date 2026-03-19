@@ -20,6 +20,7 @@ int minor_gc_count = 0;
 long pass_the_remember_set_count = 0;
 long write_barrier_calls = 0;
 long write_barrier_duplicate_filtered = 0;
+int in_minor_gc = 0;
 
 // Performance profiling: GC breakdown
 long long total_scan_roots_time = 0;
@@ -65,7 +66,7 @@ void print_cache_space_useage()
     // printf("Cache space usage: used %f KB\n", used_bytes / 1024.0);
 }
 
-class CacheCheney_Tracer
+class GiYIsolatedTracer
 {
 private:
 
@@ -316,16 +317,16 @@ public:
 
     }
 
-    CacheCheney_Tracer(/* args */);
-    ~CacheCheney_Tracer
+    GiYIsolatedTracer(/* args */);
+    ~GiYIsolatedTracer
 ();
 };
 
-CacheCheney_Tracer::CacheCheney_Tracer(/* args */)
+GiYIsolatedTracer::GiYIsolatedTracer(/* args */)
 {
 }
 
-CacheCheney_Tracer::~CacheCheney_Tracer()
+GiYIsolatedTracer::~GiYIsolatedTracer()
 {
 }
 
@@ -337,14 +338,14 @@ static void scan_roots_generational(Context *ctx) {
         struct global_constant_objects *gconstsp = &gconsts;
         JSValue *p;
         for (p = (JSValue *) gconstsp; p < (JSValue *) (gconstsp + 1); p++)
-            CacheCheney_Tracer::process_edge(*p);
+            GiYIsolatedTracer::process_edge(*p);
     }
     {
         struct global_property_maps *gpmsp = &gpms;
         PropertyMap **p;
         for (p = (PropertyMap **) gpmsp; p < (PropertyMap **) (gpmsp + 1); p++) {
             void *ptr = (void*)*p;
-            CacheCheney_Tracer::process_edge(ptr);
+            GiYIsolatedTracer::process_edge(ptr);
             *p = (PropertyMap*)ptr;
         }
     }
@@ -353,27 +354,27 @@ static void scan_roots_generational(Context *ctx) {
         Shape** p;
         for (p = (Shape **) gshapesp; p < (Shape **) (gshapesp + 1); p++) {
             void *ptr = (void*)*p;
-            CacheCheney_Tracer::process_edge(ptr);
+            GiYIsolatedTracer::process_edge(ptr);
             *p = (Shape*)ptr;
         }
     }
 
     // Scan Context (global, special registers, stack, exception handlers)
-    CacheCheney_Tracer::process_edge(ctx->global);
+    GiYIsolatedTracer::process_edge(ctx->global);
     // SKIP function table scanning - it's treated as old generation!
     {
         void *ptr = (void*)ctx->spreg.lp;
-        CacheCheney_Tracer::process_edge(ptr);
+        GiYIsolatedTracer::process_edge(ptr);
         ctx->spreg.lp = (FunctionFrame*)ptr;
     }
-    CacheCheney_Tracer::process_edge(ctx->spreg.a);
-    CacheCheney_Tracer::process_edge(ctx->spreg.err);
+    GiYIsolatedTracer::process_edge(ctx->spreg.a);
+    GiYIsolatedTracer::process_edge(ctx->spreg.err);
     if (ctx->exhandler_stack_top != NULL) {
         void *ptr = (void*)ctx->exhandler_stack_top;
-        CacheCheney_Tracer::process_edge(ptr);
+        GiYIsolatedTracer::process_edge(ptr);
         ctx->exhandler_stack_top = (UnwindProtect*)ptr;
     }
-    CacheCheney_Tracer::process_edge(ctx->lcall_stack);
+    GiYIsolatedTracer::process_edge(ctx->lcall_stack);
 
     // Scan stack
     JSValue* stack = ctx->stack;
@@ -381,20 +382,20 @@ static void scan_roots_generational(Context *ctx) {
     int fp = ctx->spreg.fp;
     while (1) {
         while (sp >= fp) {
-            CacheCheney_Tracer::process_edge(stack[sp]);
+            GiYIsolatedTracer::process_edge(stack[sp]);
             sp--;
         }
         if (sp < 0)
             break;
         fp = stack[sp--]; /* FP */
-        CacheCheney_Tracer::process_edge_function_frame(stack[sp--]); /* LP */
+        GiYIsolatedTracer::process_edge_function_frame(stack[sp--]); /* LP */
         sp--; /* PC */
         sp--; /* CF */
     }
 
     // Scan GC_PUSH'ed roots
     for (int i = 0; i < gc_root_stack_ptr; i++)
-        CacheCheney_Tracer::process_edge(*(gc_root_stack[i]));
+        GiYIsolatedTracer::process_edge(*(gc_root_stack[i]));
 }
 
 
@@ -455,8 +456,8 @@ void space_init(size_t bytes, size_t threshold_bytes)
     dram_space.available_bytes = bytes;
     dram_space.end = dram_space.begin + dram_space.total_size;
 
-        printf("Now we are using cache_cheney GC. Cache DRAM Manager initialized: Cache size %d Mbytes, DRAM size %zu Mbytes\n",
-            cache_space.total_size / (1024 * 1024), dram_space.total_size / (1024 * 1024));
+        printf("Now we are using GiY GC. Cache DRAM Manager initialized: Cache size %d Kbytes, DRAM size %zu Kbytes\n",
+            cache_space.total_size / 1024, dram_space.total_size / 1024);
         printf("DRAM address info: begin=%p, end=%p, total_size=%zuKB\n",
             (void*)dram_space.begin, (void*)dram_space.end, dram_space.total_size/1024);
 
@@ -520,9 +521,6 @@ void garbage_collection(Context *ctx)
     the_context = ctx;
     
     // dram_space.current = dram_space.begin;
-    uintptr_t scan_start = dram_space.free;
-    // dram_space.current = dram_space.free; //start from the free pointer
-
     if(need_major_gc()) {
         printf("===============major GC triggered=================\n");
         //todo: implement major GC
@@ -532,39 +530,24 @@ void garbage_collection(Context *ctx)
     print_cache_space_useage();
     // printf("=================minor GC triggered==================\n");
     minor_gc_count++;
+    in_minor_gc = 1;
     // printf("Minor GC count: %d, size of rememberset %d\n", minor_gc_count, remembered_set.count);
 
-    struct timespec t1, t2, t3, t4;
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-    scan_roots<CacheCheney_Tracer>(ctx);
-    clock_gettime(CLOCK_MONOTONIC, &t2);
+    // GiY-style minor path: resolve pointer graph in young first,
+    // then materialize copied objects in DRAM.
+    long long scan_roots_ns = 0;
+    long long scan_rs_ns = 0;
+    long long young_trace_ns = 0;
+    giy_minor_collect(ctx, &scan_roots_ns, &scan_rs_ns, &young_trace_ns);
 
-    // scan_init_area();
-
-    #ifdef USE_REMEMBERED_SET
-    scan_remembered_set();
-    clock_gettime(CLOCK_MONOTONIC, &t3);
-    #else
-    scan_init_area();
-    clock_gettime(CLOCK_MONOTONIC, &t3);
-    #endif
-        pass_the_remember_set_count++;
-
-    dram_space.current = scan_start;
-    // printf("there are %d items between dram_space.current and dram_space.free to scavenge\n",
-    //        (int)((dram_space.free - dram_space.current)/8));
-    scavenge();
-    clock_gettime(CLOCK_MONOTONIC, &t4);
-
-    // Accumulate timing
-    total_scan_roots_time += (t2.tv_sec - t1.tv_sec) * 1000000000LL + (t2.tv_nsec - t1.tv_nsec);
-    total_scan_rs_time += (t3.tv_sec - t2.tv_sec) * 1000000000LL + (t3.tv_nsec - t2.tv_nsec);
-    total_scavenge_time += (t4.tv_sec - t3.tv_sec) * 1000000000LL + (t4.tv_nsec - t3.tv_nsec);
+    total_scan_roots_time += scan_roots_ns;
+    total_scan_rs_time += scan_rs_ns;
+    total_scavenge_time += young_trace_ns;
 
     // scan_init_area();
     // printf("scavenge finished\n");
 
-    weak_clear<CacheCheney_Tracer>(ctx);
+    giy_weak_clear(ctx);
     // printf("weak_clear finished\n");
 
 
@@ -594,6 +577,7 @@ void garbage_collection(Context *ctx)
 
 
 
+    // Entire young work area is reclaimed after successful minor GC.
     cache_space.current = cache_space.work_begin;
     print_dram_space_usage();
     print_cache_space_useage();
@@ -605,6 +589,8 @@ void garbage_collection(Context *ctx)
     rememberset_clear();
     // printf("remembered set cleared\n");
     #endif
+
+    in_minor_gc = 0;
     
     pass_the_remember_set_count++;
     // printf("minor GC finished\n");
@@ -624,7 +610,7 @@ void scavenge(){
         uintptr_t payload_ptr = hdr_ptr + sizeof(object_header);
         // printf("Scavenging object of size %d bytes at dram address %p, type 0x%02x\n", obj_hdr->size, (void*)payload_ptr, obj_hdr->type);
         //scan the object fields
-        process_node<CacheCheney_Tracer>(obj_hdr->type, payload_ptr);
+        process_node<GiYIsolatedTracer>(obj_hdr->type, payload_ptr);
     }
 }
 
@@ -634,7 +620,7 @@ void scan_init_area() {
         object_header *obj_hdr = (object_header *) current;
         uintptr_t payload_ptr = current + sizeof(object_header);
         
-        process_node<CacheCheney_Tracer>(obj_hdr->type, payload_ptr);
+        process_node<GiYIsolatedTracer>(obj_hdr->type, payload_ptr);
         
         current += ALIGN(obj_hdr->size + sizeof(object_header));
         scan_init_objects_count++;
@@ -657,11 +643,11 @@ void scan_remembered_set() {
         if (is_ptr_slot) {
             void **slot = (void **) slot_addr;
             void *value = *slot;
-            CacheCheney_Tracer::process_edge(value);
+            GiYIsolatedTracer::process_edge(value);
             *slot = value;
         } else {
             JSValue *slot = (JSValue *) slot_addr;
-            CacheCheney_Tracer::process_edge(*slot);
+            GiYIsolatedTracer::process_edge(*slot);
         }
     }
 }
@@ -756,6 +742,10 @@ extern "C" void space_free_dram_manager_init(){
     printf("init_info: init object alloc over, now used bytes in cache space: %f KB\n",
            (float)(cache_space.current - cache_space.begin)/1024.0);
     cache_space.work_begin = cache_space.current;
+#ifdef USE_GIY_MINOR
+    // Bind GiY traversal stack inside cache space after work_begin is fixed.
+    giy_bind_stack_to_cache();
+#endif
     init_finish = 1;
     printf("init_info: after init object alloc, cache_space.work_begin moved to %p\n",
            (void*)cache_space.work_begin);    

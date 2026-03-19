@@ -67,7 +67,8 @@ LIBS =
 OPT_REGEXP    = none
 # OPT_REGEXP    = oniguruma
 # OPT_GC        = native
-OPT_GC        = cache_cheney
+# OPT_GC        = cache_cheney
+OPT_GC        = giy
 # OPT_GC        = bibop
 # OPT_GC        = copy
 #OPT_GC        = none
@@ -151,10 +152,6 @@ CPPFLAGS       += -DBIBOP_FREELIST
 #CPPFLAGS       += -DFLONUM_SPACE
 ## debug
 CPPFLAGS       += -DVERIFY_BIBOP
-
-ifeq ($(OPT_GC),cache_cheney)
-	CPPFLAGS += -DUSE_REMEMBERED_SET
-endif
 
 ##
 ## Threaded compactor options
