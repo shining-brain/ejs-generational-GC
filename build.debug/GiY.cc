@@ -1,6 +1,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if defined(__x86_64__) || defined(__i386__)
+#include <emmintrin.h>
+#endif
 
 #include "prefix.h"
 #define EXTERN extern
@@ -43,6 +46,7 @@ struct EdgePatchLog {
 };
 
 EdgePatchLog g_edge_log = {NULL, 0, 0, false};
+bool g_used_nt_old_store = false;
 
 static inline bool in_dram_space(uintptr_t ptr) {
 	return (ptr - dram_space.begin) < dram_space.total_size;
@@ -54,6 +58,31 @@ static inline bool in_young_space(uintptr_t ptr) {
 
 static inline bool in_init_space(uintptr_t ptr) {
 	return ptr >= cache_space.begin && ptr < cache_space.work_begin;
+}
+
+static inline void giy_store_u64_old(uint64_t *slot, uint64_t bits) {
+#if defined(__x86_64__)
+  _mm_stream_si64((long long *) slot, (long long) bits);
+  g_used_nt_old_store = true;
+#else
+  *slot = bits;
+#endif
+}
+
+static inline void giy_store_ptr_slot(void **slot, void *value, bool slot_in_dram) {
+  if (slot_in_dram) {
+    giy_store_u64_old((uint64_t *) slot, (uint64_t) (uintptr_t) value);
+    return;
+  }
+  *slot = value;
+}
+
+static inline void giy_store_jsvalue_slot(JSValue *slot, JSValue value, bool slot_in_dram) {
+  if (slot_in_dram) {
+    giy_store_u64_old((uint64_t *) slot, (uint64_t) (uintjsv_t) value);
+    return;
+  }
+  *slot = value;
 }
 
 static void giy_bind_stack_to_cache_impl() {
@@ -313,23 +342,31 @@ public:
       return;
     uintptr_t ptr = (uintptr_t) clear_ptag(v);
     uintptr_t to = patch_ptr(ptr);
-    if (to != ptr)
-      v = put_ptag(to, get_ptag(v));
+    if (to != ptr) {
+      JSValue nv = put_ptag(to, get_ptag(v));
+      bool slot_in_dram = in_dram_space((uintptr_t) &v);
+      giy_store_jsvalue_slot(&v, nv, slot_in_dram);
+    }
   }
 
   static void process_edge(void *&p) {
     uintptr_t ptr = (uintptr_t) p;
     uintptr_t to = patch_ptr(ptr);
-    if (to != ptr)
-      p = (void *) to;
+    if (to != ptr) {
+      bool slot_in_dram = in_dram_space((uintptr_t) &p);
+      giy_store_ptr_slot(&p, (void *) to, slot_in_dram);
+    }
   }
 
   static void process_edge_function_frame(JSValue &v) {
     void *p = jsv_to_function_frame(v);
     uintptr_t ptr = (uintptr_t) p;
     uintptr_t to = patch_ptr(ptr);
-    if (to != ptr)
-      v = (JSValue) (uintjsv_t) to;
+    if (to != ptr) {
+      JSValue nv = (JSValue) (uintjsv_t) to;
+      bool slot_in_dram = in_dram_space((uintptr_t) &v);
+      giy_store_jsvalue_slot(&v, nv, slot_in_dram);
+    }
   }
 
   static void process_edge_ex_JSValue_array(JSValue *&array, size_t size) {
@@ -338,8 +375,10 @@ public:
       return;
     uintptr_t ptr = (uintptr_t) array;
     uintptr_t to = patch_ptr(ptr);
-    if (to != ptr)
-      array = (JSValue *) to;
+    if (to != ptr) {
+      bool slot_in_dram = in_dram_space((uintptr_t) &array);
+      giy_store_ptr_slot((void **) &array, (void *) to, slot_in_dram);
+    }
   }
 
   static void process_edge_ex_JSValue_array(JSValue &array_ref, size_t size) {
@@ -349,8 +388,11 @@ public:
       return;
     uintptr_t ptr = (uintptr_t) array;
     uintptr_t to = patch_ptr(ptr);
-    if (to != ptr)
-      array_ref = put_ptag(to, get_ptag(array_ref));
+    if (to != ptr) {
+      JSValue nv = put_ptag(to, get_ptag(array_ref));
+      bool slot_in_dram = in_dram_space((uintptr_t) &array_ref);
+      giy_store_jsvalue_slot(&array_ref, nv, slot_in_dram);
+    }
   }
 
   static void process_node_JSValue_array(JSValue *p) {
@@ -368,8 +410,10 @@ public:
       return;
     uintptr_t ptr = (uintptr_t) array;
     uintptr_t to = patch_ptr(ptr);
-    if (to != ptr)
-      array = (void **) to;
+    if (to != ptr) {
+      bool slot_in_dram = in_dram_space((uintptr_t) &array);
+      giy_store_ptr_slot((void **) &array, (void *) to, slot_in_dram);
+    }
   }
 
   static void process_weak_edge(JSValue &v) { process_edge(v); }
@@ -404,10 +448,12 @@ static void giy_scan_remembered_set_slots() {
       void **slot = (void **) slot_addr;
       void *value = *slot;
       GiYReserveTracer::process_edge(value);
-      *slot = value;
+      giy_store_ptr_slot(slot, value, slot_in_dram);
     } else {
       JSValue *slot = (JSValue *) slot_addr;
-      GiYReserveTracer::process_edge(*slot);
+      JSValue value = *slot;
+      GiYReserveTracer::process_edge(value);
+      giy_store_jsvalue_slot(slot, value, slot_in_dram);
     }
 	}
 }
@@ -427,10 +473,12 @@ static void giy_patch_remembered_set_slots() {
       void **slot = (void **) slot_addr;
       void *value = *slot;
       GiYPatchTracer::process_edge(value);
-      *slot = value;
+      giy_store_ptr_slot(slot, value, slot_in_dram);
     } else {
       JSValue *slot = (JSValue *) slot_addr;
-      GiYPatchTracer::process_edge(*slot);
+      JSValue value = *slot;
+      GiYPatchTracer::process_edge(value);
+      giy_store_jsvalue_slot(slot, value, slot_in_dram);
     }
   }
 }
@@ -489,7 +537,57 @@ static void giy_apply_edge_log() {
   }
 }
 
+static inline void giy_copy_live_object(void *dst,
+                                        const void *src,
+                                        size_t nbytes,
+                                        bool *used_nt_store) {
+#if defined(__x86_64__) || defined(__i386__)
+  unsigned char *d = (unsigned char *) dst;
+  const unsigned char *s = (const unsigned char *) src;
+  size_t n = nbytes;
+
+  if ((((uintptr_t) d) & 15) != 0) {
+    if ((((uintptr_t) d) & 15) != 8 || n < 8) {
+      printf("GiY NT copy alignment invariant failed (dst=%p, n=%zu)\n", (void *) d, n);
+      exit(1);
+    }
+    uint64_t v;
+    memcpy(&v, s, sizeof(v));
+    _mm_stream_si64((long long *) d, (long long) v);
+    s += 8;
+    d += 8;
+    n -= 8;
+  }
+
+  while (n >= 16) {
+    __m128i v = _mm_loadu_si128((const __m128i *) s);
+    _mm_stream_si128((__m128i *) d, v);
+    s += 16;
+    d += 16;
+    n -= 16;
+  }
+
+  if (n != 0) {
+    if (n != 8) {
+      printf("GiY NT copy tail invariant failed (n=%zu)\n", n);
+      exit(1);
+    }
+    uint64_t v;
+    memcpy(&v, s, sizeof(v));
+    _mm_stream_si64((long long *) d, (long long) v);
+  }
+
+  *used_nt_store = true;
+  return;
+#else
+  (void) used_nt_store;
+#endif
+
+  memcpy(dst, src, nbytes);
+}
+
 static void giy_traverse_stack_and_copy() {
+	bool used_nt_store = false;
 	while (!gc_stack_empty()) {
 		uintptr_t src_payload = gc_stack_pop();
 		object_header *src_hdr = (object_header *) src_payload - 1;
@@ -509,10 +607,15 @@ static void giy_traverse_stack_and_copy() {
 		object_header *dst_hdr = ((object_header *) dst_payload) - 1;
 		int align_bytes = ALIGN(src_hdr->size + sizeof(object_header));
 
-		// The only DRAM operation for live payload materialization: one memcpy.
-		memcpy((void *) dst_hdr, (void *) src_hdr, align_bytes);
-		dst_hdr->forwarding_pointer = 0;
+    // Materialize in old generation with non-temporal stores when beneficial.
+    giy_copy_live_object((void *) dst_hdr,
+                         (const void *) src_hdr,
+                         (size_t) align_bytes,
+                         &used_nt_store);
 	}
+
+  if (used_nt_store)
+    g_used_nt_old_store = true;
 }
 
 }  // namespace
@@ -528,6 +631,7 @@ void giy_minor_collect(Context *ctx,
 	ensure_gc_stack_capacity();
   ensure_edge_log_capacity();
 	gc_stack_reset();
+  g_used_nt_old_store = false;
 
 	struct timespec t1, t2, t3, t4;
 	clock_gettime(CLOCK_MONOTONIC, &t1);
@@ -543,6 +647,10 @@ void giy_minor_collect(Context *ctx,
   scan_roots<GiYPatchTracer>(ctx);
 #ifdef USE_REMEMBERED_SET
   giy_patch_remembered_set_slots();
+#endif
+#if defined(__x86_64__) || defined(__i386__)
+  if (g_used_nt_old_store)
+    _mm_sfence();
 #endif
 	clock_gettime(CLOCK_MONOTONIC, &t4);
 
