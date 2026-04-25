@@ -537,6 +537,7 @@ static void giy_apply_edge_log() {
   }
 }
 
+// Copy a live object from young to old generation, using non-temporal stores when beneficial.
 static inline void giy_copy_live_object(void *dst,
                                         const void *src,
                                         size_t nbytes,
@@ -580,7 +581,7 @@ static inline void giy_copy_live_object(void *dst,
   *used_nt_store = true;
   return;
 #else
-  (void) used_nt_store;
+  // (void) used_nt_store;
 #endif
 
   memcpy(dst, src, nbytes);
@@ -635,19 +636,29 @@ void giy_minor_collect(Context *ctx,
 
 	struct timespec t1, t2, t3, t4;
 	clock_gettime(CLOCK_MONOTONIC, &t1);
+
+  //phase 1: discover live objects from roots
   scan_roots<GiYReserveTracer>(ctx);
 	clock_gettime(CLOCK_MONOTONIC, &t2);
 
 #ifdef USE_REMEMBERED_SET
+  //phase 2: discover live objects from remembered set slots
 	giy_scan_remembered_set_slots();
 #endif
 	clock_gettime(CLOCK_MONOTONIC, &t3);
 
+  //phase 3: traverse the live young objects and copy them to old generation
 	giy_traverse_stack_and_copy();
+
+  //phase 4: patch the roots
   scan_roots<GiYPatchTracer>(ctx);
 #ifdef USE_REMEMBERED_SET
+  //phase 5: patch the remembered set slots
   giy_patch_remembered_set_slots();
 #endif
+
+
+
 #if defined(__x86_64__) || defined(__i386__)
   if (g_used_nt_old_store)
     _mm_sfence();

@@ -2,6 +2,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#ifdef __linux__
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <linux/perf_event.h>
+#endif
 #include "prefix.h"
 #define EXTERN extern
 #include "header.h"
@@ -33,8 +41,187 @@ long long generational_alloc_bytes = 0;
 long long generational_forward_count = 0;
 
 // Performance profiling: overall timing
-struct timespec program_start_time;
-struct timespec program_end_time;
+long long total_gc_full_wall_time = 0;
+long long total_gc_full_cpu_time = 0;
+struct timespec program_start_wall_time;
+struct timespec program_end_wall_time;
+struct timespec program_start_cpu_time;
+struct timespec program_end_cpu_time;
+
+// PMU counters for cache-miss observation only during GC windows.
+int gc_pmu_initialized = 0;
+int gc_pmu_supported = 0;
+int gc_pmu_fd_cache_misses = -1;
+int gc_pmu_fd_cache_references = -1;
+int gc_pmu_fd_instructions = -1;
+long long total_gc_cache_misses = 0;
+long long total_gc_cache_references = 0;
+long long total_gc_instructions = 0;
+int gc_pmu_sampled_gc_count = 0;
+int gc_pmu_init_errno = 0;
+int gc_pmu_perf_event_paranoid = -999;
+
+static inline int gc_perf_event_open(struct perf_event_attr *attr, pid_t pid,
+                                     int cpu, int group_fd, unsigned long flags)
+{
+#ifdef __linux__
+    return (int) syscall(__NR_perf_event_open, attr, pid, cpu, group_fd, flags);
+#else
+    (void) attr; (void) pid; (void) cpu; (void) group_fd; (void) flags;
+    return -1;
+#endif
+}
+
+static int gc_open_hw_counter(unsigned long long config)
+{
+#ifdef __linux__
+    struct perf_event_attr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.type = PERF_TYPE_HARDWARE;
+    attr.size = sizeof(attr);
+    attr.config = config;
+    attr.disabled = 1;
+    attr.exclude_kernel = 1;
+    attr.exclude_hv = 1;
+    return gc_perf_event_open(&attr, 0, -1, -1, 0);
+#else
+    (void) config;
+    return -1;
+#endif
+}
+
+static int gc_open_hw_cache_counter(int cache_id, int op_id, int result_id)
+{
+#ifdef __linux__
+    struct perf_event_attr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.type = PERF_TYPE_HW_CACHE;
+    attr.size = sizeof(attr);
+    attr.config = (unsigned long long) cache_id |
+                  ((unsigned long long) op_id << 8) |
+                  ((unsigned long long) result_id << 16);
+    attr.disabled = 1;
+    attr.exclude_kernel = 1;
+    attr.exclude_hv = 1;
+    return gc_perf_event_open(&attr, 0, -1, -1, 0);
+#else
+    (void) cache_id; (void) op_id; (void) result_id;
+    return -1;
+#endif
+}
+
+static int gc_read_perf_event_paranoid(void)
+{
+#ifdef __linux__
+    FILE *fp = fopen("/proc/sys/kernel/perf_event_paranoid", "r");
+    int value = -999;
+    if (!fp)
+        return value;
+    if (fscanf(fp, "%d", &value) != 1)
+        value = -999;
+    fclose(fp);
+    return value;
+#else
+    return -999;
+#endif
+}
+
+static void gc_pmu_init_once(void)
+{
+    if (gc_pmu_initialized)
+        return;
+    gc_pmu_initialized = 1;
+
+#ifdef __linux__
+    int saved_errno = 0;
+    gc_pmu_perf_event_paranoid = gc_read_perf_event_paranoid();
+
+    gc_pmu_fd_cache_misses = gc_open_hw_counter(PERF_COUNT_HW_CACHE_MISSES);
+    if (gc_pmu_fd_cache_misses < 0) {
+        if (errno != 0)
+            saved_errno = errno;
+        gc_pmu_fd_cache_misses = gc_open_hw_cache_counter(
+            PERF_COUNT_HW_CACHE_LL,
+            PERF_COUNT_HW_CACHE_OP_READ,
+            PERF_COUNT_HW_CACHE_RESULT_MISS);
+    }
+
+    gc_pmu_fd_cache_references = gc_open_hw_counter(PERF_COUNT_HW_CACHE_REFERENCES);
+    if (gc_pmu_fd_cache_references < 0) {
+        if (errno != 0)
+            saved_errno = errno;
+        gc_pmu_fd_cache_references = gc_open_hw_cache_counter(
+            PERF_COUNT_HW_CACHE_LL,
+            PERF_COUNT_HW_CACHE_OP_READ,
+            PERF_COUNT_HW_CACHE_RESULT_ACCESS);
+    }
+
+    gc_pmu_fd_instructions = gc_open_hw_counter(PERF_COUNT_HW_INSTRUCTIONS);
+    if (gc_pmu_fd_instructions < 0 && errno != 0)
+        saved_errno = errno;
+
+    gc_pmu_supported = (gc_pmu_fd_cache_misses >= 0 ||
+                        gc_pmu_fd_cache_references >= 0 ||
+                        gc_pmu_fd_instructions >= 0);
+    if (!gc_pmu_supported)
+        gc_pmu_init_errno = saved_errno;
+#else
+    gc_pmu_supported = 0;
+#endif
+}
+
+static inline void gc_pmu_counter_start(int fd)
+{
+#ifdef __linux__
+    if (fd < 0)
+        return;
+    ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+    ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+#else
+    (void) fd;
+#endif
+}
+
+static inline long long gc_pmu_counter_stop_and_read(int fd)
+{
+#ifdef __linux__
+    long long value = 0;
+    if (fd < 0)
+        return 0;
+    ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
+    if (read(fd, &value, sizeof(value)) != (ssize_t) sizeof(value))
+        return 0;
+    return value;
+#else
+    (void) fd;
+    return 0;
+#endif
+}
+
+static void gc_pmu_start_window(void)
+{
+    if (!gc_pmu_supported)
+        return;
+    gc_pmu_counter_start(gc_pmu_fd_cache_misses);
+    gc_pmu_counter_start(gc_pmu_fd_cache_references);
+    gc_pmu_counter_start(gc_pmu_fd_instructions);
+}
+
+static void gc_pmu_stop_window(void)
+{
+    if (!gc_pmu_supported)
+        return;
+    total_gc_cache_misses += gc_pmu_counter_stop_and_read(gc_pmu_fd_cache_misses);
+    total_gc_cache_references += gc_pmu_counter_stop_and_read(gc_pmu_fd_cache_references);
+    total_gc_instructions += gc_pmu_counter_stop_and_read(gc_pmu_fd_instructions);
+    gc_pmu_sampled_gc_count++;
+}
+
+static inline long long timespec_diff_ns(const struct timespec &start, const struct timespec &end)
+{
+    return (end.tv_sec - start.tv_sec) * 1000000000LL +
+           (end.tv_nsec - start.tv_nsec);
+}
 
 void scavenge();
 void scan_init_area();
@@ -527,6 +714,12 @@ void garbage_collection(Context *ctx)
         exit(1);
     }
 
+    struct timespec gc_wall_start, gc_wall_end;
+    struct timespec gc_cpu_start, gc_cpu_end;
+    clock_gettime(CLOCK_MONOTONIC, &gc_wall_start);
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &gc_cpu_start);
+    gc_pmu_start_window();
+
     print_cache_space_useage();
     // printf("=================minor GC triggered==================\n");
     minor_gc_count++;
@@ -593,6 +786,14 @@ void garbage_collection(Context *ctx)
     in_minor_gc = 0;
     
     pass_the_remember_set_count++;
+
+    gc_pmu_stop_window();
+
+    clock_gettime(CLOCK_MONOTONIC, &gc_wall_end);
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &gc_cpu_end);
+    total_gc_full_wall_time += timespec_diff_ns(gc_wall_start, gc_wall_end);
+    total_gc_full_cpu_time += timespec_diff_ns(gc_cpu_start, gc_cpu_end);
+
     // printf("minor GC finished\n");
     // printf("Total passed the remembered set count: %ld\n", pass_the_remember_set_count);
     return;
@@ -654,35 +855,54 @@ void scan_remembered_set() {
 
 static void print_gc_status(){
     // Capture end time for overall profiling
-    clock_gettime(CLOCK_MONOTONIC, &program_end_time);
+    clock_gettime(CLOCK_MONOTONIC, &program_end_wall_time);
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &program_end_cpu_time);
     
     printf("\n");
     printf("========================================\n");
     printf("===   Performance Analysis Report    ===\n");
     printf("========================================\n\n");
     
-    // Calculate total elapsed time
-    double total_elapsed = (program_end_time.tv_sec - program_start_time.tv_sec) +
-                          (program_end_time.tv_nsec - program_start_time.tv_nsec) / 1e9;
+    // Calculate total elapsed wall/cpu time
+    double total_elapsed_wall = timespec_diff_ns(program_start_wall_time, program_end_wall_time) / 1e9;
+    double total_elapsed_cpu = timespec_diff_ns(program_start_cpu_time, program_end_cpu_time) / 1e9;
+
+    // Core breakdown time (roots/RS/traverse) and full-enclosed GC time
+    long long total_gc_core_ns = total_scan_roots_time + total_scan_rs_time + total_scavenge_time;
+    double total_gc_core_time = total_gc_core_ns / 1e9;
+    double total_gc_full_wall = total_gc_full_wall_time / 1e9;
+    double total_gc_full_cpu = total_gc_full_cpu_time / 1e9;
+
+    double business_wall = total_elapsed_wall - total_gc_full_wall;
+    double business_cpu = total_elapsed_cpu - total_gc_full_cpu;
+    if (business_wall < 0.0)
+        business_wall = 0.0;
+    if (business_cpu < 0.0)
+        business_cpu = 0.0;
     
-    // Calculate GC time breakdown
-    double total_gc_time = (total_scan_roots_time + total_scan_rs_time + total_scavenge_time) / 1e9;
-    double business_logic_time = total_elapsed - total_gc_time;
-    
-    printf("=== Overall Runtime ===\n");
-    printf("Total execution:     %.3f sec (100.0%%)\n", total_elapsed);
-    printf("  Business logic:    %.3f sec (%.1f%%)\n", 
-           business_logic_time, 
-           100.0 * business_logic_time / total_elapsed);
-    printf("  GC overhead:       %.3f sec (%.1f%%)\n", 
-           total_gc_time, 
-           100.0 * total_gc_time / total_elapsed);
+    printf("=== Overall Runtime (Wall Clock) ===\n");
+    printf("Total execution:     %.3f sec (100.0%%)\n", total_elapsed_wall);
+    printf("  Business logic:    %.3f sec (%.1f%%)\n",
+           business_wall,
+           total_elapsed_wall > 0.0 ? (100.0 * business_wall / total_elapsed_wall) : 0.0);
+    printf("  GC overhead(full): %.3f sec (%.1f%%)\n",
+           total_gc_full_wall,
+           total_elapsed_wall > 0.0 ? (100.0 * total_gc_full_wall / total_elapsed_wall) : 0.0);
+
+    printf("\n=== Overall Runtime (CPU Time) ===\n");
+    printf("Total CPU time:      %.3f sec (100.0%%)\n", total_elapsed_cpu);
+    printf("  Business CPU:      %.3f sec (%.1f%%)\n",
+           business_cpu,
+           total_elapsed_cpu > 0.0 ? (100.0 * business_cpu / total_elapsed_cpu) : 0.0);
+    printf("  GC CPU(full):      %.3f sec (%.1f%%)\n",
+           total_gc_full_cpu,
+           total_elapsed_cpu > 0.0 ? (100.0 * total_gc_full_cpu / total_elapsed_cpu) : 0.0);
     
     printf("\n=== GC Statistics ===\n");
     printf("Minor GC count:      %d\n", minor_gc_count);
     if (minor_gc_count > 0) {
-        printf("Avg GC pause:        %.3f ms\n", 1000.0 * total_gc_time / minor_gc_count);
-        printf("GC frequency:        %.1f GC/sec\n", minor_gc_count / total_elapsed);
+        printf("Avg GC pause(full):  %.3f ms\n", 1000.0 * total_gc_full_wall / minor_gc_count);
+        printf("GC frequency:        %.1f GC/sec\n", total_elapsed_wall > 0.0 ? (minor_gc_count / total_elapsed_wall) : 0.0);
     }
     printf("Init area objects:   %ld (avg %.1f per GC)\n", 
            scan_init_objects_count,
@@ -721,17 +941,45 @@ static void print_gc_status(){
         printf("  Forward per GC:    N/A (no GC yet)\n");
     }
     
-    if (minor_gc_count > 0 && total_gc_time > 0) {
-        printf("\n=== GC Time Breakdown ===\n");
-        printf("scan_roots:          %.3f sec (%.1f%% of GC)\n", 
-               total_scan_roots_time / 1e9, 
-               100.0 * total_scan_roots_time / (total_scan_roots_time + total_scan_rs_time + total_scavenge_time));
-        printf("scan_RS:             %.3f sec (%.1f%% of GC)\n", 
+    if (minor_gc_count > 0 && total_gc_core_ns > 0) {
+        printf("\n=== GC Core Breakdown (Roots/RS/Traverse) ===\n");
+        printf("GC core total:       %.3f sec\n", total_gc_core_time);
+        printf("scan_roots:          %.3f sec (%.1f%% of core)\n",
+               total_scan_roots_time / 1e9,
+               100.0 * total_scan_roots_time / total_gc_core_ns);
+        printf("scan_RS:             %.3f sec (%.1f%% of core)\n",
                total_scan_rs_time / 1e9,
-               100.0 * total_scan_rs_time / (total_scan_roots_time + total_scan_rs_time + total_scavenge_time));
-        printf("scavenge:            %.3f sec (%.1f%% of GC)\n", 
+               100.0 * total_scan_rs_time / total_gc_core_ns);
+        printf("scavenge:            %.3f sec (%.1f%% of core)\n",
                total_scavenge_time / 1e9,
-               100.0 * total_scavenge_time / (total_scan_roots_time + total_scan_rs_time + total_scavenge_time));
+               100.0 * total_scavenge_time / total_gc_core_ns);
+    }
+
+    printf("\n=== GC Cache Miss Counters (PMU) ===\n");
+    if (!gc_pmu_supported) {
+        printf("PMU counters:        unavailable on this machine/config\n");
+#ifdef __linux__
+        if (gc_pmu_perf_event_paranoid != -999)
+            printf("perf_event_paranoid:%d\n", gc_pmu_perf_event_paranoid);
+        if (gc_pmu_init_errno != 0)
+            printf("PMU init errno:      %d (%s)\n", gc_pmu_init_errno, strerror(gc_pmu_init_errno));
+        printf("hint:                run as root or set kernel.perf_event_paranoid<=1\n");
+#endif
+    } else {
+        printf("PMU-sampled GC:      %d / %d\n", gc_pmu_sampled_gc_count, minor_gc_count);
+        if (gc_pmu_fd_cache_misses >= 0) {
+            printf("cache-misses:        %lld\n", total_gc_cache_misses);
+            if (minor_gc_count > 0)
+                printf("  Avg per GC:        %.1f\n", (double) total_gc_cache_misses / minor_gc_count);
+        }
+        if (gc_pmu_fd_cache_references >= 0)
+            printf("cache-references:    %lld\n", total_gc_cache_references);
+        if (gc_pmu_fd_cache_misses >= 0 && gc_pmu_fd_cache_references >= 0 && total_gc_cache_references > 0)
+            printf("cache-miss rate:     %.2f%%\n", 100.0 * total_gc_cache_misses / total_gc_cache_references);
+        if (gc_pmu_fd_instructions >= 0)
+            printf("instructions:        %lld\n", total_gc_instructions);
+        if (gc_pmu_fd_cache_misses >= 0 && gc_pmu_fd_instructions >= 0 && total_gc_instructions > 0)
+            printf("cache MPKI:          %.3f\n", 1000.0 * total_gc_cache_misses / total_gc_instructions);
     }
     
     printf("\n========================================\n");
@@ -749,8 +997,11 @@ extern "C" void space_free_dram_manager_init(){
     init_finish = 1;
     printf("init_info: after init object alloc, cache_space.work_begin moved to %p\n",
            (void*)cache_space.work_begin);    
+    gc_pmu_init_once();
     // Start profiling timer after initialization
-    clock_gettime(CLOCK_MONOTONIC, &program_start_time);}
+    clock_gettime(CLOCK_MONOTONIC, &program_start_wall_time);
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &program_start_cpu_time);
+}
 
 extern "C" void space_print_memory_status() {
     printf("========== Memory Status ==========\n");
