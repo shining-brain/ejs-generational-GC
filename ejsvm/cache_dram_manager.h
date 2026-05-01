@@ -28,6 +28,7 @@ typedef struct
 typedef struct RememberedSet
 {
     uintptr_t *buffer;  // Array of pointers to remembered objects
+    uintptr_t *values;  // GiY records latest values to avoid reading old slots
     int count;       // Number of remembered objects
     int capacity;    // Capacity of the buffer
     int size_of_hash_table;
@@ -80,6 +81,10 @@ extern void rememberset_add(uintptr_t obj_ptr);
 extern void rememberset_clear();
 extern void write_barrier(JSValue *ptr, JSValue value);
 extern void write_barrier_ptr(void** ptr, void* value);
+#ifdef CACHE_CHENEY
+extern void giy_record_ft_jsvalue_slot(JSValue *ptr, JSValue value);
+extern void giy_record_ft_ptr_slot(void **ptr, void *value);
+#endif
 extern int in_minor_gc;
 
 
@@ -94,6 +99,7 @@ void giy_minor_collect(Context *ctx,
                        long long *young_trace_ns);
 void giy_weak_clear(Context *ctx);
 void giy_bind_stack_to_cache();
+void giy_print_profile();
 #endif
 
 

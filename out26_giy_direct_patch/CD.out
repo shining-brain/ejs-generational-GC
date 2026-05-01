@@ -1,0 +1,1529 @@
+=== CD ===
+object_header size: 16 bytes
+init_info: remembered set initialized with capacity 8192 , new cache_space.end at 0x73d33b903010
+init info: cache_space.begin=0x73d33b8b3010, cache_space.end=0x73d33b903010, total_size=320KB, threshold_size=0MB
+Now we are using GiY GC. Cache DRAM Manager initialized: Cache size 320 Kbytes, DRAM size 67108864 Kbytes
+DRAM address info: begin=0x73c33b8b2010, end=0x73d33b8b2010, total_size=67108864KB
+init_info: init object alloc over, now used bytes in cache space: 19.757812 KB
+init_info: after init object alloc, cache_space.work_begin moved to 0x73d33b8b7f18
+Starting CD benchmark ...
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2860000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2851000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2927000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2844000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2769000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2770000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2771000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2770000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2769000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2770000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2774000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2879000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2907000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2856000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2857000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2855000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2854000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2857000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2857000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2857000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2856000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2857000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2857000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2932000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2924000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2858000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2855000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2858000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2861000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2855000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2856000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2856000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2862000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2959000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2880000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2863000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2865000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2864000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2862000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2860000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2860000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2859000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2859000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2857000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2922000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2922000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2858000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2870000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2870000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2867000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2869000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2869000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2869000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2876000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2948000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2879000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2862000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2868000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2853000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2853000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2852000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2851000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2852000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2855000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2851000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2917000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2892000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2861000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2864000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2862000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2864000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2869000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2863000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2863000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2887000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2939000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2782000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2760000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2762000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2760000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2760000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2761000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2763000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2760000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2762000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2763000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2864000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2914000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2852000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2859000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2854000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2855000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2856000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2857000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2857000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2895000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2903000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2761000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2761000us
+
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+Cache space full, need to trigger GC!!!
+CD: iterations=1 runtime: 2760000us
+
+CD: iterations=100 average: 2850070us total: 285007000us
+
+
+
+
+Total Runtime: 285007000us
+
+
+========================================
+===   Performance Analysis Report    ===
+========================================
+
+=== Overall Runtime (Wall Clock) ===
+Total execution:     285.011 sec (100.0%)
+  Business logic:    248.479 sec (87.2%)
+  GC overhead(full): 36.532 sec (12.8%)
+
+=== Overall Runtime (CPU Time) ===
+Total CPU time:      284.962 sec (100.0%)
+  Business CPU:      248.464 sec (87.2%)
+  GC CPU(full):      36.497 sec (12.8%)
+
+=== GC Statistics ===
+Minor GC count:      284514
+Avg GC pause(full):  0.128 ms
+GC frequency:        998.3 GC/sec
+Init area objects:   0 (avg 0.0 per GC)
+
+=== Remembered Set ===
+Write barrier calls: 9573828
+  Duplicates:        2999924 (31.3%)
+  Avg per GC:        33.6
+
+=== Allocation Statistics ===
+Total allocations:   2314174986
+Total alloc bytes:   28661.26 MB
+Avg alloc size:      13.0 bytes
+Allocs per GC:       8133.8
+Forward operations:  163101991
+  Forward per GC:    573.3
+
+=== GC Core Breakdown (Roots/RS/Traverse) ===
+GC core total:       31.509 sec
+scan_roots:          0.116 sec (0.4% of core)
+scan_RS:             0.054 sec (0.2% of core)
+scavenge:            31.339 sec (99.5% of core)
+
+=== GiY Detailed Profile ===
+Minor collections:   284514
+Young before aux:    300.24 KB
+Young after aux:     230.72 KB
+Aux total:           69.52 KB (stack 37.52 KB, edge 0.00 KB, ft 32.00 KB)
+Stack pushes:        138229552
+Max stack depth:     319
+Young edge visits:   158896209
+  Per object:        1.150
+  Per minor GC:      558.483
+  Patched:           158896209
+  No-op old/init:    0
+  Immediate:         0
+  Unforwarded young: 0
+  Max per object:    250
+  Max per GC:        250
+  Kind JSVALUE_TAGGED  158894997
+  Kind VOID_PTR        1212
+  Kind FUNC_FRAME      0
+  Kind JSVALUE_PTR     0
+Materialized objs:   138229552
+Materialized bytes:  9057.99 MB
+  Avg object bytes:  68.7
+  <=64 bytes:        127743264
+  <=128 bytes:       20077
+  <=256 bytes:       6
+  >256 bytes:        10466205
+  Max bytes per GC:  124.12 KB
+NT copy objects:     138229552
+NT copy bytes:       9057.99 MB
+Old slot stores:     5832723
+Function table slots recorded: 570
+Function table max live set:   553
+Function table slots scanned:  570
+Function table slots patched:  570
+Remembered set slots scanned:  6573900
+Remembered set slots patched:  5832481
+Materialized by cell type:
+  type 04 STRING             objs=161 bytes=0.01 MB edge_entries=0
+  type 05 FLONUM             objs=7862169 bytes=179.95 MB edge_entries=0
+  type 06 SIMPLE_OBJECT      objs=54855061 bytes=1674.04 MB edge_entries=54691782
+  type 07 ARRAY              objs=10464910 bytes=558.89 MB edge_entries=10461734
+  type 08 FUNCTION           objs=64919 bytes=2.97 MB edge_entries=104953
+  type 17 PROP               objs=54475701 bytes=2327.94 MB edge_entries=82098695
+  type 18 ARRAY_DATA         objs=10466201 bytes=4311.58 MB edge_entries=11466116
+  type 20 FUNCTION_FRAME     objs=40003 bytes=2.59 MB edge_entries=72482
+  type 21 STR_CONS           objs=161 bytes=0.00 MB edge_entries=2
+  type 24 TRANSITIONS        objs=27 bytes=0.00 MB edge_entries=39
+  type 25 HASHTABLE          objs=60 bytes=0.01 MB edge_entries=181
+  type 28 PROPERTY_MAP       objs=60 bytes=0.01 MB edge_entries=153
+  type 29 SHAPE              objs=101 bytes=0.01 MB edge_entries=72
+  type 31 PROPERTY_MAP_LIST  objs=18 bytes=0.00 MB edge_entries=0
+
+=== GC Cache Miss Counters (PMU) ===
+PMU counters:        unavailable on this machine/config
+perf_event_paranoid:4
+PMU init errno:      1 (Operation not permitted)
+hint:                run as root or set kernel.perf_event_paranoid<=1
+
+========================================
+real 285.24
+user 283.14
+sys 2.04
+
+status=0

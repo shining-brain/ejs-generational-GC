@@ -900,6 +900,9 @@ static Shape *get_cached_shape(Context *ctx, AllocSite *as,
       /* 2. create object shape for this allocation site */
       as->shape = new_object_shape(ctx, DEBUG_NAME("(prealloc)"), as->pm,
                                    n_embedded, 0, as);
+#ifdef CACHE_CHENEY
+      giy_record_ft_ptr_slot((void **) &as->shape, (void *) as->shape);
+#endif
 #ifdef DUMP_HCG
       as->shape->is_cached = 1;
 #endif /* DUMP_HCG */
@@ -1070,6 +1073,10 @@ JSValue create_simple_object_with_prototype(Context *ctx, JSValue prototype)
       if (as != NULL && as->pm == NULL) {
         as->pm = pm;
         as->shape = os;
+#ifdef CACHE_CHENEY
+        giy_record_ft_ptr_slot((void **) &as->pm, (void *) as->pm);
+        giy_record_ft_ptr_slot((void **) &as->shape, (void *) as->shape);
+#endif
 #ifdef DUMP_HCG
         as->shape->is_cached = 1;
 #endif /* DUMP_HCG */
@@ -1111,6 +1118,10 @@ JSValue create_array_object(Context *ctx, char *name, size_t size)
     if (as->pm == NULL) {
       as->pm = pm;
       as->shape = os;
+#ifdef CACHE_CHENEY
+      giy_record_ft_ptr_slot((void **) &as->pm, (void *) as->pm);
+      giy_record_ft_ptr_slot((void **) &as->shape, (void *) as->shape);
+#endif
       as->polymorphic = 0;
     }
   }

@@ -1,0 +1,321 @@
+=== Storage ===
+object_header size: 16 bytes
+init_info: remembered set initialized with capacity 8192 , new cache_space.end at 0x7a9bb4276010
+init info: cache_space.begin=0x7a9bb4226010, cache_space.end=0x7a9bb4276010, total_size=320KB, threshold_size=0MB
+Now we are using GiY GC. Cache DRAM Manager initialized: Cache size 320 Kbytes, DRAM size 67108864 Kbytes
+DRAM address info: begin=0x7a8bb4225010, end=0x7a9bb4225010, total_size=67108864KB
+init_info: init object alloc over, now used bytes in cache space: 19.757812 KB
+init_info: after init object alloc, cache_space.work_begin moved to 0x7a9bb422af18
+Starting Storage benchmark ...
+
+Storage: iterations=1 runtime: 4038000us
+
+Storage: iterations=1 runtime: 4035000us
+
+Storage: iterations=1 runtime: 4031000us
+
+Storage: iterations=1 runtime: 4034000us
+
+Storage: iterations=1 runtime: 4102000us
+
+Storage: iterations=1 runtime: 4054000us
+
+Storage: iterations=1 runtime: 4055000us
+
+Storage: iterations=1 runtime: 4052000us
+
+Storage: iterations=1 runtime: 4052000us
+
+Storage: iterations=1 runtime: 4050000us
+
+Storage: iterations=1 runtime: 4051000us
+
+Storage: iterations=1 runtime: 4055000us
+
+Storage: iterations=1 runtime: 4019000us
+
+Storage: iterations=1 runtime: 3906000us
+
+Storage: iterations=1 runtime: 3905000us
+
+Storage: iterations=1 runtime: 3905000us
+
+Storage: iterations=1 runtime: 3975000us
+
+Storage: iterations=1 runtime: 3910000us
+
+Storage: iterations=1 runtime: 3906000us
+
+Storage: iterations=1 runtime: 3905000us
+
+Storage: iterations=1 runtime: 3919000us
+
+Storage: iterations=1 runtime: 3970000us
+
+Storage: iterations=1 runtime: 3908000us
+
+Storage: iterations=1 runtime: 3903000us
+
+Storage: iterations=1 runtime: 3903000us
+
+Storage: iterations=1 runtime: 3907000us
+
+Storage: iterations=1 runtime: 3906000us
+
+Storage: iterations=1 runtime: 3983000us
+
+Storage: iterations=1 runtime: 3984000us
+
+Storage: iterations=1 runtime: 3916000us
+
+Storage: iterations=1 runtime: 3915000us
+
+Storage: iterations=1 runtime: 3916000us
+
+Storage: iterations=1 runtime: 3915000us
+
+Storage: iterations=1 runtime: 3915000us
+
+Storage: iterations=1 runtime: 4035000us
+
+Storage: iterations=1 runtime: 4037000us
+
+Storage: iterations=1 runtime: 4021000us
+
+Storage: iterations=1 runtime: 4021000us
+
+Storage: iterations=1 runtime: 4022000us
+
+Storage: iterations=1 runtime: 4021000us
+
+Storage: iterations=1 runtime: 4022000us
+
+Storage: iterations=1 runtime: 4022000us
+
+Storage: iterations=1 runtime: 4098000us
+
+Storage: iterations=1 runtime: 4084000us
+
+Storage: iterations=1 runtime: 4073000us
+
+Storage: iterations=1 runtime: 4075000us
+
+Storage: iterations=1 runtime: 4069000us
+
+Storage: iterations=1 runtime: 4072000us
+
+Storage: iterations=1 runtime: 4074000us
+
+Storage: iterations=1 runtime: 4091000us
+
+Storage: iterations=1 runtime: 4023000us
+
+Storage: iterations=1 runtime: 4022000us
+
+Storage: iterations=1 runtime: 4022000us
+
+Storage: iterations=1 runtime: 4022000us
+
+Storage: iterations=1 runtime: 4022000us
+
+Storage: iterations=1 runtime: 4022000us
+
+Storage: iterations=1 runtime: 4024000us
+
+Storage: iterations=1 runtime: 4040000us
+
+Storage: iterations=1 runtime: 3987000us
+
+Storage: iterations=1 runtime: 3988000us
+
+Storage: iterations=1 runtime: 3990000us
+
+Storage: iterations=1 runtime: 3985000us
+
+Storage: iterations=1 runtime: 3986000us
+
+Storage: iterations=1 runtime: 4057000us
+
+Storage: iterations=1 runtime: 4077000us
+
+Storage: iterations=1 runtime: 4036000us
+
+Storage: iterations=1 runtime: 4037000us
+
+Storage: iterations=1 runtime: 4038000us
+
+Storage: iterations=1 runtime: 4038000us
+
+Storage: iterations=1 runtime: 4037000us
+
+Storage: iterations=1 runtime: 4038000us
+
+Storage: iterations=1 runtime: 4048000us
+
+Storage: iterations=1 runtime: 4068000us
+
+Storage: iterations=1 runtime: 4024000us
+
+Storage: iterations=1 runtime: 4070000us
+
+Storage: iterations=1 runtime: 4063000us
+
+Storage: iterations=1 runtime: 4070000us
+
+Storage: iterations=1 runtime: 4069000us
+
+Storage: iterations=1 runtime: 4090000us
+
+Storage: iterations=1 runtime: 4077000us
+
+Storage: iterations=1 runtime: 4022000us
+
+Storage: iterations=1 runtime: 4023000us
+
+Storage: iterations=1 runtime: 4024000us
+
+Storage: iterations=1 runtime: 4024000us
+
+Storage: iterations=1 runtime: 4020000us
+
+Storage: iterations=1 runtime: 4023000us
+
+Storage: iterations=1 runtime: 4040000us
+
+Storage: iterations=1 runtime: 4017000us
+
+Storage: iterations=1 runtime: 3920000us
+
+Storage: iterations=1 runtime: 3917000us
+
+Storage: iterations=1 runtime: 3915000us
+
+Storage: iterations=1 runtime: 3917000us
+
+Storage: iterations=1 runtime: 3916000us
+
+Storage: iterations=1 runtime: 3953000us
+
+Storage: iterations=1 runtime: 4070000us
+
+Storage: iterations=1 runtime: 4029000us
+
+Storage: iterations=1 runtime: 4021000us
+
+Storage: iterations=1 runtime: 4021000us
+
+Storage: iterations=1 runtime: 4022000us
+
+Storage: iterations=1 runtime: 4033000us
+
+Storage: iterations=100 average: 4008340us total: 400834000us
+
+
+
+
+Total Runtime: 400834000us
+
+
+========================================
+===   Performance Analysis Report    ===
+========================================
+
+=== Overall Runtime (Wall Clock) ===
+Total execution:     400.836 sec (100.0%)
+  Business logic:    158.407 sec (39.5%)
+  GC overhead(full): 242.428 sec (60.5%)
+
+=== Overall Runtime (CPU Time) ===
+Total CPU time:      400.761 sec (100.0%)
+  Business CPU:      158.410 sec (39.5%)
+  GC CPU(full):      242.351 sec (60.5%)
+
+=== GC Statistics ===
+Minor GC count:      261374
+Avg GC pause(full):  0.928 ms
+GC frequency:        652.1 GC/sec
+Init area objects:   0 (avg 0.0 per GC)
+
+=== Remembered Set ===
+Write barrier calls: 2176952
+  Duplicates:        40 (0.0%)
+  Avg per GC:        8.3
+
+=== Allocation Statistics ===
+Total allocations:   1092302019
+Total alloc bytes:   42104.41 MB
+Avg alloc size:      40.4 bytes
+Allocs per GC:       4179.1
+Forward operations:  1090858774
+  Forward per GC:    4173.6
+
+=== GC Core Breakdown (Roots/RS/Traverse) ===
+GC core total:       239.439 sec
+scan_roots:          0.060 sec (0.0% of core)
+scan_RS:             0.021 sec (0.0% of core)
+scavenge:            239.358 sec (100.0% of core)
+
+=== GiY Detailed Profile ===
+Minor collections:   261374
+Young before aux:    300.24 KB
+Young after aux:     230.72 KB
+Aux total:           69.52 KB (stack 37.52 KB, edge 0.00 KB, ft 32.00 KB)
+Stack pushes:        1092300449
+Max stack depth:     158
+Young edge visits:   1088576225
+  Per object:        0.997
+  Per minor GC:      4164.822
+  Patched:           1088576225
+  No-op old/init:    0
+  Immediate:         0
+  Unforwarded young: 0
+  Max per object:    17
+  Max per GC:        17
+  Kind JSVALUE_TAGGED  1088574520
+  Kind VOID_PTR        1705
+  Kind FUNC_FRAME      0
+  Kind JSVALUE_PTR     0
+Materialized objs:   1092300449
+Materialized bytes:  58771.54 MB
+  Avg object bytes:  56.4
+  <=64 bytes:        929000404
+  <=128 bytes:       163300037
+  <=256 bytes:       5
+  >256 bytes:        3
+  Max bytes per GC:  230.31 KB
+NT copy objects:     1092300449
+NT copy bytes:       58771.54 MB
+Old slot stores:     2177019
+Function table slots recorded: 245
+Function table max live set:   245
+Function table slots scanned:  245
+Function table slots patched:  245
+Remembered set slots scanned:  2176912
+Remembered set slots patched:  2176912
+Materialized by cell type:
+  type 04 STRING             objs=88 bytes=0.00 MB edge_entries=0
+  type 06 SIMPLE_OBJECT      objs=100075 bytes=3.05 MB edge_entries=28
+  type 07 ARRAY              objs=546100001 bytes=29164.89 MB edge_entries=545971601
+  type 08 FUNCTION           objs=72 bytes=0.00 MB edge_entries=145
+  type 17 PROP               objs=14 bytes=0.00 MB edge_entries=80
+  type 18 ARRAY_DATA         objs=546100001 bytes=29603.58 MB edge_entries=542604158
+  type 20 FUNCTION_FRAME     objs=2 bytes=0.00 MB edge_entries=7
+  type 21 STR_CONS           objs=87 bytes=0.00 MB edge_entries=0
+  type 24 TRANSITIONS        objs=14 bytes=0.00 MB edge_entries=20
+  type 25 HASHTABLE          objs=28 bytes=0.00 MB edge_entries=88
+  type 28 PROPERTY_MAP       objs=28 bytes=0.00 MB edge_entries=70
+  type 29 SHAPE              objs=32 bytes=0.00 MB edge_entries=28
+  type 31 PROPERTY_MAP_LIST  objs=7 bytes=0.00 MB edge_entries=0
+
+=== GC Cache Miss Counters (PMU) ===
+PMU counters:        unavailable on this machine/config
+perf_event_paranoid:4
+PMU init errno:      1 (Operation not permitted)
+hint:                run as root or set kernel.perf_event_paranoid<=1
+
+========================================
+real 401.85
+user 389.40
+sys 12.37
+
+status=0

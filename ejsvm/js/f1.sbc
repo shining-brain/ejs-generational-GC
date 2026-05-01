@@ -1,19 +1,21 @@
+fingerprint 36
 funcLength 3
 callentry 0
 sendentry 0
 numberOfLocals 0
-numberOfInstruction 34
+numberOfInstructions 34
+numberOfConstants 3
 getglobalobj 1
 setfl 25
 makeclosure 2 0
-string 5 "f"
+string 5 #0="f"
 setglobal 5 2
 makeclosure 2 1
-string 8 "g"
+string 8 #1="g"
 setglobal 8 2
-string 11 "printv"
+string 11 #2="printv"
 getglobal 9 11
-string 14 "g"
+string 14 #1="g"
 getglobal 12 14
 fixnum 13 300
 move 25 13
@@ -24,9 +26,9 @@ move 25 10
 call 9 1
 setfl 25
 geta 2
-string 17 "printv"
+string 17 #2="printv"
 getglobal 15 17
-string 19 "f"
+string 19 #0="f"
 getglobal 18 19
 call 18 0
 setfl 25
@@ -40,11 +42,12 @@ ret
 callentry 0
 sendentry 1
 numberOfLocals 2
-numberOfInstruction 17
+numberOfInstructions 17
+numberOfConstants 1
 getglobalobj 1
-newargs
+newframe 2 1
 setfl 15
-string 8 "g"
+string 8 #0="g"
 getglobal 6 8
 fixnum 7 99
 move 15 7
@@ -61,13 +64,14 @@ ret
 callentry 0
 sendentry 1
 numberOfLocals 2
-numberOfInstruction 18
+numberOfInstructions 18
+numberOfConstants 2
 getglobalobj 1
-newargs
+newframe 2 1
 setfl 16
-string 5 "print"
+string 5 #0="print"
 getglobal 3 5
-string 4 "ggggggg"
+string 4 #1="ggggggg"
 move 16 4
 call 3 1
 setfl 16

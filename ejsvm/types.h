@@ -415,12 +415,19 @@ static inline void set_js##OT##_##field(JSValue v, FT val)      \
 }
 
 #ifdef USE_REMEMBERED_SET
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern void write_barrier(JSValue *ptr, JSValue value);
+extern void write_barrier_ptr(void **ptr, void *value);
+#ifdef __cplusplus
+}
+#endif
+
 #define ACCESSOR_WB_JSVALUE(slot, value) do {                           \
-  extern void write_barrier(JSValue *ptr, JSValue value);               \
   write_barrier((slot), (value));                                       \
 } while (0)
 #define ACCESSOR_WB_PTR(slot, value) do {                               \
-  extern void write_barrier_ptr(void **ptr, void *value);               \
   write_barrier_ptr((void **)(slot), (void *)(value));                  \
 } while (0)
 #else

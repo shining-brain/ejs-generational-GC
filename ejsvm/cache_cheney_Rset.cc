@@ -11,11 +11,12 @@ extern int in_minor_gc;
 
 RememberedSet remembered_set;
 
-#define HASH_TABLE_SIZE 4096  
+#define HASH_TABLE_SIZE 8192
+#define HASH_PROBE_LIMIT 32
 //only use the bits of 3-14 as hash value
 #define MASK_HASH(ptr) (((ptr) >> 3) & (HASH_TABLE_SIZE - 1))
 #define RS_PTR_SLOT_TAG ((uintptr_t)1)
-#define REMEMBERED_SET_CAPACITY_BYTES (24 * 1024)
+#define REMEMBERED_SET_CAPACITY_BYTES (128 * 1024)
 
 // Initialize the remembered set,and adjust cache_space.end accordingly, adjust total_size too
 void init_remembered_set() {
@@ -55,7 +56,7 @@ void rememberset_add(uintptr_t obj_ptr) {
     unsigned int hash_idx = MASK_HASH(obj_ptr);
     
     
-    for (int probe = 0; probe < 8; probe++) {
+    for (int probe = 0; probe < HASH_PROBE_LIMIT; probe++) {
         unsigned int idx = (hash_idx + probe) & (HASH_TABLE_SIZE - 1);
         uintptr_t existing = remembered_set.hash_table[idx];
         
@@ -139,4 +140,3 @@ void write_barrier_ptr(void** ptr, void* value){
     write_barrier_calls++;
     rememberset_add(obj_ptr | RS_PTR_SLOT_TAG);
 }
-

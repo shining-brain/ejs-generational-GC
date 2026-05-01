@@ -517,6 +517,113 @@ CacheCheney_Tracer::~CacheCheney_Tracer()
 {
 }
 
+static const uintptr_t CACHE_CHENEY_FT_PTR_SLOT_TAG = 1;
+
+typedef struct CacheCheneyFTSlotSet {
+    uintptr_t *items;
+    size_t count;
+    size_t capacity;
+    bool in_cache_space;
+} CacheCheneyFTSlotSet;
+
+static CacheCheneyFTSlotSet cache_cheney_ft_slot_set = {NULL, 0, 0, false};
+
+static inline bool cache_cheney_ft_value_is_young(JSValue value) {
+    if (is_fixnum(value) || is_special(value))
+        return false;
+    uintptr_t ptr = (uintptr_t) clear_ptag(value);
+    return (ptr - cache_space.work_begin) < (cache_space.end - cache_space.work_begin);
+}
+
+static inline bool cache_cheney_ft_ptr_is_young(void *value) {
+    uintptr_t ptr = (uintptr_t) value;
+    return value != NULL &&
+           (ptr - cache_space.work_begin) < (cache_space.end - cache_space.work_begin);
+}
+
+static void cache_cheney_bind_ft_slots_to_cache() {
+    if (cache_cheney_ft_slot_set.in_cache_space)
+        return;
+
+    if (cache_space.work_begin == 0 || cache_space.end <= cache_space.work_begin) {
+        printf("cache_cheney function table slot set bind failed: invalid cache work area\n");
+        exit(1);
+    }
+
+    size_t young_bytes = (size_t) (cache_space.end - cache_space.work_begin);
+    size_t ft_slot_bytes = (young_bytes / 8) & ~(sizeof(uintptr_t) - 1);
+    if (ft_slot_bytes < 4096 * sizeof(uintptr_t))
+        ft_slot_bytes = 4096 * sizeof(uintptr_t);
+    if (ft_slot_bytes >= young_bytes) {
+        printf("cache_cheney function table slot set bind failed: not enough cache bytes (%zu)\n",
+               young_bytes);
+        exit(1);
+    }
+
+    uintptr_t ft_slot_begin = cache_space.end - ft_slot_bytes;
+    cache_space.end = ft_slot_begin;
+    cache_space.total_size -= (int) ft_slot_bytes;
+
+    cache_cheney_ft_slot_set.items = (uintptr_t *) ft_slot_begin;
+    cache_cheney_ft_slot_set.count = 0;
+    cache_cheney_ft_slot_set.capacity = ft_slot_bytes / sizeof(uintptr_t);
+    cache_cheney_ft_slot_set.in_cache_space = true;
+}
+
+static void cache_cheney_ft_slot_set_add(uintptr_t raw_slot) {
+    if (cache_cheney_ft_slot_set.items == NULL) {
+        printf("cache_cheney function table slot set not bound to cache space\n");
+        exit(1);
+    }
+
+    for (size_t i = 0; i < cache_cheney_ft_slot_set.count; i++) {
+        if (cache_cheney_ft_slot_set.items[i] == raw_slot)
+            return;
+    }
+
+    if (cache_cheney_ft_slot_set.count >= cache_cheney_ft_slot_set.capacity) {
+        printf("cache_cheney function table slot set overflow in cache space (capacity=%zu)\n",
+               cache_cheney_ft_slot_set.capacity);
+        exit(1);
+    }
+
+    cache_cheney_ft_slot_set.items[cache_cheney_ft_slot_set.count++] = raw_slot;
+}
+
+static void scan_function_table_strong_slots() {
+    for (size_t i = 0; i < cache_cheney_ft_slot_set.count; i++) {
+        uintptr_t raw_slot = cache_cheney_ft_slot_set.items[i];
+        bool is_ptr_slot = (raw_slot & CACHE_CHENEY_FT_PTR_SLOT_TAG) != 0;
+        uintptr_t slot_addr = raw_slot & ~CACHE_CHENEY_FT_PTR_SLOT_TAG;
+
+        if (is_ptr_slot) {
+            void **slot = (void **) slot_addr;
+            void *value = *slot;
+            CacheCheney_Tracer::process_edge(value);
+            *slot = value;
+        } else {
+            JSValue *slot = (JSValue *) slot_addr;
+            CacheCheney_Tracer::process_edge(*slot);
+        }
+    }
+}
+
+static inline void clear_function_table_strong_slots() {
+    cache_cheney_ft_slot_set.count = 0;
+}
+
+extern "C" void giy_record_ft_jsvalue_slot(JSValue *slot, JSValue value) {
+    if (in_minor_gc || slot == NULL || !cache_cheney_ft_value_is_young(value))
+        return;
+    cache_cheney_ft_slot_set_add((uintptr_t) slot);
+}
+
+extern "C" void giy_record_ft_ptr_slot(void **slot, void *value) {
+    if (in_minor_gc || slot == NULL || !cache_cheney_ft_ptr_is_young(value))
+        return;
+    cache_cheney_ft_slot_set_add(((uintptr_t) slot) | CACHE_CHENEY_FT_PTR_SLOT_TAG);
+}
+
 // Optimized root scanning for generational GC: skip function table to avoid 
 // scanning thousands of inline caches that mostly point to old generation
 static void scan_roots_generational(Context *ctx) {
@@ -740,10 +847,11 @@ void garbage_collection(Context *ctx)
     total_scan_roots_time += scan_roots_ns;
     total_scan_rs_time += scan_rs_ns;
     total_scavenge_time += young_trace_ns;
-#else
+    #else
     struct timespec t1, t2, t3, t4;
     clock_gettime(CLOCK_MONOTONIC, &t1);
-    scan_roots<CacheCheney_Tracer>(ctx);
+    scan_roots_generational(ctx);
+    scan_function_table_strong_slots();
     clock_gettime(CLOCK_MONOTONIC, &t2);
 
     #ifdef USE_REMEMBERED_SET
@@ -758,6 +866,7 @@ void garbage_collection(Context *ctx)
     dram_space.current = scan_start;
     scavenge();
     clock_gettime(CLOCK_MONOTONIC, &t4);
+    clear_function_table_strong_slots();
 
     total_scan_roots_time += (t2.tv_sec - t1.tv_sec) * 1000000000LL + (t2.tv_nsec - t1.tv_nsec);
     total_scan_rs_time += (t3.tv_sec - t2.tv_sec) * 1000000000LL + (t3.tv_nsec - t2.tv_nsec);
@@ -1024,6 +1133,8 @@ extern "C" void space_free_dram_manager_init(){
 #ifdef USE_GIY_MINOR
     // Bind GiY traversal stack inside cache space after work_begin is fixed.
     giy_bind_stack_to_cache();
+#else
+    cache_cheney_bind_ft_slots_to_cache();
 #endif
     init_finish = 1;
     printf("init_info: after init object alloc, cache_space.work_begin moved to %p\n",

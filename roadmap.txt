@@ -1,0 +1,67 @@
+你是一个精通 C/C++ 和底层内存管理的虚拟机（VM）开发专家。为我实现一个针对“Cache (Young Gen) -> DRAM (Old Gen)”内存架构深度优化的单线程 Minor GC（复制算法）。
+
+架构背景与核心约束：
+由于 DRAM 的读写延迟远高于 Cache，本次实现严禁使用标准的 Cheney 复制算法。核心约束是：在 Minor GC 期间，对每一个存活对象，必须做到 0 次 DRAM 读取，且仅发生 1 次 DRAM 批量写入（复制）。 所有的对象图遍历、指针读取和修改，都必须在 Cache（Young Gen）中原地完成，最后再一把拷贝到 DRAM。
+
+数据结构定义（请按此实现）：
+
+Allocator：维护连续内存边界。young_start, young_end, young_free (代表 Cache)；old_start, old_end, old_free (代表 DRAM)。
+
+ObjectHeader：至少包含 size、class_meta 和 gc_ptr (转发指针)。
+
+Remembered Set (RS)：一个简单的指针数组，记录 Old Gen 中指向 Young Gen 的跨代引用。
+
+GCStack：一个后进先出栈，用于深度优先遍历存活对象。注意：栈里存放的必须是 Young Gen (Cache) 中的旧对象地址。
+
+核心算法流程（请严格按以下步骤实现核心逻辑）：
+
+步骤 1：根节点扫描 (Root Scanning)
+
+遍历执行栈（局部变量）和 Remembered Set。
+
+对每一个指向 Young Gen 的指针，调用 copy_for_minor。
+
+步骤 2：分配与标记 (copy_for_minor)
+
+输入：一个指向 Young Gen 对象的指针。
+
+如果该对象的 gc_ptr 已经被设置（打过标记），直接返回它里面的新地址。
+
+如果没有被设置：在 Old Gen (old_free) 划出等大空间，拿到目标地址 dest_ptr，更新 old_free。
+
+将 dest_ptr 写入当前 Young 对象的 gc_ptr 中作为转发指针。
+
+【极其重要】：此时绝对不要把数据拷贝到 Old Gen！而是将这个 Young 对象的旧地址 压入 GCStack。返回 dest_ptr 以便调用方更新指针。
+
+步骤 3：Cache 内的图遍历与指针修正 (traverse_stack)
+
+当 GCStack 不为空时，循环 pop 出一个地址（记为 young_obj）。
+
+读取 young_obj 的类元数据，找到它内部所有的引用字段。
+
+遍历这些字段：如果字段指向 Young Gen，则对其调用 copy_for_minor，并将返回的 dest_ptr 直接覆盖写入当前 young_obj 的这个字段中。
+
+当 young_obj 的所有字段都更新完毕后（此时它内部的所有指针都已经指向了 Old Gen 的新地址），执行唯一的一次数据拷贝：使用 memcpy 将整个 young_obj（包括 Header 和数据）拷贝到它 gc_ptr 记录的 dest_ptr 处。
+
+步骤 4：重置阶段
+
+将 young_free 游标重置为 young_start。
+
+清空 Remembered Set。
+
+请你一定要记住：一定要注意避免除了一次性拷贝进Old Gen之外的一切 对Old Gen的“触碰操作”，除了一个例外：最最后阶段在更新old区域指针的时候，如果恰好这个指针指向了young区的之后，你不得不写入一次，以完成这个指针的更新
+除此之外 要禁止对Dram的Old gen部分的“触碰”，否则的话，又会导致cache pollution，这样的话 这个算法就白费了
+
+然后 我需要使用Non temporal
+
+我只会在对于Old gen写入的时候使用non temporal 命令
+
+然后 你还可以使用 _mprotect 命令之类的 来保证对DRAM 的Old 区写入 真的没有其他的“触碰”
+
+关于benchmark 你如果想使用benchmark 你可以去跑build.debug当中的benchmarks当中的run_benchmarks.sh脚本 更改输出文件夹的后缀 比如接下来要变成：out21，在接下来是out22
+输出的时候记得写一个readme文件告诉我干了什么事情
+
+然后 对于你所有干了的事情 你需要写一份文档，写进meeting.md里，内容要求能够解释清楚干了什么 为什么这么干，因为我要和我的导师汇报 我要防止我干的事情我自己解释不清楚
+如果某件事情你不干了 撤回了 记得在meeting.md里对应的删除掉
+
+另外 把你干的事情的细节 写入文件：AIlog.txt

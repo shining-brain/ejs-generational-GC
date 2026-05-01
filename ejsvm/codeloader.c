@@ -457,6 +457,9 @@ void const_load(Context *ctx, int nconsts, JSValue *ctop, CItable *citable) {
         break;
       }
       ctop[i] = v;
+#ifdef CACHE_CHENEY
+      giy_record_ft_jsvalue_slot(&ctop[i], v);
+#endif
     }
   }
 #undef next_buf
@@ -610,9 +613,12 @@ int load_number_sbc(char *src, JSValue *ctop, int ninsns, int nconsts) {
   index = load_const_sbc(src, nconsts, &d, NULL);
   if (index < 0) return -1;
   v0 = ctop[index];
-  if (v0 == JS_UNDEFINED)
+  if (v0 == JS_UNDEFINED) {
     ctop[index] = double_to_number(NULL, d);  /* TODO: context */
-  else {
+#ifdef CACHE_CHENEY
+    giy_record_ft_jsvalue_slot(&ctop[index], ctop[index]);
+#endif
+  } else {
     if (!is_number(v0)) {
       LOG_ERR("inconsistent constants at index %d", index);
       return -1;
@@ -635,9 +641,12 @@ int load_string_sbc(char *src, JSValue *ctop, int ninsns, int nconsts) {
   decode_escape_char(str);
   v0 = ctop[index];
   v1 = cstr_to_string(NULL, str);
-  if (v0 == JS_UNDEFINED)
+  if (v0 == JS_UNDEFINED) {
     ctop[index] = v1;
-  else if (v0 != v1) {
+#ifdef CACHE_CHENEY
+    giy_record_ft_jsvalue_slot(&ctop[index], v1);
+#endif
+  } else if (v0 != v1) {
     LOG_ERR("inconsistent string constants at index %d", index);
     return -1;
   } /* else, v0 == v1.  do nothing */
@@ -655,8 +664,12 @@ int load_regexp_sbc(Context *ctx, char *src, JSValue *ctop,
   if (index < 0) return -1;
   decode_escape_char(str);
   v0 = ctop[index];
-  if (v0 == JS_UNDEFINED)
+  if (v0 == JS_UNDEFINED) {
     ctop[index] = new_regexp(ctx, str, flag);
+#ifdef CACHE_CHENEY
+    giy_record_ft_jsvalue_slot(&ctop[index], ctop[index]);
+#endif
+  }
   /*
    * else, it is necessary to check the consistency of v0 and str
    * but this check in not implemented yet.
