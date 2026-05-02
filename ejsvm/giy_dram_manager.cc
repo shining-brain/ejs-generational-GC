@@ -40,6 +40,160 @@ long long generational_alloc_count = 0;
 long long generational_alloc_bytes = 0;
 long long generational_forward_count = 0;
 
+#ifndef ALLOC_SIZE_PROFILE
+#define ALLOC_SIZE_PROFILE 0
+#endif
+
+#ifndef GIY_WB_PROFILE
+#define GIY_WB_PROFILE 0
+#endif
+
+#if GIY_WB_PROFILE
+extern "C" void giy_print_wb_profile();
+#endif
+
+#if ALLOC_SIZE_PROFILE
+static const size_t alloc_size_bucket_limits[] = {
+    8, 16, 24, 32, 40, 48, 56, 64,
+    80, 96, 112, 128, 160, 192, 224, 256,
+    320, 384, 512, 768, 1024, 1536, 2048, 4096,
+    8192, 16384, 32768, 65536
+};
+static const int alloc_size_bucket_count =
+    (int)(sizeof(alloc_size_bucket_limits) / sizeof(alloc_size_bucket_limits[0])) + 1;
+
+static unsigned long long alloc_payload_count[sizeof(alloc_size_bucket_limits) / sizeof(alloc_size_bucket_limits[0]) + 1];
+static unsigned long long alloc_payload_bytes[sizeof(alloc_size_bucket_limits) / sizeof(alloc_size_bucket_limits[0]) + 1];
+static unsigned long long alloc_footprint_count[sizeof(alloc_size_bucket_limits) / sizeof(alloc_size_bucket_limits[0]) + 1];
+static unsigned long long alloc_footprint_bytes[sizeof(alloc_size_bucket_limits) / sizeof(alloc_size_bucket_limits[0]) + 1];
+static unsigned long long alloc_count_by_type[256];
+static unsigned long long alloc_payload_bytes_by_type[256];
+static unsigned long long alloc_footprint_bytes_by_type[256];
+static unsigned long long alloc_profile_total_count;
+static unsigned long long alloc_profile_payload_bytes;
+static unsigned long long alloc_profile_footprint_bytes;
+
+static int alloc_size_bucket_index(size_t bytes)
+{
+    int limit_count = alloc_size_bucket_count - 1;
+    for (int i = 0; i < limit_count; i++) {
+        if (bytes <= alloc_size_bucket_limits[i])
+            return i;
+    }
+    return limit_count;
+}
+
+static void alloc_size_profile_note(size_t payload_bytes,
+                                    size_t footprint_bytes,
+                                    cell_type_t type)
+{
+    int payload_bucket = alloc_size_bucket_index(payload_bytes);
+    int footprint_bucket = alloc_size_bucket_index(footprint_bytes);
+    unsigned int t = (unsigned int) type;
+
+    alloc_payload_count[payload_bucket]++;
+    alloc_payload_bytes[payload_bucket] += payload_bytes;
+    alloc_footprint_count[footprint_bucket]++;
+    alloc_footprint_bytes[footprint_bucket] += footprint_bytes;
+
+    if (t < 256) {
+        alloc_count_by_type[t]++;
+        alloc_payload_bytes_by_type[t] += payload_bytes;
+        alloc_footprint_bytes_by_type[t] += footprint_bytes;
+    }
+
+    alloc_profile_total_count++;
+    alloc_profile_payload_bytes += payload_bytes;
+    alloc_profile_footprint_bytes += footprint_bytes;
+}
+
+static void alloc_size_profile_print_bucket(const char *label,
+                                            int index,
+                                            unsigned long long count,
+                                            unsigned long long bytes,
+                                            unsigned long long total_count,
+                                            unsigned long long total_bytes)
+{
+    if (count == 0)
+        return;
+
+    int limit_count = alloc_size_bucket_count - 1;
+    if (index == 0) {
+        printf("%-20s <=%-6zu %14llu %8.2f%% %12.2f MB %8.2f%%\n",
+               label, alloc_size_bucket_limits[index], count,
+               total_count ? 100.0 * count / total_count : 0.0,
+               bytes / (1024.0 * 1024.0),
+               total_bytes ? 100.0 * bytes / total_bytes : 0.0);
+    } else if (index < limit_count) {
+        printf("%-20s %5zu-%-6zu %14llu %8.2f%% %12.2f MB %8.2f%%\n",
+               label, alloc_size_bucket_limits[index - 1] + 1,
+               alloc_size_bucket_limits[index], count,
+               total_count ? 100.0 * count / total_count : 0.0,
+               bytes / (1024.0 * 1024.0),
+               total_bytes ? 100.0 * bytes / total_bytes : 0.0);
+    } else {
+        printf("%-20s >%-6zu %14llu %8.2f%% %12.2f MB %8.2f%%\n",
+               label, alloc_size_bucket_limits[limit_count - 1], count,
+               total_count ? 100.0 * count / total_count : 0.0,
+               bytes / (1024.0 * 1024.0),
+               total_bytes ? 100.0 * bytes / total_bytes : 0.0);
+    }
+}
+
+static void alloc_size_profile_print()
+{
+    printf("\n=== Allocation Size Distribution ===\n");
+    printf("note: payload is request_bytes; footprint is ALIGN(payload + object_header)\n");
+    printf("Total profiled allocs: %llu\n", alloc_profile_total_count);
+    printf("Total payload bytes:   %.2f MB\n",
+           alloc_profile_payload_bytes / (1024.0 * 1024.0));
+    printf("Total footprint bytes: %.2f MB\n",
+           alloc_profile_footprint_bytes / (1024.0 * 1024.0));
+    if (alloc_profile_total_count > 0) {
+        printf("Avg payload size:     %.1f bytes\n",
+               (double) alloc_profile_payload_bytes / alloc_profile_total_count);
+        printf("Avg footprint size:   %.1f bytes\n",
+               (double) alloc_profile_footprint_bytes / alloc_profile_total_count);
+    }
+
+    printf("\nPayload histogram:\n");
+    printf("%-20s %-12s %14s %9s %12s %9s\n",
+           "kind", "bytes", "count", "count%", "payload", "bytes%");
+    for (int i = 0; i < alloc_size_bucket_count; i++) {
+        alloc_size_profile_print_bucket("payload", i,
+                                        alloc_payload_count[i],
+                                        alloc_payload_bytes[i],
+                                        alloc_profile_total_count,
+                                        alloc_profile_payload_bytes);
+    }
+
+    printf("\nFootprint histogram:\n");
+    printf("%-20s %-12s %14s %9s %12s %9s\n",
+           "kind", "bytes", "count", "count%", "footprint", "bytes%");
+    for (int i = 0; i < alloc_size_bucket_count; i++) {
+        alloc_size_profile_print_bucket("footprint", i,
+                                        alloc_footprint_count[i],
+                                        alloc_footprint_bytes[i],
+                                        alloc_profile_total_count,
+                                        alloc_profile_footprint_bytes);
+    }
+
+    printf("\nAllocation by cell type:\n");
+    printf("%-8s %14s %12s %12s %12s\n",
+           "type", "count", "count%", "payload MB", "footprint MB");
+    for (int i = 0; i < 256; i++) {
+        if (alloc_count_by_type[i] == 0)
+            continue;
+        printf("0x%02x     %14llu %11.2f%% %12.2f %12.2f\n",
+               i, alloc_count_by_type[i],
+               alloc_profile_total_count ?
+                   100.0 * alloc_count_by_type[i] / alloc_profile_total_count : 0.0,
+               alloc_payload_bytes_by_type[i] / (1024.0 * 1024.0),
+               alloc_footprint_bytes_by_type[i] / (1024.0 * 1024.0));
+    }
+}
+#endif
+
 // Performance profiling: overall timing
 long long total_gc_full_wall_time = 0;
 long long total_gc_full_cpu_time = 0;
@@ -672,6 +826,9 @@ void *space_alloc(uintptr_t request_bytes, cell_type_t type)
 
     int total_byte = (int)request_bytes + sizeof(object_header);
     int align_bytes = ALIGN(total_byte);
+    #if ALLOC_SIZE_PROFILE
+    alloc_size_profile_note((size_t) request_bytes, (size_t) align_bytes, type);
+    #endif
     if(cache_space.current + align_bytes > cache_space.end) {
         printf("Cache space full, need to trigger GC!!!\n");
         // exit(1);
@@ -923,6 +1080,10 @@ static void print_gc_status(){
         printf("  Avg per GC:        N/A (no GC yet)\n");
     }
     #endif
+
+    #if GIY_WB_PROFILE
+    giy_print_wb_profile();
+    #endif
     
     printf("\n=== Allocation Statistics ===\n");
     printf("Total allocations:   %lld\n", generational_alloc_count);
@@ -940,6 +1101,10 @@ static void print_gc_status(){
     } else if (generational_forward_count > 0) {
         printf("  Forward per GC:    N/A (no GC yet)\n");
     }
+
+    #if ALLOC_SIZE_PROFILE
+    alloc_size_profile_print();
+    #endif
     
     if (minor_gc_count > 0 && total_gc_core_ns > 0) {
         printf("\n=== GC Core Breakdown (Roots/RS/Traverse) ===\n");

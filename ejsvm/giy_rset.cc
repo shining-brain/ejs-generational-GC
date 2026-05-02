@@ -11,6 +11,21 @@ extern int in_minor_gc;
 
 RememberedSet remembered_set;
 
+#ifndef GIY_WB_PROFILE
+#define GIY_WB_PROFILE 0
+#endif
+
+#if GIY_WB_PROFILE
+static unsigned long long wb_profile_update_attempts = 0;
+static unsigned long long wb_profile_update_hits = 0;
+static unsigned long long wb_profile_update_scan_steps = 0;
+static unsigned long long wb_profile_clear_attempts_jsvalue = 0;
+static unsigned long long wb_profile_clear_attempts_ptr = 0;
+static unsigned long long wb_profile_young_adds_jsvalue = 0;
+static unsigned long long wb_profile_young_adds_ptr = 0;
+static unsigned long long wb_profile_duplicate_value_updates = 0;
+#endif
+
 #define HASH_TABLE_SIZE 8192
 #define HASH_PROBE_LIMIT 32
 //only use the bits of 3-14 as hash value
@@ -20,6 +35,9 @@ RememberedSet remembered_set;
 
 static int rememberset_find_index(uintptr_t obj_ptr) {
     for (int i = 0; i < remembered_set.count; i++) {
+#if GIY_WB_PROFILE
+        wb_profile_update_scan_steps++;
+#endif
         if (remembered_set.buffer[i] == obj_ptr) {
             return i;
         }
@@ -28,10 +46,16 @@ static int rememberset_find_index(uintptr_t obj_ptr) {
 }
 
 static bool rememberset_update_existing(uintptr_t obj_ptr, uintptr_t value) {
+#if GIY_WB_PROFILE
+    wb_profile_update_attempts++;
+#endif
     int index = rememberset_find_index(obj_ptr);
     if (index < 0) {
         return false;
     }
+#if GIY_WB_PROFILE
+    wb_profile_update_hits++;
+#endif
     remembered_set.values[index] = value;
     return true;
 }
@@ -83,6 +107,9 @@ static void rememberset_add_with_value(uintptr_t obj_ptr, uintptr_t value) {
         uintptr_t existing = remembered_set.hash_table[idx];
         
         if (existing == obj_ptr) {
+#if GIY_WB_PROFILE
+            wb_profile_duplicate_value_updates++;
+#endif
             rememberset_update_existing(obj_ptr, value);
             write_barrier_duplicate_filtered++;
             return;
@@ -129,16 +156,25 @@ void write_barrier(JSValue* ptr, JSValue value){
     }
 
     if (is_fixnum(value) || is_special(value)) {
+#if GIY_WB_PROFILE
+        wb_profile_clear_attempts_jsvalue++;
+#endif
         rememberset_update_existing(obj_ptr, 0);
         return;
     }
 
     uintptr_t obj_addr = clear_ptag(value);
     if (obj_addr < cache_space.work_begin || obj_addr >= cache_space.end) {
+#if GIY_WB_PROFILE
+        wb_profile_clear_attempts_jsvalue++;
+#endif
         rememberset_update_existing(obj_ptr, 0);
         return;
     }
 
+#if GIY_WB_PROFILE
+    wb_profile_young_adds_jsvalue++;
+#endif
     write_barrier_calls++;
     rememberset_add_with_value(obj_ptr, (uintptr_t) value);
 }
@@ -162,10 +198,35 @@ void write_barrier_ptr(void** ptr, void* value){
     if (val_ptr == 0 ||
         val_ptr < cache_space.work_begin ||
         val_ptr >= cache_space.end) {
+#if GIY_WB_PROFILE
+        wb_profile_clear_attempts_ptr++;
+#endif
         rememberset_update_existing(obj_ptr | RS_PTR_SLOT_TAG, 0);
         return;
     }
 
+#if GIY_WB_PROFILE
+    wb_profile_young_adds_ptr++;
+#endif
     write_barrier_calls++;
     rememberset_add_with_value(obj_ptr | RS_PTR_SLOT_TAG, val_ptr);
 }
+
+#if GIY_WB_PROFILE
+extern "C" void giy_print_wb_profile() {
+    printf("\n=== GiY Write Barrier Profile ===\n");
+    printf("Update attempts:     %llu\n", wb_profile_update_attempts);
+    printf("Update hits:         %llu\n", wb_profile_update_hits);
+    printf("Update scan steps:   %llu\n", wb_profile_update_scan_steps);
+    if (wb_profile_update_attempts > 0) {
+        printf("  Steps per attempt: %.3f\n",
+               (double) wb_profile_update_scan_steps /
+               (double) wb_profile_update_attempts);
+    }
+    printf("Clear attempts JS:   %llu\n", wb_profile_clear_attempts_jsvalue);
+    printf("Clear attempts ptr:  %llu\n", wb_profile_clear_attempts_ptr);
+    printf("Young adds JS:       %llu\n", wb_profile_young_adds_jsvalue);
+    printf("Young adds ptr:      %llu\n", wb_profile_young_adds_ptr);
+    printf("Duplicate value updates: %llu\n", wb_profile_duplicate_value_updates);
+}
+#endif

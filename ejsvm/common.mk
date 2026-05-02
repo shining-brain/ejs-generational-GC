@@ -102,6 +102,14 @@ CXXFLAGS = -std=c++11 -Wall $(INCLUDES)
 CPPFLAGS +=
 LIBS   += -lm
 
+ifeq ($(ALLOC_SIZE_PROFILE),true)
+CPPFLAGS += -DALLOC_SIZE_PROFILE=1
+endif
+
+ifeq ($(GIY_WB_PROFILE),true)
+CPPFLAGS += -DGIY_WB_PROFILE=1
+endif
+
 ifeq ($(USE_VMDL),true)
 CPPFLAGS += -DUSE_VMDL
 CPPFLAGS_VMDL += -Wno-parentheses-equality -Wno-tautological-constant-out-of-range-compare

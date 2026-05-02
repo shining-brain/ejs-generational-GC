@@ -2256,3 +2256,585 @@ scavenge 综合：
 - 从 targeted 三项综合看，新 GiY 相比旧 GiY 总体快 1.23x，总时间减少 18.6%。
 - GC 部分提升更明显：GC full 减少 73.4%，scavenge 减少 78.9%。
 - 相比 cache_cheney，对 GC core 来说新 GiY 已经更快；但总运行时间仍慢约 1.1%，说明剩余问题主要不在 root scanning/scavenge 主体，而在 RSet patch、write barrier、cache locality 或 mutator-side 影响。
+
+## 2026-05-02 当前项目进展梳理
+
+本次用户询问：
+- “现在详细告诉我项目当前的进展状况”
+
+当前仓库状态：
+- 当前目录：`/home/qiancheng/ejs-new`。
+- 当前分支：`master`。
+- `master` 相比 `origin/master` 领先 10 个提交。
+- 工作区当前只有 `AGENTS.md` 有未提交修改；修改内容是日志文件要求从 `AIlog.txt` 改成 `AIlog.md`。
+- 对话开头提供的规则仍写着 `AIlog.txt`，而仓库当前 `AGENTS.md` 写着 `AIlog.md`。为避免记录丢失，本次总结同时写入 `AIlog.md` 和 `AIlog.txt`。
+
+项目主线进展：
+- 项目原始基础是 eJS/eJSVM，核心目录包括 `ejsvm`、`vmgen`、`ejsc`、`ejsi`。
+- 当前主要研究/实现方向是 Cache Young Gen -> DRAM Old Gen 的单线程 generational minor GC。
+- 已经实现两个相关 GC 路径：
+  - `OPT_GC=cache_cheney`：作为 cache/DRAM generational Cheney 对照组。
+  - `OPT_GC=giy`：当前重点 GiY minor GC prototype。
+
+GiY 当前实现状态：
+- 已经接入构建系统：
+  - `ejsvm/common.mk` 中 `OPT_GC=giy` 会定义 `USE_GIY_MINOR`，并编译 `giy_dram_manager.cc`、`giy_rset.cc`、`GiY.cc`。
+  - `ejsvm/Makefile.template` 中已经列出 `OPT_GC=giy` 选项。
+- 新对象在 cache/young 区分配，minor GC 时把 live young 对象 materialize 到 DRAM/old。
+- roots、function table strong slots、remembered set values 用来发现 live young 对象。
+- remembered set 不只记录 old slot 地址，也记录最近写入的 value，目的是 minor GC 扫 remembered set 时不用读 old slot。
+- young 对象内部的 young-to-young 边已经改成直接在 young/cache 对象内 patch，不再依赖旧的 edge log 回放。
+- function table 没有恢复通用全表扫描，而是记录 constant pool 和 allocation site cache 的强引用 slot，避免漏标 Young 指针。
+- inline cache 保持弱引用语义：未被强边保活的 inline cache 目标不会因为 cache 自身而 materialize。
+- 当前实现带有 mprotect old-space guard 逻辑，可用于检查 GiY 核心阶段是否发生非法 old-space 触碰。
+
+当前 Practical GiY 的重要边界：
+- 当前最终版本不是 strict “所有 old writes 都 non-temporal”的纯版本，而是 Practical GiY。
+- materialization 策略是：
+  - `<=256 bytes` 的对象使用 `memcpy`。
+  - `>256 bytes` 的对象使用 non-temporal store。
+- 原因是 benchmark 发现多数 materialized object 只有几十字节，一律使用 non-temporal store 会让小对象复制成本过高。
+- 这个策略可能引入一定 cache pollution，但保留了核心语义：minor GC 强扫描阶段避免乱读 old，并避免 function_table 全表扫描。
+
+RSet/cache 空间状态：
+- GiY 和 cache_cheney 的 remembered set cache footprint 当前都控制为 192KB。
+- GiY 因为额外保存 values，所以 entry capacity 是 8192。
+- cache_cheney 不保存 values，所以 entry capacity 是 16384。
+- 这个差异是 GiY 为避免 old slot read 付出的容量代价。
+- 当前 GiY 可用于 young object 分配的 active young area 约 230.72KB。
+- GiY 辅助区约 69.52KB：GC stack 37.52KB，function table slot set 32KB，edge log 0KB。
+
+benchmark 进展：
+- 已有关键输出目录：
+  - `out25_giy_profile`
+  - `out26_giy_direct_patch`
+  - `out27_giy_direct_memcpy`
+- 当前最应该引用的最终数据是 `out27_giy_direct_memcpy`。
+- out27 结果：
+  - Storage：184.211s，GC full 27.182s，scavenge 24.209s。
+  - CD：257.053s，GC full 12.071s，scavenge 6.941s。
+  - Havlak：446.590s，GC full 32.513s，scavenge 21.458s。
+- 相比旧 GiY out22：
+  - targeted 三项总时间从 1090.801s 降到 887.854s，整体约 1.23x。
+  - GC full 综合减少约 73.4%。
+  - scavenge 综合减少约 78.9%。
+- 相比 cache_cheney root-controlled out24：
+  - Storage 上新 GiY 更快：184.211s vs 209.181s。
+  - CD 上新 GiY 略慢：257.053s vs 251.045s。
+  - Havlak 上新 GiY 略慢：446.590s vs 417.826s。
+  - targeted 三项总时间新 GiY 约慢 1.1%，但 GC core 已经比 cache_cheney 更快。
+
+当前验证：
+- 已执行：`make OPT_GC=giy -j2`，结果为 `Nothing to be done for 'all'`，说明当前 GiY build 目标是最新的。
+- 已执行已有 `.sbc` smoke test：
+  - `a.sbc`
+  - `b.sbc`
+  - `c.sbc`
+  - `d.sbc`
+  - `e.sbc`
+  - `f.sbc`
+  - `g.sbc`
+  - `../ejsvm/js/hello.sbc`
+  - `../ejsvm/js/f1.sbc`
+- 结果：全部 `status=0`。
+
+尚未完成/下一步：
+- 本次没有重新跑完整 benchmark，因为用户询问的是当前进展状况，不是要求产生新 benchmark 输出。
+- 当前下一步重点应放在 CD/Havlak 的剩余差距：
+  - remembered set patch 成本；
+  - write barrier 压力；
+  - cache locality；
+  - mutator-side 影响；
+  - weak_clear 阶段如果要进一步 strict 0 old read，需要单独设计 GiY weak remembered set，而不是局部修改 generic weak_clear。
+
+## 2026-05-02 roadmap.txt 5.2 之后内容结论
+
+本次用户询问：
+- 阅读 `roadmap.txt` 的 5.2 号之后内容，并给出结论。
+
+读到的内容：
+- 导师认为“一股脑对所有对象都使用 non-temporal store”是错误方向，应该分路径讨论。
+- 导师建议尝试把 young 区存活对象先统一搬运到相同地方，并且这个地方不是 old 区，然后再统一执行 non-temporal store。
+- 用户要求判断该方案是否合理，并给出可行性分析。
+
+结论：
+- 第一条判断完全正确：所有对象都使用 non-temporal store 不合理，尤其是几十字节的小对象。当前 Practical GiY 的 `<=256 bytes memcpy，>256 bytes non-temporal store` 正好符合“分路径讨论”的方向。
+- 第二条建议有研究价值，但不能直接理解成“无条件多复制一遍”。如果先把 live objects 搬到另一个非 old staging 区，再统一 NT store 到 old，会增加一次额外复制、占用更多 cache 空间，并可能破坏当前 GiY 已经做到的 low GC core cost。
+- 这个方案只有在 staging 带来的收益超过额外复制成本时才合理，例如：能把很多小碎片写合并成连续大块、改善 NT store 对齐、减少散乱 old writes、或者为后续 batch materialization 提供更好顺序。
+- 实现时必须保持一个关键约束：对象的最终 old 地址要在 traversal/patch 阶段就确定，young 对象内部字段和 root/RS/function table patch 都必须指向最终 old 地址，不能指向 staging 地址。staging 只能是临时物理搬运缓冲区，不能成为 GC 语义地址。
+
+更稳妥的实现方向：
+- 优先不要立即做“对象完整搬到 staging，再 NT store”的重设计。
+- 先做 batch materialization：traverse 阶段仍在 young 对象内完成字段 patch，只把 `(young_src, old_dest, size)` 记录下来，最后按 old_dest 或 size/class 分组执行 materialization。
+- 对小对象继续使用 memcpy，或者把小对象聚合成较大连续写入后再评估 NT store。
+- 对大对象继续直接 NT store。
+- 如果 profiling 证明散乱写/对齐问题是主要瓶颈，再引入 cache staging buffer。
+
+一句话结论：
+- “分路径使用 memcpy/NT store”是确定正确方向；“先搬到非 old 区再统一 NT store”是可探索优化，但必须做成 batch/staging materialization 实验，不能破坏 final old address 语义，也不能让额外复制成本超过 NT store 聚合收益。
+
+## 2026-05-02 benchmark allocation size 分布实验工具
+
+本次用户要求：
+- 做一个实验，为后续 memcpy / non-temporal store / staging 方案选择提供判据。
+- 统计 benchmarks 中申请的 objects size 大小分布。
+
+本次修改范围：
+- `ejsvm/common.mk`
+- `ejsvm/giy_dram_manager.cc`
+- `run_alloc_size_profile_benchmarks.sh`
+- `AIlog.md`
+- `AIlog.txt`
+
+具体修改：
+- 在 `ejsvm/common.mk` 中新增 `ALLOC_SIZE_PROFILE=true` 编译开关。
+- 在 GiY 的 `space_alloc(request_bytes, type)` 中新增可选统计逻辑，默认关闭，只有 `ALLOC_SIZE_PROFILE=1` 时启用。
+- 统计两种 size：
+  - payload size：传给 `space_alloc` 的 `request_bytes`。
+  - footprint size：`ALIGN(payload + object_header)`，这是 GiY materialization 实际复制/写入 Old 时更相关的大小。
+- 输出内容包括：
+  - payload histogram；
+  - footprint histogram；
+  - 按 cell type 的 allocation count / payload MB / footprint MB。
+- 新增脚本 `run_alloc_size_profile_benchmarks.sh`：
+  - 自动执行 `make -C build.debug OPT_GC=giy ALLOC_SIZE_PROFILE=true -j$JOBS`。
+  - 默认跑 benchmark suite：`Bounce List Sieve Queens Permute Storage Towers Mandelbrot Richards CD NBody Havlak`。
+  - 输出目录默认是 `build.debug/benchmarks/out28_alloc_size_profile`。
+  - 每个 benchmark 生成一个完整 `.out` 文件。
+  - 额外生成 `summary.tsv`，直接给出 payload/footprint 的 `<=256` 和 `>256` 数量比例。
+
+验证：
+- 已执行：`make OPT_GC=giy ALLOC_SIZE_PROFILE=true -j2`。
+- 结果：构建通过。仍有仓库已有 warning，本次没有处理。
+- 已执行：`OUT_DIR=out_alloc_profile_smoke BENCHMARKS='hello_world' ./run_alloc_size_profile_benchmarks.sh`。
+- 结果：脚本成功生成 summary。
+- smoke 结果：
+  - `hello_world` total profiled allocs = 400。
+  - avg payload = 34.2 bytes。
+  - avg footprint = 51.1 bytes。
+  - payload `<=256`：95.50%。
+  - footprint `<=256`：99.50%。
+
+没有做的事情：
+- 没有在本次直接跑完整 benchmark suite。
+- 原因：尝试用 `Sieve` 做快速样例时，90 秒以上仍未结束；完整 suite 预计耗时较长，不适合在这个回答里直接阻塞完成。
+- 当前已经提供可重复脚本，后续可以按需要跑完整 suite 或只跑 targeted benchmarks。
+
+建议运行方式：
+- targeted 三项：
+  - `OUT_DIR=out28_alloc_size_profile BENCHMARKS='Storage CD Havlak' ./run_alloc_size_profile_benchmarks.sh`
+- 完整 suite：
+  - `OUT_DIR=out28_alloc_size_profile ./run_alloc_size_profile_benchmarks.sh`
+
+实验判据：
+- 后续判断 memcpy / NT store 阈值时，优先看 footprint histogram，不只看 payload histogram。
+- 如果 footprint `<=256` 的 allocation count 占绝大多数，继续保留小对象 memcpy 是合理方向。
+- 如果 `>256` 的 footprint 在 bytes 占比很高，说明大对象 NT store 仍有意义。
+- 如果很多对象 footprint 很小但总 bytes 占比也很高，才值得进一步考虑 batch/staging，把小对象聚合成更大连续写入再实验 NT store。
+
+## 2026-05-02 完整 suite allocation size profile 结果
+
+本次用户要求：
+- 完整跑完 benchmark suite，再统计 allocation object size 分布。
+
+执行过程：
+- 第一次完整跑完 suite 后发现输出没有 `Allocation Size Distribution`，原因是 build 目录里的 `ejsvm/giy_dram_manager.o/ejsvm` 没有被强制重建到 `ALLOC_SIZE_PROFILE=1` 版本。
+- 我修正了 `run_alloc_size_profile_benchmarks.sh`：
+  - 跑 benchmark 前删除 `build.debug/giy_dram_manager.cc`、`build.debug/giy_dram_manager.o`、`build.debug/ejsvm`，强制重新复制/编译/链接 GiY manager。
+  - 修正 summary awk 中 `<=8` bucket 的字符串/数字比较问题，强制 `upper += 0`。
+  - 每次运行前清空目标输出目录，避免旧结果混入。
+- 用 `hello_world` 做重建检查，确认输出包含 `Allocation Size Distribution`。
+- 随后重新完整跑完 suite。
+
+有效输出目录：
+- `build.debug/benchmarks/out28_alloc_size_profile`
+
+关键输出文件：
+- `summary.tsv`：每个 benchmark 的总 allocation、平均 payload/footprint、`<=256` / `>256` count 比例。
+- `aggregate_summary.md`：完整 suite 和 targeted 三项的 count/bytes 汇总结论。
+- 每个 benchmark 的 `.out`：完整 payload histogram、footprint histogram、按 cell type 统计。
+
+完整 suite count-based 结果：
+- total allocations：20,131,570,860。
+- payload `<=256`：19,992,449,412，占 99.31%。
+- payload `>256`：139,121,448，占 0.69%。
+- footprint `<=256`：19,992,444,280，占 99.31%。
+- footprint `>256`：139,126,580，占 0.69%。
+
+完整 suite byte-based 结果：
+- payload bytes `<=256`：231,645.97 MB，占 77.28%。
+- payload bytes `>256`：68,091.02 MB，占 22.72%。
+- footprint bytes `<=256`：536,705.27 MB，占 88.43%。
+- footprint bytes `>256`：70,215.19 MB，占 11.57%。
+
+targeted 三项（Storage + CD + Havlak）count-based 结果：
+- total allocations：5,390,445,950。
+- payload `<=256`：5,251,774,731，占 97.43%。
+- payload `>256`：138,671,219，占 2.57%。
+- footprint `<=256`：5,251,769,621，占 97.43%。
+- footprint `>256`：138,676,329，占 2.57%。
+
+targeted 三项 byte-based 结果：
+- payload bytes `<=256`：116,541.53 MB，占 67.34%。
+- payload bytes `>256`：56,532.38 MB，占 32.66%。
+- footprint bytes `<=256`：196,675.94 MB，占 77.03%。
+- footprint bytes `>256`：58,649.68 MB，占 22.97%。
+
+重要单项结果：
+- Storage：total allocations 1,092,302,015，avg payload 40.4 bytes，avg footprint 56.4 bytes，footprint `<=256` 基本 100%。
+- CD：total allocations 2,314,174,982，avg payload 13.0 bytes，avg footprint 29.0 bytes，footprint `>256` 10,786,072，占 0.47%。
+- Havlak：total allocations 1,983,968,953，avg payload 54.1 bytes，avg footprint 70.1 bytes，footprint `>256` 127,890,234，占 6.45%。
+
+实验结论：
+- 绝大多数 allocation event 都是小对象。按 count 看，完整 suite 和 targeted 三项里 `<=256` footprint 都占压倒多数。
+- 这强烈支持继续保留小对象 `memcpy` 路径，不应该回到所有对象一律 non-temporal store。
+- 大对象按 count 很少，但按 bytes 仍然重要。targeted 三项中 `>256` footprint 只占 2.57% 的 allocation count，却占约 22.97% 的 footprint bytes。
+- 因此当前 `<=256 memcpy，>256 non-temporal store` 的分路径策略有数据支持。
+- 后续 staging/batch materialization 实验不应该替代小对象 memcpy；它更应该针对 byte-heavy 的大 bucket，尤其是 Havlak 和 CD。
+
+验证/清理：
+- 完整有效 suite 已跑完。
+- 已恢复 `build.debug/ejsvm`、`build.debug/giy_dram_manager.cc`、`build.debug/giy_dram_manager.o`、`build.debug/gmon.out` 等 tracked build 产物，避免工作区混入构建噪声。
+
+## 2026-05-03 staging/batch materialization 排列方式结论
+
+本次用户询问：
+- 对“把存活 object 先放在相同地方紧凑排列，再用 non-temporal store 传输”这个想法，有哪些可实现方式，尤其是对象该如何排列到一起。
+
+结论：
+- 这个想法可以实现，但不能让对象语义地址变成 staging 地址。
+- 正确原则是：minor GC 的 forwarding pointer 必须仍然指向最终 old address；root、RS、function table slot、young object 内部边也必须 patch 到最终 old address。staging 只能是临时物理缓冲区。
+- 最稳妥的实现不是一开始就“复制到 staging 再复制到 old”，而是先做 materialization queue：
+  - `copy_for_minor` 分配最终 old address，设置 forwarding pointer。
+  - traversal 阶段只 patch young object 内部字段。
+  - 对每个 live object 记录 `(young_src_hdr, old_dst_hdr, aligned_size, type)`。
+  - 最后按这个 queue 执行 materialization。
+
+推荐的对象排列方式：
+- 第一版用 old destination order，也就是 forwarding pointer 分配顺序。
+- 原因：
+  - old address 单调递增，后续写 old 时天然连续。
+  - 不需要排序，记录顺序就是最终 old layout 顺序。
+  - root/slot patch 语义最简单。
+  - 最容易和当前 GiY 实现兼容。
+- 这个版本可以先不做真正 staging，只把当前“边扫描边 copy”改成“先记录 queue，最后按 old order copy/NT”。
+
+如果要做真正 staging：
+- 使用固定大小 staging slab，例如 32KB 或 64KB，cache-line 对齐。
+- 按 old destination order 把 live objects 紧凑打包进 slab。
+- slab 满了以后，按同样顺序把 slab 中对象写到各自 final old address。
+- 这一步仍然不一定能变成一个单次大 memcpy/NT copy，除非 old address layout 与 staging layout 完全一致；因此最好让 old allocation order 和 staging packing order 保持一致。
+
+第二阶段可尝试 size-class 排列：
+- 例如按 footprint 分成 `<=256`、`257-512`、`513-1024`、`>1024`。
+- 小对象继续 memcpy，不要强行 NT。
+- 大对象 bucket 用 NT store 或 staging slab。
+- 这种方式可能改善 CD/Havlak 的大对象路径，但会改变 old layout，需要先规划 bucket 大小，再设置 forwarding pointer，复杂度高于 old-order queue。
+
+不推荐的方式：
+- 不推荐 DFS pop 顺序直接作为最终排列依据，除非它和 old allocation order 一致；否则写 old 会变散。
+- 不推荐把 young object 先复制到 staging，并把 forwarding pointer 指向 staging；这会破坏 root/slot patch 语义。
+- 不推荐小对象全部 staging 后统一 NT；完整 suite 和 targeted 统计都显示小对象按 count 占绝对多数，小对象 memcpy 更有数据支持。
+
+最建议的实验路线：
+- Step 1：实现 materialization queue，按 old destination order 延迟 copy，不引入 staging。
+- Step 2：只对 `>256` 的对象启用 batch/NT 路径，小对象保持 memcpy。
+- Step 3：如果 old-order queue 仍显示大对象写入分散或 NT 效率不足，再引入 32KB/64KB staging slab。
+- Step 4：最后再尝试 size-class bucket，但这是更复杂的第二阶段实验。
+
+一句话结论：
+- 最可实现、风险最低的排列方式是“按最终 old address 顺序排列”。先做 old-order materialization queue，再考虑对大对象引入 staging slab；不要让 staging 成为对象语义地址，也不要用 staging 取代小对象 memcpy。
+
+## 2026-05-03 当前 Practical GiY GC 与 Cheney GC 对比结论
+
+本次用户询问：
+- 给出“当前 GC”和 Cheney GC 的详细对比。
+
+我的理解：
+- “当前 GC”指当前仓库中的 Practical GiY minor GC。
+- “Cheney GC”指标准 Cheney-style copying GC / 仓库中的 `cache_cheney` 对照思路。
+
+核心结论：
+- Cheney GC 的优势是简单、语义自然、实现成熟：复制对象到 to-space/old 后，从新地址继续扫描对象字段，scan 指针和 copy 指针线性推进。
+- 当前 Practical GiY 的目标不是简单复制，而是为 Cache Young -> DRAM Old 架构优化：尽量把对象图遍历和指针修正在 Young/Cache 内完成，避免 minor GC 强扫描阶段读取 Old/DRAM。
+- 因此 GiY 的设计复杂度高于 Cheney，但它减少了 GC core 中对 Old/DRAM 的读触碰，尤其适合 DRAM 读代价高、cache pollution 敏感的实验设定。
+
+关键差异：
+- 对象扫描位置：
+  - Cheney：对象被复制到目标空间后，从目标空间扫描。
+  - GiY：对象留在 Young/Cache 中扫描和 patch，最后 materialize 到 Old/DRAM。
+- Old/DRAM 触碰：
+  - Cheney：scan 目标空间对象时会读已经复制到 Old/DRAM 的对象字段。
+  - GiY：强扫描阶段尽量不读 Old/DRAM；Old/DRAM 主要只接收最终 materialization 写入和必要 old slot patch。
+- remembered set：
+  - Cheney：通常记录 old slot 地址，GC 时可以直接读 slot 当前值。
+  - GiY：记录 old slot 地址和最近写入的 value，GC 扫 RS 时尽量不读 old slot。
+- function table：
+  - Cheney：更容易复用通用 root/function table scan。
+  - GiY：不能全表扫 function table，否则会把大量非 Young/Old metadata 带入 minor GC 热路径；当前用 function table strong slot set 记录真正可能指向 Young 的强 slot。
+- weak reference：
+  - Cheney/通用 GC：强扫描后统一 weak_clear。
+  - GiY：弱边不能保活对象，同时不能留下 Young 悬空指针；当前 inline cache 等弱结构需要更谨慎处理。
+- copy 策略：
+  - Cheney：普通 copy/memcpy 语义即可。
+  - GiY：当前 Practical 版本 `<=256 bytes memcpy`，`>256 bytes non-temporal store`，避免小对象一律 NT store 的高开销。
+
+性能判断：
+- 已有 targeted benchmark 显示：当前 GiY 相比旧 GiY 大幅降低 GC full/scavenge 成本。
+- 相比 cache_cheney，当前 GiY 的 GC core 已更快，但总运行时间仍和 cache_cheney 接近或略慢，说明剩余成本更多来自 remembered set patch、write barrier、cache locality、mutator-side 影响等。
+- allocation size profile 进一步支持当前 Practical GiY 的分路径策略：绝大多数 allocation event 是 `<=256` 小对象，应保留 memcpy；大对象按 count 少但 bytes 有分量，应保留 NT path。
+
+一句话总结：
+- Cheney GC 是“复制后扫描新空间”的简单可靠基线；当前 Practical GiY 是“先在 Cache/Young 内扫描和修指针，最后写 Old/DRAM”的架构优化版本。GiY 更复杂，但更符合避免 Old/DRAM read 和降低 cache pollution 的研究目标。
+
+## 2026-05-03 当前 GiY 与 Cheney 具体 benchmark 差异数据
+
+本次用户追问：
+- 需要具体数据，不要只要概念对比。
+- 用户指出之前已经各跑过 benchmark。
+
+数据来源：
+- Cheney 对照：`build.debug/benchmarks/out24`，cache_cheney root-controlled full suite。
+- 旧 GiY full suite：`build.debug/benchmarks/out22`。
+- 当前最新 Practical GiY targeted：`out27_giy_direct_memcpy`，只有 `Storage/CD/Havlak` 三项。
+
+重要说明：
+- `out22 vs out24` 是完整 suite 对比，但 out22 是旧 GiY，不是当前最终 Practical GiY。
+- `out27 vs out24` 是当前最新 GiY 和 Cheney 的最干净对比，但只有 Storage、CD、Havlak 三项。
+- 刚跑的 `out28_alloc_size_profile` 是 allocation size profiling build，带额外统计开销，不适合作为性能对比。
+
+当前最新 Practical GiY out27 vs Cheney out24：
+- Storage：
+  - total execution：GiY 184.211s，Cheney 209.181s，GiY 快 11.94%。
+  - GC full：GiY 27.182s，Cheney 50.947s，GiY 少 46.65%。
+  - GC core：GiY 24.274s，Cheney 48.552s，GiY 少 50.00%。
+  - scavenge：GiY 24.209s，Cheney 48.342s，GiY 少 49.92%。
+  - Minor GC count：GiY 261,374，Cheney 229,482。
+- CD：
+  - total execution：GiY 257.053s，Cheney 251.045s，GiY 慢 2.39%。
+  - GC full：GiY 12.071s，Cheney 11.989s，GiY 多 0.68%。
+  - GC core：GiY 7.086s，Cheney 8.000s，GiY 少 11.43%。
+  - scavenge：GiY 6.941s，Cheney 7.675s，GiY 少 9.56%。
+  - Minor GC count：GiY 284,514，Cheney 230,567。
+- Havlak：
+  - total execution：GiY 446.590s，Cheney 417.826s，GiY 慢 6.88%。
+  - GC full：GiY 32.513s，Cheney 38.889s，GiY 少 16.40%。
+  - GC core：GiY 22.526s，Cheney 29.936s，GiY 少 24.75%。
+  - scavenge：GiY 21.458s，Cheney 27.866s，GiY 少 23.00%。
+  - Minor GC count：GiY 590,600，Cheney 502,801。
+
+当前最新 Practical GiY targeted 三项合计：
+- total execution：GiY 887.854s，Cheney 878.052s，GiY 总时间慢 1.12%。
+- GC full：GiY 71.766s，Cheney 101.825s，GiY 少 29.52%。
+- GC core：GiY 53.886s，Cheney 86.488s，GiY 少 37.70%。
+- scavenge：GiY 52.608s，Cheney 83.883s，GiY 少 37.28%。
+
+数据解释：
+- 当前 GiY 的 GC 主体已经明显优于 Cheney：targeted 三项 GC core 少 37.70%，scavenge 少 37.28%。
+- 但总时间还没有全面赢：Storage 赢 11.94%，CD 慢 2.39%，Havlak 慢 6.88%，三项合计慢 1.12%。
+- 这说明问题不在 GC core 主扫描，而更可能在 write barrier、remembered set patch、old slot update、cache locality、mutator-side overhead。
+
+旧 GiY out22 full suite vs Cheney out24：
+- full suite total execution：旧 GiY 3715.449s，Cheney 3499.343s，旧 GiY 慢 6.18%。
+- full suite GC full：旧 GiY 291.428s，Cheney 119.450s，旧 GiY 多 143.97%。
+- full suite GC core：旧 GiY 252.463s，Cheney 89.940s，旧 GiY 多 180.70%。
+- full suite scavenge：旧 GiY 250.646s，Cheney 85.707s，旧 GiY 多 192.45%。
+- 这组数据说明旧 GiY 明显不如 Cheney；后来的 out27 Practical GiY 已经把 targeted 三项的 GC core 反超 Cheney。
+
+一句话结论：
+- 如果看旧 full-suite GiY，GiY 明显输给 Cheney；如果看当前最新 Practical GiY 的 targeted 三项，GiY 的 GC core 已经赢 Cheney 很多，但总运行时间还差约 1.12%，剩余瓶颈主要在 GC core 之外。
+
+## 2026-05-03 当前 GiY full suite 补跑与 Cheney out24 性能调查
+
+本次用户要求：
+- 补跑一轮新的当前 GiY full suite。
+- 不要让刚才 allocation size profile 测试的噪音影响结果。
+- 详细比较 GiY 和 Cheney GC 的性能，并调查差异原因。
+
+执行方式：
+- 输出目录：`build.debug/benchmarks/out29_giy_current_full`。
+- 对照目录：`build.debug/benchmarks/out24`。
+- 构建前删除：
+  - `build.debug/giy_dram_manager.cc`
+  - `build.debug/giy_dram_manager.o`
+  - `build.debug/ejsvm`
+- 重新执行：`make OPT_GC=giy -j2`。
+- 编译命令确认没有 `-DALLOC_SIZE_PROFILE=1`，因此不受 `out28_alloc_size_profile` 的统计开销影响。
+- 完整跑完 benchmark suite：
+  - Bounce
+  - List
+  - Sieve
+  - Queens
+  - Permute
+  - Storage
+  - Towers
+  - Mandelbrot
+  - Richards
+  - CD
+  - NBody
+  - Havlak
+
+生成文件：
+- `build.debug/benchmarks/out29_giy_current_full/README.txt`
+- `build.debug/benchmarks/out29_giy_current_full/compare_out29_vs_out24.tsv`
+- `build.debug/benchmarks/out29_giy_current_full/cause_investigation_out29_vs_out24.tsv`
+- `build.debug/benchmarks/out29_giy_current_full/investigation_report.md`
+
+full-suite 总体结果：
+- Total execution：
+  - GiY out29：3521.378s。
+  - Cheney out24：3499.343s。
+  - GiY 慢 0.63%。
+- Business logic：
+  - GiY：3428.880s。
+  - Cheney：3379.894s。
+  - GiY 多 48.986s，多 1.45%。
+- GC full：
+  - GiY：92.497s。
+  - Cheney：119.450s。
+  - GiY 少 26.953s，少 22.56%。
+- GC core：
+  - GiY：55.822s。
+  - Cheney：89.940s。
+  - GiY 少 34.118s，少 37.93%。
+- scan_roots：
+  - GiY：0.466s。
+  - Cheney：1.307s。
+  - GiY 少 64.35%。
+- scan_RS：
+  - GiY：1.206s。
+  - Cheney：2.925s。
+  - GiY 少 58.77%。
+- scavenge：
+  - GiY：54.148s。
+  - Cheney：85.707s。
+  - GiY 少 36.82%。
+- Minor GC count：
+  - GiY：2,709,304。
+  - Cheney：2,341,014。
+  - GiY 多 15.73%。
+- Write barrier calls：
+  - GiY：2,087,865,377。
+  - Cheney：2,054,529,628。
+  - GiY 多 1.62%。
+- Forward operations：
+  - GiY：1,636,291,388。
+  - Cheney：1,696,428,830。
+  - GiY 少 3.54%。
+- Total allocations：
+  - GiY：20,177,532,732。
+  - Cheney：19,789,564,672。
+  - GiY 多 1.96%。
+- GC full - GC core：
+  - GiY：36.675s。
+  - Cheney：29.510s。
+  - GiY 多 24.28%。
+
+单项重点：
+- Storage 是 GiY 最强项：
+  - total：187.000s vs 209.181s，GiY 快 10.60%。
+  - GC full：27.403s vs 50.947s，GiY 少 46.21%。
+  - GC core：24.421s vs 48.552s，GiY 少 49.70%。
+- Havlak 是 GiY 最大问题：
+  - total：447.385s vs 417.826s，GiY 慢 7.07%。
+  - GC core：22.654s vs 29.936s，GiY 少 24.33%。
+  - business logic：414.267s vs 378.938s，GiY 多 35.329s，多 9.32%。
+- CD：
+  - total：257.280s vs 251.045s，GiY 慢 2.48%。
+  - GC core：7.062s vs 8.000s，GiY 少 11.72%。
+  - business logic：245.134s vs 239.056s，GiY 多 6.078s，多 2.54%。
+
+原因调查结论：
+- GiY 的 GC core 已经赢了 Cheney，full suite 少 37.93%；scavenge 少 36.82%。这说明当前 GiY 的核心扫描/复制方向是有效的。
+- 但 total execution 仍慢 0.63%，原因是 business/non-GC time 增加 48.986s，抵消了 GC full 节省的 26.953s。
+- GiY minor GC count 多 15.73%，很可能和 GiY 辅助结构占用 young/cache 空间有关，例如 GC stack、function-table slot set 等减少了 active young allocation area。
+- GiY 的 GC full - GC core 多 24.28%，说明 core 外还有更高成本，可能来自 old slot patch、weak/metadata maintenance、GC entry/exit、profile/reporting 等。
+- Havlak/CD 的 business time 增长最值得查：
+  - Havlak write barrier calls 多 21.22%，allocations 多 9.31%，business time 多 35.329s。
+  - CD write barrier calls 多 4.54%，allocations 多 10.25%，business time 多 6.078s。
+- benchmark harness 两边都是 100 iterations，所以 Havlak/CD 的 allocation 差异不是顶层 benchmark 迭代次数不同导致的，更可能来自 VM/runtime 行为差异，例如 inline cache/hidden class/shape/cache retention、GC 触发导致的 metadata/cache invalidation、或者 weak-cache 清理策略差异。
+- out29 和之前 out27 targeted 三项一致性很好：
+  - Storage total 比 out27 慢 1.51%，GC core 多 0.61%。
+  - CD total 比 out27 慢 0.09%，GC core 少 0.34%。
+  - Havlak total 比 out27 慢 0.18%，GC core 多 0.57%。
+  - 因此 out29 可以认为是干净的当前 GiY full-suite 性能 run。
+
+下一步建议：
+- 优先调查 Havlak/CD 为什么 GiY allocations 更多。
+- 分解 write barrier 和 remembered-set insertion/duplicate-check 成本。
+- 单独计时 old-slot patch、weak_clear、function-table slot patch、GC entry/exit 等 GC core 外阶段。
+- 尝试减少 GiY auxiliary cache footprint 或增大 young active area，观察 minor GC count 是否下降。
+- 对 Havlak/CD 做 materialization order / staging / batch 实验，但不要影响小对象 memcpy 路径。
+
+清理：
+- 已恢复 tracked build 产物：
+  - `build.debug/ejsvm`
+  - `build.debug/giy_dram_manager.cc`
+  - `build.debug/giy_dram_manager.o`
+  - `build.debug/gmon.out`
+
+## 2026-05-03 business/non-GC time 增加 48.986s 的原因调查与验证
+
+结论：
+- `out29_giy_current_full` 相对 Cheney `out24` 的 business/non-GC time 增加 `48.986s`，主因不是 GC core。GiY 的 GC core 反而从 `89.940s` 降到 `55.822s`，少 `34.118s` / `37.93%`。
+- business 增量主要集中在 Havlak 和 CD：
+  - Havlak：business `414.267s` vs `378.938s`，多 `35.329s`，贡献 `72.12%`。
+  - CD：business `245.134s` vs `239.056s`，多 `6.078s`，贡献 `12.41%`。
+  - Havlak + CD 合计 `41.407s`，解释 `84.53%` 的 business 增量。
+- 已排除两个假因：
+  - 关键 benchmark 两边都是 `iterations=100`。
+  - out29 是无 `ALLOC_SIZE_PROFILE=true` 的 clean performance run，allocation-size profile 的 out28 没有参与性能对比。
+
+验证 1：GiY active young area 变小解释了普遍的 minor GC 增加。
+- GiY 输出：
+  - Young before aux：`300.24 KB`。
+  - Young after aux：`230.72 KB`。
+  - Aux total：`69.52 KB`，其中 stack `37.52 KB`，function-table slots `32.00 KB`。
+- Cheney 源码中 function-table slot 预留约 `young_bytes / 8`，所以从 `300.24 KB` 推算 active young 约 `262.71 KB`。
+- 由容量推算的 minor GC 增加：`262.71 / 230.72 - 1 = 13.865%`。
+- 实测 allocation 数基本相同的 workload 中，minor GC 增加约 `13.90%`：
+  - Bounce `13.918%`，List `13.899%`，Storage `13.897%`，Mandelbrot `13.906%`，NBody `13.900%`。
+- 所以 GiY 辅助结构占用 cache/young 空间确实导致了更高 minor GC 频率，但这只能解释普遍的小幅扰动，不足以解释 Havlak/CD 的主要 business time 增量。
+
+验证 2：具体 business 开销来自 GiY write barrier 的 remembered-set value-update 线性扫描。
+- GiY remembered set 为了避免 GC 时读 old slot，保存了 `buffer[]` 和 `values[]`。
+- 当 old/init slot 写入 young value 时，GiY 记录 value。
+- 当同一个 old/init slot 后续写入 immediate/old/null 时，GiY 调用 `rememberset_update_existing(slot, 0)` 清除旧 value。
+- 当前 `rememberset_update_existing` 通过 `rememberset_find_index` 线性扫描 `remembered_set.buffer[0..count)`。
+- 这段发生在 `write_barrier` / `write_barrier_ptr` 内，因此记入 business/non-GC time。
+- 现有 `Write barrier calls` 只统计 young-value add，不统计这些 clear/update 扫描，所以之前计数看不到真正开销。
+
+我添加了默认关闭的验证开关 `GIY_WB_PROFILE=true`，只跑 CD/Havlak 做验证，不作为性能 baseline：
+- CD：
+  - Update attempts：`43,851,721`。
+  - Update scan steps：`401,694,113`。
+  - Steps/attempt：`9.160`。
+  - Clear attempts：`40,851,797`。
+  - Existing WB calls：`9,573,828`。
+  - 等价于每个已计数 WB call 额外 `41.96` 次线性扫描 step。
+- Havlak：
+  - Update attempts：`444,200,570`。
+  - Update scan steps：`190,916,727,113`。
+  - Steps/attempt：`429.798`。
+  - Clear attempts：`417,674,314`。
+  - Existing WB calls：`165,000,542`。
+  - 等价于每个已计数 WB call 额外 `1157.07` 次线性扫描 step。
+
+这验证了最主要原因：Havlak 贡献 `72.12%` 的 business regression，同时它在 GiY write barrier profile 中产生约 `1909亿` 次 remembered-set 线性扫描 step。GC core 变快但 business time 增加，正是这个 mutator-side RSet value-update/clear-update 路径造成的。
+
+次要因素：
+- Havlak allocation 也从 `1,856,819,962` 增到 `2,029,600,757`，多 `172,780,795` / `9.30%`。
+- CD allocation 从 `2,099,019,821` 增到 `2,314,174,986`，多 `215,155,165` / `10.25%`。
+- 两边都是 100 iterations，所以不是 harness 次数差异。这个更可能来自不同 GC 时机影响 VM/runtime cache、shape、inline cache、weak metadata 等对象生命周期。
+
+修复方向：
+- 优先把 `rememberset_update_existing` 从线性扫描改成 hash-probe 后 O(1) 更新：
+  - hash table 存 slot 对应的 buffer index，或维护并行 index table。
+  - duplicate/update 时直接 `values[index] = value`。
+  - 处理当前 `HASH_PROBE_LIMIT` 后 fallback 插入的条目，避免出现只能线性找的 overflow 项。
+- 修完后先重跑 Havlak/CD/Storage，再跑 full suite。
+- 预期 Havlak business time 改善最大，CD 次之；GC core 优势应保持。
+
+记录文件：
+- 详细报告：`build.debug/benchmarks/out29_giy_current_full/business_non_gc_delta_investigation.md`。
+- 插桩验证输出：`build.debug/benchmarks/out30_giy_wb_profile/CD.out`、`build.debug/benchmarks/out30_giy_wb_profile/Havlak.out`。
