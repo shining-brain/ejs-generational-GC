@@ -71,6 +71,10 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 #define GIY_PROFILE_DETAIL 0
 #endif
 
+#ifndef GIY_AS_DRY_PROFILE
+#define GIY_AS_DRY_PROFILE 0
+#endif
+
 struct GiYProfile {
   unsigned long long minor_collections;
   unsigned long long stack_pushes;
@@ -108,6 +112,11 @@ struct GiYProfile {
 
   unsigned long long rset_slots_scanned;
   unsigned long long rset_slots_patched;
+
+  unsigned long long as_dry_objects;
+  unsigned long long as_dry_pm_null;
+  unsigned long long as_dry_pm_match;
+  unsigned long long as_dry_pm_mismatch;
 
   size_t aux_stack_bytes;
   size_t aux_edge_bytes;
@@ -609,6 +618,20 @@ static inline uintptr_t forwarded_or_self(uintptr_t ptr);
 
 template<typename Tracer>
 static void giy_scan_jsobject_conservative(JSObject *p) {
+#if GIY_AS_DRY_PROFILE && defined(ALLOC_SITE_CACHE)
+  Shape *dry_shape = p->shape;
+  if (dry_shape != NULL && dry_shape->alloc_site != NULL) {
+    AllocSite *as = dry_shape->alloc_site;
+    giy_profile.as_dry_objects++;
+    if (as->pm == NULL)
+      giy_profile.as_dry_pm_null++;
+    else if (GC_PM_EQ(dry_shape->pm, as->pm))
+      giy_profile.as_dry_pm_match++;
+    else
+      giy_profile.as_dry_pm_mismatch++;
+  }
+#endif
+
   giy_process_edge<Tracer>(p->shape);
 
   object_header *hdr = ((object_header *) p) - 1;
@@ -1444,6 +1467,12 @@ void giy_print_profile() {
          giy_profile.rset_slots_scanned);
   printf("Remembered set slots patched:  %llu\n",
          giy_profile.rset_slots_patched);
+#if GIY_AS_DRY_PROFILE && defined(ALLOC_SITE_CACHE)
+  printf("AS dry objects:       %llu\n", giy_profile.as_dry_objects);
+  printf("AS dry pm null:       %llu\n", giy_profile.as_dry_pm_null);
+  printf("AS dry pm match:      %llu\n", giy_profile.as_dry_pm_match);
+  printf("AS dry pm mismatch:   %llu\n", giy_profile.as_dry_pm_mismatch);
+#endif
 
   printf("Materialized by cell type:\n");
   for (unsigned int i = 0; i < GIY_PROFILE_CELL_TYPES; i++) {

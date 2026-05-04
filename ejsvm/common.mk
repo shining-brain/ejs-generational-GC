@@ -110,6 +110,26 @@ ifeq ($(GIY_WB_PROFILE),true)
 CPPFLAGS += -DGIY_WB_PROFILE=1
 endif
 
+ifeq ($(GIY_PROFILE_DETAIL),true)
+CPPFLAGS += -DGIY_PROFILE_DETAIL=1
+endif
+
+ifeq ($(GIY_AS_DRY_PROFILE),true)
+CPPFLAGS += -DGIY_AS_DRY_PROFILE=1
+endif
+
+ifeq ($(GIY_RSET_INDEX_FAST),true)
+CPPFLAGS += -DGIY_RSET_INDEX_FAST=1
+endif
+
+ifeq ($(AS_PROF),true)
+CPPFLAGS += -DAS_PROF
+endif
+
+ifneq ($(CACHE_SIZE_KB),)
+CPPFLAGS += -DCACHE_SIZE_KB=$(CACHE_SIZE_KB)
+endif
+
 ifeq ($(USE_VMDL),true)
 CPPFLAGS += -DUSE_VMDL
 CPPFLAGS_VMDL += -Wno-parentheses-equality -Wno-tautological-constant-out-of-range-compare

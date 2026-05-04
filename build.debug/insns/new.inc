@@ -26,7 +26,7 @@ TLnew_regexp:
 TLnew_simple_object:
 TLnew_special:
 TLnew_string:
-{ // normal_string vmgen.newsynth.DecisionDiagram$Leaf@435
+{ // normal_boolean_object vmgen.newsynth.DecisionDiagram$Leaf@54
 
 dst = JS_UNDEFINED;
 /* Local Variables:      */

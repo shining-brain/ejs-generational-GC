@@ -48,6 +48,10 @@ long long generational_forward_count = 0;
 #define GIY_WB_PROFILE 0
 #endif
 
+#ifndef CACHE_SIZE_KB
+#define CACHE_SIZE_KB 512
+#endif
+
 #if GIY_WB_PROFILE
 extern "C" void giy_print_wb_profile();
 #endif
@@ -747,7 +751,7 @@ void space_init(size_t bytes, size_t threshold_bytes)
     printf("object_header size: %lu bytes\n", sizeof(object_header));
     initial_alloc_bytes = 0;
     //initial cache space
-    long cache_size = 512*1024; // 512KB cache space
+    long cache_size = CACHE_SIZE_KB * 1024; // cache space
     // long cache_size = 100*1024*1024; // 100MB cache space
     cache_space.begin = (uintptr_t) malloc(cache_size); // 512KB cache space
     cache_space.current = cache_space.begin;

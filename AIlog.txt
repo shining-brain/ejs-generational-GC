@@ -133,3 +133,579 @@
 
 详细报告：`build.debug/benchmarks/out29_giy_current_full/business_non_gc_delta_investigation.md`。
 插桩验证输出：`build.debug/benchmarks/out30_giy_wb_profile/CD.out`、`build.debug/benchmarks/out30_giy_wb_profile/Havlak.out`。
+
+## 2026-05-03 深度因果调查：business/non-GC gap 的进一步验证
+
+新增实验：
+- `out31_giy_rset_index_fast`：`GIY_RSET_INDEX_FAST=true`，不打开 WB profile，用来做性能消融。
+- `out32_giy_rset_index_fast_wb_profile`：确认 fast index 后 update scan step 是否消失。
+- `out33_giy_index_cache552`：`GIY_RSET_INDEX_FAST=true CACHE_SIZE_KB=552`，把 GiY active young 从 `230.72KB` 提到 `265.72KB`，接近 Cheney 估算 active young `262.71KB`。
+
+实验 1 结论：RSet update 线性扫描是 Havlak 的强因果项。
+- Havlak out29 business：`414.267s`。
+- Havlak out31 index business：`395.732s`。
+- 下降 `18.535s`，关闭 Havlak business gap 的 `52.46%`。
+- GC core 基本不变：`22.654s -> 22.570s`，所以改善不是 GC core 噪音，而是 mutator-side metadata lookup 成本。
+- CD 没改善：`245.134s -> 245.848s`，说明 CD 主因不是这条线性扫描。
+
+profile 反证：
+- CD update scan steps：`401,694,113 -> 121,419`，下降 `99.97%`，但本来量级小，性能没改善。
+- Havlak update scan steps：`190,916,727,113 -> 2,744,439,102`，下降 `98.56%`，对应 business 大幅回收。
+- index 版本 Havlak 还有 `3,692,903` 个 fallback insertions，留下 `2.744B` fallback scan steps，正式修复要消除 overflow/fallback 线性扫描。
+
+实验 2 结论：GiY active young 过小是 Havlak 的第二个因果项，但不是 CD 主因。
+- CD：minor GC `284,514 -> 246,970`，business `245.848s -> 245.245s`，只改善 `0.603s`；allocation 几乎不变。
+- Havlak：minor GC `590,600 -> 512,300`，business `395.732s -> 389.257s`，改善 `6.475s`；allocation 几乎不变。
+- 因此 Havlak 有明显 higher minor-GC frequency / metadata churn penalty；CD gap 基本不是这个。
+
+CD + Havlak 合并：
+- out29 baseline business gap vs Cheney：`+41.407s`。
+- out31 RSet index 后：`+23.586s`。
+- out33 RSet index + cache552 后：`+16.508s`。
+- 两个消融实验合计关闭 `60.13%` 的 CD+Havlak business gap。
+
+最终判断：
+- 高置信：Havlak 最大 business regression 成分来自 GiY RSet `values[]` 清理/更新的线性扫描。
+- 高置信：GiY active young 过小导致 minor GC 增加，并给 Havlak 带来约 `6.5s` business penalty。
+- 中高置信：剩余 CD/Havlak gap 是 extra mutator work，主要体现为更多 actual allocations 和普通 write barrier：
+  - out33 CD allocations 仍比 Cheney 多 `10.25%`。
+  - out33 Havlak allocations 仍比 Cheney 多 `9.31%`。
+  - out33 CD WB 仍多约 `2.03%`。
+  - out33 Havlak WB 仍多约 `18.96%`。
+- allocation 差异在 active young 调整后几乎不变，所以不是 young capacity 的直接结果，更像 GiY runtime/cache/metadata 行为差异，例如 inline-cache、alloc-site-cache、weak-shape/property-map metadata churn。
+
+修复建议：
+- 正式实现 GiY RSet `slot -> buffer index` 的 O(1)/bounded update，并消除 fallback 线性扫描。
+- 重新设计 GiY auxiliary footprint，保证和 Cheney 对比时 active young 容量等价。
+- 之后再加可靠的 allocation-site / weak_clear invalidation / inline-cache invalidation 计数，定位剩余 extra allocations。
+
+详细报告：`build.debug/benchmarks/out29_giy_current_full/deep_business_gap_causal_investigation.md`。
+
+## 2026-05-03 RSet update 查找的目的、语义和瓶颈解释
+
+结论：
+- 这个查找不是为了 GC 时扫描 RSet，而是在 mutator 的 write barrier 里维护 GiY RSet 的 `values[]`。
+- GiY RSet 记录的是 `(slot_addr, last_written_value)`，而 Cheney RSet 基本只记录 `slot_addr`。
+- GiY 这样做的目的，是 minor GC 时尽量不读 old/init slot 当前值，减少 Old/DRAM read。
+- 因此 GiY 必须保证 RSet 里的 `values[i]` 不过期；一旦 old/init slot 不再指向 young object，就要把对应的 `values[i]` 清成 0。
+- 当前为了找到 `values[i]` 对应的 index，代码线性扫描 `remembered_set.buffer[]`，这就是最大的已确认单项瓶颈，尤其在 Havlak 里非常严重。
+
+为什么必须查找：
+- 例子：
+  - `t1: old_obj.field = young_obj_A`
+  - GiY RSet 记录：`slot=&old_obj.field, value=young_obj_A`
+  - `t2: old_obj.field = null` 或 `old_obj.field = old_obj_B`
+- 到 `t2` 时，这个 slot 当前已经不再引用 `young_obj_A`。
+- 如果 GiY 不更新 RSet 中的 value，minor GC 会继续看到 `value=young_obj_A`，错误地认为 `young_obj_A` 仍然 live。
+- 所以 write barrier 必须找到这个 slot 原来在 RSet 中的 index，然后执行：
+  - `remembered_set.values[index] = 0`
+- 这就是 `rememberset_update_existing(slot, 0)` 的语义目的。
+
+为什么不能简单不查：
+- 如果不清旧 value：
+  - 会导致 young object 被错误保活。
+  - 会增加不必要的 forward/copy/patch。
+  - 严重时会破坏 GiY 对 “RSet value 表示 slot 当前 young 引用” 的语义。
+- 如果每次都追加一条新记录：
+  - 同一个 slot 会出现多条历史记录，例如 `slot X -> young_A`、`slot X -> 0`、`slot X -> young_B`。
+  - minor GC 必须处理版本覆盖关系，否则旧 young_A 仍可能被错误保活。
+  - RSet 会膨胀，GC 扫描成本也会上升。
+- 因此查找是语义上需要的，但查找方式不应该是线性扫描。
+
+当前性能问题：
+- 当前路径大致是：
+  - `write_barrier(...)`
+  - `rememberset_update_existing(slot, value)`
+  - `rememberset_find_index(slot)`
+  - 遍历 `remembered_set.buffer[0..count)` 找 slot。
+- 这个查找发生在 mutator 阶段，所以时间记入 business/non-GC time。
+- 现有 `Write barrier calls` 只统计 young-value add，不能完整反映这些 clear/update 查找成本。
+- 实测 profile：
+  - CD baseline update scan steps：`401,694,113`。
+  - Havlak baseline update scan steps：`190,916,727,113`。
+
+fast index 证明：
+- 实验开关 `GIY_RSET_INDEX_FAST=true` 让 RSet hash table 额外记录 slot 对应的 `buffer[]/values[]` index。
+- 更新路径从 `slot -> 线性扫描 buffer[] -> index -> values[index]` 变成 `slot -> hash probe -> index -> values[index]`。
+- Havlak update scan steps 从 `190,916,727,113` 降到 `2,744,439,102`，下降 `98.56%`。
+- Havlak business 从 `414.267s` 降到 `395.732s`，直接收回 `18.535s`。
+- GC core 基本不变：`22.654s -> 22.570s`。
+- 这证明改善来自 mutator-side RSet metadata lookup，不是 GC core 噪音。
+
+正确修复方向：
+- RSet hash table 不应只用于去重，还应能返回 `buffer[]/values[]` 的 index。
+- 正式设计应实现：`slot_addr -> bounded hash probe -> index -> values[index] = current_young_value_or_0`。
+- 还要处理 `HASH_PROBE_LIMIT` 后的 fallback 插入，不能让 fallback 只能靠线性扫描找回。
+- 一句话：查找这个动作是为了保持 GiY RSet `values[]` 的正确语义；错不在“查找需求”，而在当前用线性扫描实现 slot 到 index 的映射。
+
+## 2026-05-03 收回 RSet 线性扫描损失后，business 时间是否接近 Cheney
+
+结论：
+- 如果只收回已经验证的 RSet update 线性扫描损失，GiY 的总时间会非常接近 Cheney，但 business 时间本身仍然明显慢于 Cheney。
+- full suite 粗略估算：
+  - 当前 out29 business gap：`3428.880s - 3379.894s = +48.986s`。
+  - Havlak RSet index 实验收回 `18.535s`。
+  - 剩余 business gap 约 `48.986s - 18.535s = +30.451s`。
+  - 相对 Cheney business `3379.894s`，仍慢约 `0.90%`。
+  - 当前 out29 total 比 Cheney 慢 `+22.035s`；若只收回 `18.535s`，total 还会慢约 `+3.500s`，约 `+0.10%`。
+- 所以：总时间会接近到几乎打平，但 business 时间还没有真正接近；还剩约 `30s` 级别的 non-GC gap。
+
+CD + Havlak 实测消融：
+- 原始 out29 两项合计 business gap：`+41.407s`。
+- 只加 RSet index 后 out31：
+  - CD business：`245.848s` vs Cheney `239.056s`，仍慢 `+6.792s`。
+  - Havlak business：`395.732s` vs Cheney `378.938s`，仍慢 `+16.794s`。
+  - 两项合计 business gap：`+23.586s`。
+  - RSet index 关闭 CD+Havlak business gap 的 `43.04%`，还剩 `56.96%`。
+- 再加 active young 容量消融 out33：
+  - CD business gap：`+6.189s`。
+  - Havlak business gap：`+10.319s`。
+  - 两项合计 business gap：`+16.508s`。
+  - 两个消融合计关闭 `60.13%`，但仍未完全贴近 Cheney。
+
+判断：
+- 如果目标是 total execution，收回 RSet 线性扫描后已经非常接近 Cheney。
+- 如果目标是 business/non-GC 本身，仍不够接近，尤其 CD 的 business gap 基本没有被 RSet index 解决。
+- 剩余 business gap 主要是 extra mutator work：CD allocations 仍多 `10.25%`，Havlak allocations 仍多 `9.31%`，Havlak write barrier 仍多约 `18.96%`。
+
+## 2026-05-03 是否可以把 GiY 中 stale RSet value 当作 floating garbage
+
+结论：
+- 在当前 GiY 实现里，不能简单把 RSet 里过期的 young value 当成 floating garbage，然后不再清理/更新它。
+- 原因是当前 GiY 不只是把 `remembered_set.values[i]` 当作保守 root；它还会在 patch 阶段根据这个 saved value 回写真实 old/init slot。
+- 如果 saved value 已经过期，patch 阶段可能把已经写成 `null`、immediate、或 old object 的 slot 重新写回 stale young object 的 promoted 地址。这不是 floating garbage，而是程序语义错误。
+
+危险例子：
+- `t1: old_obj.field = young_A`
+  - RSet 记录：`slot=&old_obj.field, value=young_A`
+- `t2: old_obj.field = null`
+  - 如果不清 RSet value，RSet 仍然保存 `value=young_A`。
+- minor GC：
+  - scan 阶段把 `young_A` 当作 live，复制/forward 到 old。
+  - patch 阶段看到 `value=young_A` 被 forward，于是把 `old_obj.field` 写成 `forwarded(young_A)`。
+- 结果：
+  - 程序本来已经把 `old_obj.field` 设为 `null`。
+  - GC 后它又变回了指向 `young_A` 的 old 地址。
+  - 这会直接破坏 JavaScript 可观察语义。
+
+为什么这不是普通 floating garbage：
+- 普通 floating garbage 是对象被多保活一轮，但没有 live object 指向它。
+- 当前 GiY stale value 的问题是 patch 阶段会把 stale object 重新写入 live old slot，使它重新变成可达对象。
+- 因此它不是“无害地多保活”，而是可能“复活旧引用”。
+
+如果想让它真的变成 floating garbage，需要改算法：
+- saved value 只能用于 reserve/copy，不能直接用于 patch old slot。
+- patch 前必须验证 old slot 当前值仍等于 saved value，或者维护 slot 版本号/sequence。
+- 但 patch 前读 old slot 会重新引入 Old/DRAM read，违背 GiY 减少 old read 的目标。
+
+另一个现实问题：
+- 即使 stale value 只造成 floating garbage，被复制到 old/DRAM 后，下一轮 minor GC 也不能回收它。
+- minor GC 只回收 young/cache 区；promoted 到 old/DRAM 的 floating garbage 需要 major GC 才能回收。
+- 当前 major GC 路径仍不完整，不能指望“下一轮 minor 再处理”。
+
+所以正确方向：
+- 不能直接不清 stale RSet value。
+- 应该把 `slot -> index` 查找从线性扫描改成 O(1)/bounded update。
+- 如果想接受 floating garbage，必须重新定义 GiY RSet semantics：saved value 只能作为保守 root，不能用于无验证 patch；并且要有 major GC 或 old-space 回收机制承接 promoted garbage。
+
+## 2026-05-03 Cheney GC 下 RSet 去重是否也不可或缺
+
+结论：
+- Cheney GC 下 RSet 去重也很重要，但重要性主要是容量和性能，不是 GiY 这种 `values[]` stale-value 语义正确性。
+- Cheney RSet 只记录 slot 地址；minor GC 扫 RSet 时会读取 slot 当前值。
+- 因此如果 old slot 后来被写成 `null`、immediate、或 old object，Cheney 不需要更新/清理 RSet entry；GC 时读到当前值不是 young，就自然跳过。
+- GiY RSet 记录 `(slot_addr, saved_value)`；minor GC 不读 old slot 当前值，而是相信 saved value。因此 GiY 必须在 write barrier 阶段更新/清理 saved value，否则 patch 阶段可能复活旧引用。
+
+Cheney 如果不去重：
+- 语义上通常仍然正确，因为 minor GC 会重复读取同一个 slot 的当前值，forwarding 通常幂等。
+- 但性能和容量会很差：RSet 膨胀、scan_RS 重复读 old slot、capacity 可能被重复 entry 填满。
+
+GiY 如果不去重/不查找：
+- 不只是性能问题，也可能是语义问题。
+- 同一个 slot 的 saved value 必须保持“最新 young value 或 0”。
+- 如果 old slot 当前已经改成 `null`，但 RSet 还保存旧 young value，scan 阶段会把旧 young value 当 live，patch 阶段还可能把真实 old slot 改回旧 young value 的 promoted address。
+
+一句话：
+- Cheney 的去重是“避免 RSet 重复 entry 导致容量/性能爆炸”。
+- GiY 的查找/去重是“避免容量/性能爆炸，同时维护 saved value 的最新性，保证 patch 语义正确”。
+- 所以 Cheney 下去重也不可或缺，但它不是同一种不可或缺；GiY 对 `slot -> index` 的需求更强。
+
+## 2026-05-03 如果 RSet 按写入顺序保留重复项，最后一条是否能覆盖前面的
+
+结论：
+- 理论上，如果把 RSet 改造成完整的 per-slot 写日志，并且 GC 时按“latest write wins”的规则折叠，那么最后一条确实可以代表 slot 的最终状态。
+- 但这不是当前 GiY RSet 的语义，也不能简单通过“允许重复项并按顺序 patch”来保证正确。
+
+关键反例：
+- `t1: slot = young_A`
+- `t2: slot = null`
+- 如果 RSet 保留：
+  - `slot -> young_A`
+  - `slot -> 0`
+- 当前 patch 逻辑遇到 `value=0` 是跳过，不会把 slot 写回 null。
+- patch 阶段会先把 slot 写成 `forwarded(A)`，然后最后一条 0 被跳过。
+- 最终 slot 错误地变成 `forwarded(A)`。
+- 所以“最后一条会覆盖”只有在最后一条真的执行写回时才成立；0 tombstone 如果只是 skip，不会覆盖任何东西。
+
+如果最后一次写入还是 young：
+- `t1: slot = young_A`
+- `t2: slot = young_B`
+- 顺序 patch 后最终可以是 B，语义上可对。
+- 但 scan 阶段在 patch 前已经把 A 也当 live promote 到 old，制造 floating garbage。
+
+如果要让重复 RSet 方案正确，需要重新设计：
+- 完整写日志 + replay：记录每次 old/init slot 写入的真实值，包括 null、immediate、old、young；patch 时按顺序重放。但 scan 阶段仍要避免扫描历史 stale young，而且日志会巨大。
+- 反向 latest-wins 折叠：GC 时从末尾往前扫，每个 slot 只处理最新 entry；这需要 `seen slots` 集合，本质上还是去重/索引，只是把成本从 write barrier 转移到 GC。
+- 当前更合理方向：write barrier 维护 `slot -> index`，已有 slot 直接更新 `values[index]` 为最新 young value 或 0。
+
+为什么完整写日志不现实：
+- CD clear attempts 约 `40,851,797`。
+- Havlak clear attempts 约 `417,674,314`。
+- 如果这些都追加为 RSet log entry，远超当前 RSet 容量和 cache 预算。
+
+总结：
+- “最后写入覆盖前面”这个思路理论上成立，但前提是 RSet 是完整写日志，并且 GC 做 latest-wins 折叠。
+- 当前 GiY 的 `values[]` 是每个 slot 的最新摘要，不是历史日志。
+- 对最新摘要结构来说，必须能找到旧 slot 的 index 并更新；否则会产生 stale value。
+- 因此当前最务实的修复仍然是 `slot -> index` 的 O(1)/bounded update，而不是允许无限重复项。
+
+## 2026-05-03 为什么会有 value=0 的 RSet 记录，以及为什么不能简单每次处理 0
+
+为什么会产生 `value=0`：
+- GiY RSet 的 `values[]` 是每个 remembered slot 的“当前 young 引用摘要”。
+- 当 old/init slot 写入 young object 时，`values[index] = young_value`。
+- 当同一个 slot 后来写入的不是 young object 时，例如 null、fixnum/special、old object、init/non-young object，这个 slot 就不再是 old-to-young edge。
+- 为了让 GC 扫 RSet 时知道“这个 slot 当前没有 young 引用”，GiY 会把对应 `values[index]` 更新成 0。
+- 所以 `value=0` 是 tombstone / no-young-edge 标记，不是普通对象引用。
+
+为什么不能在当前 patch 里简单“处理 value=0 并清空那个指针”：
+- 对 JSValue slot 来说，`value=0` 不等价于 JavaScript 的 null。
+- 它可能代表原始写入是 fixnum、special、old object、init object、null 等很多情况。
+- 只保存 0 会丢失真实写入值。
+- patch 时如果把 slot 写成 0，会把原程序写入的 old object/fixnum/special/null 都改坏。
+- 对 void* slot 来说，`value=0` 也只能代表“当前不是 young pointer”，不一定代表应该把 slot 写成 NULL；它也可能原本写入的是 old pointer。
+
+如果想让 `value=0` 可以覆盖旧记录：
+- 需要把 tombstone 从“无 young edge”升级成“真实最后写入值”。
+- 至少要区分 JSValue null/special/fixnum、old/init object pointer 及 tag、void* NULL、void* old/init pointer。
+- 这等于把 RSet 从 “latest young edge summary” 改成 “完整 write log / full value log”。
+
+为什么完整处理 `value=0` 会降低效率：
+- 如果每次非-young 写入都追加 tombstone/log entry：
+  - CD clear attempts 约 `40,851,797`。
+  - Havlak clear attempts 约 `417,674,314`。
+  - 这些都会变成 RSet/log entry，远超当前 RSet 容量。
+- GC 时还要做 latest-wins 折叠：
+  - 从后往前扫 log；
+  - 维护 `seen slot` 集合；
+  - 对每个 slot 只处理最新 entry。
+- 这本质上仍然需要 hash/set 去重，只是把成本从 mutator update 转移到 GC。
+- 如果不折叠而处理所有历史 young，会把大量已被覆盖的 young object promote 到 old，制造 old-space floating garbage；当前 major GC 不完整，不能靠下一轮 minor 回收。
+
+所以：
+- `value=0` 是“这个 slot 当前无 young edge”的摘要，不是“应该把 slot 清空为 0”的真实写入值。
+- 直接处理 0 去清空 slot 会破坏语义。
+- 把它改造成可重放 tombstone 理论上可行，但需要 full value log + latest-wins 折叠 + seen set，会带来容量和 GC 处理成本。
+- 当前更有效的方案仍是维护每个 slot 的最新摘要：`slot -> index -> values[index] = young_value_or_0`，并把 index 查找做成 O(1)/bounded。
+
+## 2026-05-03 当前瓶颈是否因为 GiY 必须处理“清除状态”
+
+结论：
+- 这个理解基本正确，但需要更精确地说：
+  - GiY 的确比 Cheney 多了“清除状态 / no-young-edge state”的维护需求。
+  - 但瓶颈不是“必须处理清除状态”本身，而是当前实现为了清除旧 young 摘要，需要线性查找这个 slot 在 `values[]` 中的位置。
+- write barrier 其实可以判断当前写入值是不是 young。
+- 问题在于：当当前写入值不是 young 时，write barrier 需要知道“这个 slot 以前是否已经在 RSet 中记录过 young value，以及它的 index 是多少”。
+- 当前 hash table 可以用于 duplicate filtering，但不能直接返回 `values[]` index，所以只能线性扫描 `remembered_set.buffer[]` 找 index。
+
+更准确的路径：
+- 写入 young：
+  - `slot = young_A`
+  - 记录或更新：`values[index] = young_A`。
+- 后续写入 non-young：
+  - `slot = null/old/fixnum/...`
+  - 需要清除之前可能存在的 `values[index] = young_A`。
+  - 因此需要找到 index 并执行：`values[index] = 0`。
+- 当前慢在：`slot -> remembered_set.buffer[] 线性扫描 -> index -> values[index] = 0`。
+
+为什么 Cheney 没有这个“清除状态”成本：
+- Cheney RSet 只记录 slot 地址。
+- 当 slot 写入 non-young 后，Cheney 不需要更新 RSet entry。
+- 下次 minor GC 读 slot 当前值，发现不是 young，就跳过。
+- 因此 Cheney 可以允许 RSet 中保留“曾经有用但现在无用”的 slot 地址；它们只是扫描时多读一次 old slot。
+
+为什么 GiY 不能像 Cheney 一样保留旧状态：
+- GiY minor GC 不想读 old slot 当前值。
+- 它依赖 `values[]` 保存的摘要判断这个 slot 当前是否有 young edge。
+- 如果不清除 stale `values[]`，GiY 会把旧 young 当 live，甚至在 patch 阶段写回旧引用。
+
+所以当前瓶颈可以概括为：
+- GiY 为了避免 GC core 读 old slot，把“判断 slot 当前值”的工作提前到了 write barrier。
+- 这引入了对 `values[]` 当前性的维护。
+- 当前维护方式缺少 `slot -> index` 的 O(1) 映射，导致 non-young 写入时的清除操作变成大量线性扫描。
+
+修复重点：
+- 不是取消清除状态。
+- 也不是让 write barrier 忽略 non-young 写入。
+- 而是实现 `slot -> index -> values[index] = 0/young_value`。
+
+## 2026-05-03 business 慢的核心是否是 RSet 项目更多 + 修改指针时遍历 RSet
+
+结论：
+- 用户提出的两个方向基本抓住了核心，但第 1 点需要修正：
+  1. 不是“GiY 记录的 RSet 项目数量一定比 Cheney 多”，而是 GiY 的 write barrier 必须处理更多类型的 old/init slot 写入事件，尤其是 non-young 写入导致的 clear/update attempts。
+  2. 当前实现确实在修改 old/init slot 时，为了更新或清除 `values[]`，需要线性遍历 `remembered_set.buffer[]` 找 index。这是已验证的主要瓶颈。
+
+更准确地说：
+- Cheney 只需要在 old/init slot 写入 young value 时，把 slot 地址加入 RSet。
+- 如果 old/init slot 写入 non-young value，例如 null、fixnum、old object，Cheney 可以忽略，因为 minor GC 扫 RSet 时会读取 slot 当前值。
+- GiY old/init slot 写入 young value 时，要记录 `slot -> young_value`。
+- GiY old/init slot 写入 non-young value 时，也不能完全忽略，因为这个 slot 之前可能记录过 stale young value。
+- 所以 GiY 需要执行“清除旧摘要”：`slot -> index -> values[index] = 0`。
+
+所以 GiY 多出来的不是单纯 RSet entry 数量，而是：
+- non-young 写入也会触发 update_existing 尝试；
+- duplicate young 写入也要更新 saved value；
+- 这些动作很多不体现在旧的 `Write barrier calls` 计数里，因为该计数主要统计 young-value add。
+
+实测证据：
+- CD clear attempts：约 `40,851,797`，baseline update scan steps：`401,694,113`。
+- Havlak clear attempts：约 `417,674,314`，baseline update scan steps：`190,916,727,113`。
+- Havlak 的这些线性扫描消融掉后，business 从 `414.267s` 降到 `395.732s`，直接收回 `18.535s`。
+
+关于“遍历整个 remembered set”：
+- 当前实现是线性扫描 `remembered_set.buffer[0..count)`。
+- 如果 slot 不在 RSet 中，通常会扫完整个当前 RSet。
+- 如果 slot 在 RSet 中，会扫到命中位置；平均也可能接近半个 RSet。
+- 所以不是每次都必然扫完整 RSet，但大量 miss/hit 累积后，效果接近非常高的线性扫描成本。
+
+一句话：
+- 当前 business 慢的核心不是“RSet entry count 更多”这么简单。
+- 核心是 GiY 为了避免 GC core 读 old slot，把 slot 当前 young-edge 状态缓存到 `values[]`，因此 write barrier 必须处理 non-young 写入的清除状态；而当前清除/更新状态缺少 `slot -> index` 的 O(1) 映射，只能线性扫描 RSet。
+
+## 2026-05-03 证明当前性能瓶颈确实是 GiY RSet update 线性查找的证据链
+
+结论：
+- 对 Havlak，证据已经达到强因果级别：RSet update 线性查找是最大的已确认 business 瓶颈。
+- 对 CD，RSet update 线性查找存在，但不是主瓶颈；CD 的 gap 主要还在 extra allocations / mutator work。
+
+证据 1：源码路径确实会在 non-young 写入时清除旧摘要。
+- `write_barrier(JSValue* ptr, JSValue value)` 如果 `value` 是 fixnum/special 或不在 young，会调用 `rememberset_update_existing(obj_ptr, 0)`。
+- `write_barrier_ptr(void** ptr, void* value)` 如果 `value == NULL` 或不在 young，也调用 `rememberset_update_existing(obj_ptr | RS_PTR_SLOT_TAG, 0)`。
+- 这说明 GiY 的 write barrier 不只处理 young 写入，还要处理 non-young 写入造成的“清除旧 young 摘要”。
+
+证据 2：当前 `slot -> index` 的 fallback 实现确实是线性扫描。
+- `rememberset_find_index_linear(uintptr_t obj_ptr)` 遍历 `remembered_set.buffer[0..count)`，找到 slot 后返回 index。
+- `rememberset_update_existing(...)` 使用这个 index 执行 `remembered_set.values[index] = value`。
+- 这就是 `slot -> buffer[] scan -> index -> values[index]` 的线性路径。
+
+证据 3：RSet `values[]` 的确会驱动 GC scan 和 patch，所以 stale value 不能忽略。
+- `giy_scan_remembered_set_slots()` 读取 `remembered_set.values[i]`，非 0 就调用 `giy_reserve_edge(...)`。
+- `giy_patch_remembered_set_slots()` 读取同一个 `values[i]`，如果 value 被 forward，就把真实 slot 写成 forwarded address。
+- 因此 `values[]` 直接影响 live set 和 old slot patch，GiY 必须维护它的当前性。
+
+证据 4：profile 计数显示线性扫描量巨大。
+- CD：
+  - update attempts：`43,851,721`
+  - clear attempts：`40,851,797`
+  - update scan steps：`401,694,113`
+  - steps/attempt：`9.160`
+- Havlak：
+  - update attempts：`444,200,570`
+  - clear attempts：`417,674,314`
+  - update scan steps：`190,916,727,113`
+  - steps/attempt：`429.798`
+
+证据 5：fast-index 消融几乎只消除了这个查找成本。
+- Havlak out29 -> out31：
+  - business：`414.267s -> 395.732s`，下降 `18.535s`。
+  - total：`447.385s -> 428.995s`，下降 `18.390s`。
+  - GC core：`22.654s -> 22.570s`，只变 `-0.084s`。
+  - minor GC：`590,600 -> 590,600`，完全不变。
+  - write barrier calls：`165,000,542 -> 165,000,542`，完全不变。
+  - allocations：`2,029,600,757 -> 2,029,600,757`，完全不变。
+  - forward ops：`369,160,253 -> 369,160,253`，完全不变。
+- 因为 GC/alloc/WB/minor/forward 都不变，改善几乎只能来自 `slot -> index` 查找方式变化。
+
+证据 6：profile 反证 fast-index 后扫描 step 确实消失。
+- CD update scan steps：`401,694,113 -> 121,419`，下降 `99.97%`。
+- Havlak update scan steps：`190,916,727,113 -> 2,744,439,102`，下降 `98.56%`。
+- Havlak 仍残留 `2.744B` scan steps，是因为实验实现还有 fallback insertions，正式修复还要去掉 fallback 线性扫描。
+
+证据 7：CD 是边界条件，说明结论没有过度泛化。
+- CD fast-index 后 update scan steps 下降 `99.97%`，但 business `245.134s -> 245.848s`，没有改善。
+- 原因是 CD baseline scan steps 只有 `401M`，远小于 Havlak 的 `190.9B`。
+- CD 的主要 gap 仍是 extra allocations / mutator work。
+
+最终证明结构：
+- 源码证明：non-young 写入会触发 `values[]` 清除；清除需要 `slot -> index`；当前 index 查找是线性扫描。
+- profile 证明：Havlak 上这条线性扫描达到 `190,916,727,113` step。
+- 消融证明：把 `slot -> index` 改成 fast index 后，Havlak business 直接收回 `18.535s`，而 GC/alloc/WB/minor/forward 等关键计数完全不变。
+- 因此可以高置信地说：Havlak 当前最大已确认性能瓶颈就是 GiY RSet update 的 `slot -> index` 线性查找；full suite 的总性能也被它显著拖慢。
+
+## 2026-05-03 RSet 相关开销占 full-suite business gap 的比例，以及剩余 gap 调查
+
+full-suite business gap：
+- GiY out29 business：`3428.880s`。
+- Cheney out24 business：`3379.894s`。
+- gap：`+48.986s`。
+
+已经严格实测的 RSet update 线性查找消融：
+- Havlak 收回：`18.535s`。
+- CD 反而慢：`0.714s`。
+- CD + Havlak 净收回：`17.821s`。
+
+占 full-suite business gap 的比例：
+- 只按 Havlak 正收益：`18.535 / 48.986 = 37.84%`。
+- 按 CD+Havlak 净收益：`17.821 / 48.986 = 36.38%`。
+- 所以当前已经严格证明的 RSet update 线性查找开销，至少解释 full-suite business gap 的约 `36.38%`；如果只看 Havlak 正项则是 `37.84%`。
+
+剩余 gap：
+- 扣除 CD+Havlak RSet index 净收益后，剩余 business gap：`48.986s - 17.821s = 31.165s`。
+- 剩余比例：`63.62%`。
+- 所以 RSet 线性查找是最大已确认单项瓶颈，但不是全部。
+
+剩余 gap 的构成：
+- RSet index 后 CD+Havlak 仍剩：
+  - CD：`+6.792s`。
+  - Havlak：`+16.794s`。
+  - 合计：`+23.586s`。
+- full-suite 除 CD/Havlak 外的净 business gap：`+7.579s`。
+
+进一步实测解释：
+- active young 容量消融 out33 在 CD+Havlak 上又收回：
+  - CD：`0.603s`。
+  - Havlak：`6.475s`。
+  - 合计：`7.078s`。
+- 这说明剩余 gap 中有一块来自 GiY active young 较小造成的 higher minor-GC frequency / metadata churn。
+- 但 active young 消融后 allocations 基本不变，所以 extra allocations 不是 active young 容量直接造成的。
+
+剩余 gap 最强证据指向 extra mutator work：
+- CD out33 后 business gap 仍 `+6.189s`，allocations 仍比 Cheney 多 `10.25%`。
+- Havlak out33 后 business gap 仍 `+10.319s`，allocations 仍比 Cheney 多 `9.31%`，WB 仍多约 `18.96%`。
+
+是否需要再启动 benchmarks：
+- 为了得到 full-suite RSet 百分比的精确值，需要跑完整 `GIY_RSET_INDEX_FAST=true` suite。
+- 但目前不需要为了证明“RSet 线性查找是最大已确认瓶颈”再跑，因为现有 Havlak/CD profile + 消融已经构成强因果证据。
+
+2026-05-03 结论：RSet 线性探查到底造成多少性能下降
+
+明确数字：
+- 在 Havlak 上，RSet update 的线性探查导致 GiY business time 多花 `18.535s`。
+  - 当前 GiY out29：`414.267s`
+  - 加 RSet index 后 out31：`395.732s`
+  - 差值：`414.267s - 395.732s = 18.535s`
+- 同一项在 Havlak total time 上导致约 `18.390s` 下降。
+  - 当前 GiY out29 total：`447.385s`
+  - RSet index 后 out31 total：`428.995s`
+  - 差值：`18.390s`
+
+放到 full-suite business gap 里看：
+- GiY 当前 full-suite business gap：`3428.880s - 3379.894s = 48.986s`。
+- 已严格实测的 RSet 线性探查净贡献：
+  - Havlak 收回 `18.535s`
+  - CD 反而慢 `0.714s`
+  - CD+Havlak 净收回 `17.821s`
+- 因此，当前可严格证明的 full-suite 线性探查性能损失是：
+  - `17.821s / 48.986s = 36.38%`
+  - 如果只看 Havlak 正向收益，则是 `18.535s / 48.986s = 37.84%`
+
+结论：
+- 这种 RSet update 线性探查不是造成 `48.986s` 全部 business gap 的原因。
+- 它造成的明确、已消融验证的下降约为 `18s`。
+- 对 full-suite business gap 的解释比例约为 `36% - 38%`。
+- 剩下约 `31.165s` 仍来自其他因素，包括 active young 容量差异、extra mutator work、extra allocations / write barrier 次数等。
+
+2026-05-03 深入调查：RSet 线性探查之后剩余 business gap 的主要原因
+
+最终结论：
+- 扣除 RSet 线性探查和 active-young 容量差异之后，剩下的主要问题不是 IC hit rate、也不是 JS benchmark 真的做了更多语义工作，而是 GiY 没有像 Cheney 的通用 scanner 一样在 GC 扫描 JSObject 时维护 allocation-site cache。
+- 具体表现是：`AllocSite.as->pm` 落后于存活对象真实的 `shape->pm`。下一次从同一 allocation site 分配对象时，`get_cached_shape()` 只能拿到较小/较旧的 property map，预分配形状不足，于是 mutator 执行更多 `set_prop_()`、更多 shape search、更多 `gc_malloc/space_alloc`、更多 write barrier。
+- 这解释的是 business/non-GC time 增加，因为这些额外工作发生在对象创建/属性写入路径，而不是 GC core 计时里。
+
+源码证据：
+- Cheney 通用扫描器在 `ejsvm/gc-visitor-inl.h` 的 `scan_object_properties(JSObject *p)` 中会调用 `alloc_site_update_info(p)`，并继续处理 `os->alloc_site->pm`。
+- GiY 的自定义 `giy_scan_jsobject_conservative(JSObject *p)` 原本只处理 `p->shape` 和按对象大小保守扫描 `eprop[]`，没有执行 allocation-site update。
+- `object.c:get_cached_shape()` 依赖 `as->pm` 来创建/复用 prealloc shape；如果 `as->pm` 落后，后续对象需要在 `set_prop_()` 里逐步扩 shape。
+- `object.c` 的 shape search 计数正是在 `set_prop_()` 扩展 shape 时增加；因此 extra shape search 和 extra `set_prop_()` 是同一个机制的两个观测面。
+
+性能计数证据（GiY out36 vs Cheney out37，no-AS profile，不使用 noisy AS_PROF）：
+- CD：
+  - business：GiY `247.046s`，Cheney `238.945s`，gap `+8.101s`。
+  - shape search：GiY `312,449,807`，Cheney `92,274,397`，多 `220,175,410`，是 Cheney 的 `3.39x`。
+  - `set_prop_` gprof calls：GiY `635,341,756`，Cheney `415,166,608`，多 `220,175,148`。
+  - allocations：GiY `2,314,175,264`，Cheney `2,099,019,821`，多 `215,155,443`，`+10.25%`。
+  - write barrier calls：GiY `9,344,047`，Cheney `9,157,893`，多 `186,154`。
+- Havlak：
+  - business：GiY `393.652s`，Cheney `378.276s`，gap `+15.376s`。
+  - shape search：GiY `285,943,062`，Cheney `84,926,065`，多 `201,016,997`，是 Cheney 的 `3.37x`。
+  - `set_prop_` gprof calls：GiY `792,556,118`，Cheney `592,330,180`，多 `200,225,938`。
+  - allocations：GiY `2,029,600,622`，Cheney `1,856,819,962`，多 `172,780,660`，`+9.31%`。
+  - write barrier calls：GiY `161,923,947`，Cheney `136,112,340`，多 `25,811,607`，`+18.96%`。
+
+反证：不是 shape cache miss 或 JS workload 改变。
+- shape cache hit rate 几乎一样：
+  - CD：GiY `0.999999`，Cheney `0.999998`。
+  - Havlak：GiY `0.999999`，Cheney `0.999997`。
+- 问题不是 miss，而是 GiY 进入 shape search 的次数多了三倍多。
+- 关键 JS-level 调用量基本一致，例如 Havlak 的 `vmrun_threaded`、`get_prop_with_ic`、`call_function` 量级一致；差异集中在对象创建/属性扩展相关路径。
+
+新增 dry profile 验证（out39_giy_as_dry_profile，只计数、不改变语义）：
+- CD：
+  - `AS dry objects`: `64,996,332`
+  - `AS dry pm match`: `10,445,672`
+  - `AS dry pm mismatch`: `54,550,660`
+  - mismatch 比例：`83.93%`
+  - 同一轮 shape search 仍为 `312,449,807`，`set_prop_` calls 仍为 `635,341,756`，说明 dry profile 没改变行为，只揭示了落后的 allocation-site 元数据规模。
+- Havlak：
+  - `AS dry objects`: `254,575,178`
+  - `AS dry pm match`: `100,439,376`
+  - `AS dry pm mismatch`: `154,135,802`
+  - mismatch 比例：`60.55%`
+  - 同一轮 shape search 仍为 `285,943,062`，`set_prop_` calls 仍为 `792,556,118`。
+
+直接修复实验：
+- 试过在 GiY 的 JSObject 扫描路径里直接调用 Cheney 的 `alloc_site_update_info(p)`。
+- 结果 CD 很早 SIGSEGV，崩在 `alloc_site_update_info()` 的 `find_lub` 路径。
+- 原因判断：GiY minor GC 是 reserve/materialize 两阶段，扫描 young 对象时会先设置 forwarding pointer、稍后才真正 materialize；Cheney 的 update 函数假设扫描期对象图/PM 链处在即时复制扫描的状态。直接照搬会破坏这个时序假设。
+- 因此修复方向不是简单复制 Cheney 的一行调用，而是要为 GiY 单独设计 allocation-site metadata update：在 reserve 阶段只计算/记录候选更新，在 materialize/patch 后安全更新 `as->pm/as->shape`，同时把函数表里的 `as->pm/as->shape` 当作需要 reserve/patch 的 slot 处理。
+
+结论：
+- RSet 线性探查解释 full-suite business gap 的约 `36% - 38%`。
+- active young 容量在 CD+Havlak 上又解释约 `7.078s`。
+- 剩余主要 gap 由 allocation-site cache 未被 GiY GC 训练导致的 extra mutator work 解释：它直接造成三倍多 shape search、约 `200M` 级别额外 `set_prop_()`、`170M-215M` 级别额外 allocation，以及 Havlak 上 `25.8M` 额外 write barrier。
+- 下一步真正优化应优先做 GiY-safe allocation-site update，而不是继续追 IC miss 或 GC core。
+
+2026-05-04 简化解释：剩余性能 gap 在哪里
+
+剩余性能 gap 主要不在 GC core，而在 mutator/business 阶段。
+
+GiY 没有像 Cheney 那样在 GC 扫描 JSObject 时更新 allocation-site cache，导致 allocation site 记录的 `as->pm` 落后于对象真实的 `shape->pm`。下一次从同一个 allocation site 创建对象时，GiY 预分配出来的 shape/property layout 太旧、太小，于是程序运行时不得不额外执行大量属性扩展。
+
+这批额外属性扩展表现为：
+- 更多 `set_prop_()`；
+- 更多 shape search；
+- 更多 property/shape 相关 allocation；
+- 更多 write barrier。
+
+所以剩余 gap 的本质是：GiY 让 JS 程序在对象创建和属性写入路径上多做了很多工作，而不是 GC 复制对象本身慢很多。
+
+2026-05-04 为什么 GiY 和 Cheney 会产生 allocation-site cache 差距，以及 GiY 能否修复
+
+为什么产生差距：
+- Cheney 的通用对象扫描器在扫描 JSObject 时会执行 `alloc_site_update_info(p)`，用存活对象当前真实的 `shape->pm` 更新 allocation site 的 `as->pm`。
+- 这个更新等于在 GC 期间学习“这个 allocation site 创建出来的对象最终通常长成什么形状”。
+- GiY 当前用了自己的 `giy_scan_jsobject_conservative()`，只 reserve/copy/patch 指针，没有执行这一步学习，所以 `as->pm` 长期停留在较旧、较小的 property map 上。
+- 下一轮 mutator 从这个 allocation site 分配对象时，`get_cached_shape()` 看到的是旧 `as->pm`，只能预分配旧 layout；随后对象要靠 `set_prop_()` 一步步扩展到真实 layout，于是产生额外 shape search、额外 allocation、额外 write barrier。
+
+GiY 是否可以像 Cheney 一样做：
+- 原则上可以，而且这是当前最应该做的优化方向。
+- 但不能简单地在 GiY 扫描 JSObject 时直接调用 Cheney 的 `alloc_site_update_info(p)`。
+- 已经试过直接调用，CD 很早 SIGSEGV，崩在 `alloc_site_update_info()` 的 `find_lub` 路径。
+- 原因是 Cheney 是常规扫描/复制语义，扫描时对象图和 property-map 链的状态满足该函数假设；GiY 是 reserve/materialize 两阶段，扫描 young 对象时先设置 forwarding pointer，之后才真正复制到 old，并且函数表里的 `as->pm/as->shape` 也需要单独 reserve/patch。
+
+正确修复方向：
+- 在 GiY reserve 阶段不要直接改 `as->pm/as->shape`，而是记录“这个 allocation site 看到了哪个 live object shape/property map”。
+- 在所有相关 young object、PropertyMap、Shape 都完成 reserve/materialize/patch 后，再统一计算 LUB 并更新 allocation-site cache。
+- 更新 `as->pm/as->shape` 时，必须把函数表里的这些字段当作 GC root/slot 处理，保证其中的 young 指针也被 reserve 和 patch。
+- 这样 GiY 才能获得 Cheney 的 allocation-site 学习效果，同时不破坏 GiY 两阶段复制的不变量。

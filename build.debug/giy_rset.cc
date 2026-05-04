@@ -11,6 +11,34 @@ extern int in_minor_gc;
 
 RememberedSet remembered_set;
 
+#ifndef GIY_WB_PROFILE
+#define GIY_WB_PROFILE 0
+#endif
+
+#ifndef GIY_RSET_INDEX_FAST
+#define GIY_RSET_INDEX_FAST 0
+#endif
+
+#if GIY_WB_PROFILE
+static unsigned long long wb_profile_update_attempts = 0;
+static unsigned long long wb_profile_update_hits = 0;
+static unsigned long long wb_profile_update_scan_steps = 0;
+static unsigned long long wb_profile_clear_attempts_jsvalue = 0;
+static unsigned long long wb_profile_clear_attempts_ptr = 0;
+static unsigned long long wb_profile_young_adds_jsvalue = 0;
+static unsigned long long wb_profile_young_adds_ptr = 0;
+static unsigned long long wb_profile_duplicate_value_updates = 0;
+static unsigned long long wb_profile_fast_update_hits = 0;
+static unsigned long long wb_profile_fast_update_misses = 0;
+static unsigned long long wb_profile_fast_update_probes = 0;
+static unsigned long long wb_profile_fallback_insertions = 0;
+static unsigned long long wb_profile_fallback_scan_steps = 0;
+#endif
+
+#if GIY_RSET_INDEX_FAST
+static int *remembered_set_hash_indices = NULL;
+#endif
+
 #define HASH_TABLE_SIZE 8192
 #define HASH_PROBE_LIMIT 32
 //only use the bits of 3-14 as hash value
@@ -18,8 +46,14 @@ RememberedSet remembered_set;
 #define RS_PTR_SLOT_TAG ((uintptr_t)1)
 #define REMEMBERED_SET_CAPACITY_BYTES (128 * 1024)
 
-static int rememberset_find_index(uintptr_t obj_ptr) {
+static int rememberset_find_index_linear(uintptr_t obj_ptr) {
     for (int i = 0; i < remembered_set.count; i++) {
+#if GIY_WB_PROFILE
+        wb_profile_update_scan_steps++;
+#if GIY_RSET_INDEX_FAST
+        wb_profile_fallback_scan_steps++;
+#endif
+#endif
         if (remembered_set.buffer[i] == obj_ptr) {
             return i;
         }
@@ -28,10 +62,50 @@ static int rememberset_find_index(uintptr_t obj_ptr) {
 }
 
 static bool rememberset_update_existing(uintptr_t obj_ptr, uintptr_t value) {
-    int index = rememberset_find_index(obj_ptr);
+#if GIY_WB_PROFILE
+    wb_profile_update_attempts++;
+#endif
+#if GIY_RSET_INDEX_FAST
+    unsigned int hash_idx = MASK_HASH(obj_ptr);
+    for (int probe = 0; probe < HASH_PROBE_LIMIT; probe++) {
+#if GIY_WB_PROFILE
+        wb_profile_fast_update_probes++;
+#endif
+        unsigned int idx = (hash_idx + probe) & (HASH_TABLE_SIZE - 1);
+        uintptr_t existing = remembered_set.hash_table[idx];
+        if (existing == obj_ptr) {
+            int index = remembered_set_hash_indices[idx];
+            if (index >= 0 && index < remembered_set.count &&
+                remembered_set.buffer[index] == obj_ptr) {
+#if GIY_WB_PROFILE
+                wb_profile_update_hits++;
+                wb_profile_fast_update_hits++;
+#endif
+                remembered_set.values[index] = value;
+                return true;
+            }
+            printf("GiY RSet index invariant failed (idx=%u, index=%d)\n",
+                   idx, index);
+            exit(1);
+        }
+        if (existing == 0) {
+#if GIY_WB_PROFILE
+            wb_profile_fast_update_misses++;
+#endif
+            return false;
+        }
+    }
+#if GIY_WB_PROFILE
+    wb_profile_fast_update_misses++;
+#endif
+#endif
+    int index = rememberset_find_index_linear(obj_ptr);
     if (index < 0) {
         return false;
     }
+#if GIY_WB_PROFILE
+    wb_profile_update_hits++;
+#endif
     remembered_set.values[index] = value;
     return true;
 }
@@ -58,6 +132,19 @@ void init_remembered_set() {
     cache_space.total_size -= remembered_set.size_of_hash_table * sizeof(uintptr_t);
 
     memset(remembered_set.hash_table, 0, remembered_set.size_of_hash_table * sizeof(uintptr_t));
+#if GIY_RSET_INDEX_FAST
+    if (remembered_set_hash_indices == NULL) {
+        remembered_set_hash_indices =
+            (int *) malloc(remembered_set.size_of_hash_table * sizeof(int));
+        if (remembered_set_hash_indices == NULL) {
+            printf("Error: cannot allocate GiY RSet hash index table!\n");
+            exit(1);
+        }
+    }
+    for (int i = 0; i < remembered_set.size_of_hash_table; i++) {
+        remembered_set_hash_indices[i] = -1;
+    }
+#endif
     
     printf("init_info: remembered set initialized with capacity %d , new cache_space.end at %p\n",
            remembered_set.capacity, (void*)cache_space.end);
@@ -83,7 +170,25 @@ static void rememberset_add_with_value(uintptr_t obj_ptr, uintptr_t value) {
         uintptr_t existing = remembered_set.hash_table[idx];
         
         if (existing == obj_ptr) {
+#if GIY_WB_PROFILE
+            wb_profile_duplicate_value_updates++;
+#endif
+#if GIY_RSET_INDEX_FAST
+            int index = remembered_set_hash_indices[idx];
+            if (index >= 0 && index < remembered_set.count &&
+                remembered_set.buffer[index] == obj_ptr) {
+                remembered_set.values[index] = value;
+#if GIY_WB_PROFILE
+                wb_profile_fast_update_hits++;
+#endif
+            } else {
+                printf("GiY RSet duplicate index invariant failed (idx=%u, index=%d)\n",
+                       idx, index);
+                exit(1);
+            }
+#else
             rememberset_update_existing(obj_ptr, value);
+#endif
             write_barrier_duplicate_filtered++;
             return;
         }
@@ -93,6 +198,9 @@ static void rememberset_add_with_value(uintptr_t obj_ptr, uintptr_t value) {
             remembered_set.hash_table[idx] = obj_ptr;
             remembered_set.buffer[remembered_set.count] = obj_ptr;
             remembered_set.values[remembered_set.count] = value;
+#if GIY_RSET_INDEX_FAST
+            remembered_set_hash_indices[idx] = remembered_set.count;
+#endif
             remembered_set.count += 1;
             return;
         }
@@ -101,6 +209,9 @@ static void rememberset_add_with_value(uintptr_t obj_ptr, uintptr_t value) {
   
     remembered_set.buffer[remembered_set.count] = obj_ptr;
     remembered_set.values[remembered_set.count] = value;
+#if GIY_WB_PROFILE
+    wb_profile_fallback_insertions++;
+#endif
     remembered_set.count += 1;
 }
 
@@ -111,6 +222,11 @@ void rememberset_add(uintptr_t obj_ptr) {
 void rememberset_clear() {
     remembered_set.count = 0;
     memset(remembered_set.hash_table, 0, remembered_set.size_of_hash_table * sizeof(uintptr_t));
+#if GIY_RSET_INDEX_FAST
+    for (int i = 0; i < remembered_set.size_of_hash_table; i++) {
+        remembered_set_hash_indices[i] = -1;
+    }
+#endif
 }
 
 void write_barrier(JSValue* ptr, JSValue value){
@@ -129,16 +245,25 @@ void write_barrier(JSValue* ptr, JSValue value){
     }
 
     if (is_fixnum(value) || is_special(value)) {
+#if GIY_WB_PROFILE
+        wb_profile_clear_attempts_jsvalue++;
+#endif
         rememberset_update_existing(obj_ptr, 0);
         return;
     }
 
     uintptr_t obj_addr = clear_ptag(value);
     if (obj_addr < cache_space.work_begin || obj_addr >= cache_space.end) {
+#if GIY_WB_PROFILE
+        wb_profile_clear_attempts_jsvalue++;
+#endif
         rememberset_update_existing(obj_ptr, 0);
         return;
     }
 
+#if GIY_WB_PROFILE
+    wb_profile_young_adds_jsvalue++;
+#endif
     write_barrier_calls++;
     rememberset_add_with_value(obj_ptr, (uintptr_t) value);
 }
@@ -162,10 +287,40 @@ void write_barrier_ptr(void** ptr, void* value){
     if (val_ptr == 0 ||
         val_ptr < cache_space.work_begin ||
         val_ptr >= cache_space.end) {
+#if GIY_WB_PROFILE
+        wb_profile_clear_attempts_ptr++;
+#endif
         rememberset_update_existing(obj_ptr | RS_PTR_SLOT_TAG, 0);
         return;
     }
 
+#if GIY_WB_PROFILE
+    wb_profile_young_adds_ptr++;
+#endif
     write_barrier_calls++;
     rememberset_add_with_value(obj_ptr | RS_PTR_SLOT_TAG, val_ptr);
 }
+
+#if GIY_WB_PROFILE
+extern "C" void giy_print_wb_profile() {
+    printf("\n=== GiY Write Barrier Profile ===\n");
+    printf("Update attempts:     %llu\n", wb_profile_update_attempts);
+    printf("Update hits:         %llu\n", wb_profile_update_hits);
+    printf("Update scan steps:   %llu\n", wb_profile_update_scan_steps);
+    if (wb_profile_update_attempts > 0) {
+        printf("  Steps per attempt: %.3f\n",
+               (double) wb_profile_update_scan_steps /
+               (double) wb_profile_update_attempts);
+    }
+    printf("Clear attempts JS:   %llu\n", wb_profile_clear_attempts_jsvalue);
+    printf("Clear attempts ptr:  %llu\n", wb_profile_clear_attempts_ptr);
+    printf("Young adds JS:       %llu\n", wb_profile_young_adds_jsvalue);
+    printf("Young adds ptr:      %llu\n", wb_profile_young_adds_ptr);
+    printf("Duplicate value updates: %llu\n", wb_profile_duplicate_value_updates);
+    printf("Fast update hits:    %llu\n", wb_profile_fast_update_hits);
+    printf("Fast update misses:  %llu\n", wb_profile_fast_update_misses);
+    printf("Fast update probes:  %llu\n", wb_profile_fast_update_probes);
+    printf("Fallback insertions: %llu\n", wb_profile_fallback_insertions);
+    printf("Fallback scan steps: %llu\n", wb_profile_fallback_scan_steps);
+}
+#endif

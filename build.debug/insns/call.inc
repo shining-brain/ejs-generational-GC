@@ -20,8 +20,8 @@ default:
 Lcall1:
 TLcall_regexp:
 TLcall_fixnum:
-TLcall_number_object:
 TLcall_array:
+TLcall_number_object:
 TLcall_special:
 TLcall_flonum:
 TLcall_string:
@@ -29,7 +29,7 @@ TLcall_simple_object:
 TLcall_boolean_object:
 TLcall_iterator:
 TLcall_string_object:
-{ // normal_iterator vmgen.newsynth.DecisionDiagram$Leaf@54
+{ // normal_special vmgen.newsynth.DecisionDiagram$Leaf@54
 
   set_fp(context, fp);
   set_pc(context, pc);
@@ -42,7 +42,7 @@ TLcall_string_object:
 }
 break;
 case TV_GENERIC:
-Lcall2:switch((unsigned int) get_htag(fn).v){ // vmgen.newsynth.DecisionDiagram$HTNode@41d(3)
+Lcall2:switch((unsigned int) get_htag(fn).v){ // vmgen.newsynth.DecisionDiagram$HTNode@173c(3)
 case HTAGV_SIMPLE_OBJECT:
 case 5:
 case 4:
@@ -83,7 +83,7 @@ TLcall_builtin:
   NEXT_INSN_INCPC();
 }
 break;
-}// vmgen.newsynth.DecisionDiagram$HTNode@41d
+}// vmgen.newsynth.DecisionDiagram$HTNode@173c
 break;
 } // vmgen.newsynth.DecisionDiagram$PTNode@550
 #undef fn

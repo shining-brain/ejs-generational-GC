@@ -4,8 +4,8 @@
 DEFLABEL(HEAD):
 INSN_COUNT1(isundef,v);Lisundef0:
 TLisundef_fixnum:
-TLisundef_boolean_object:
 TLisundef_number_object:
+TLisundef_boolean_object:
 TLisundef_array:
 TLisundef_any:
 TLisundef_regexp:
@@ -17,7 +17,7 @@ TLisundef_string:
 TLisundef_builtin:
 TLisundef_iterator:
 TLisundef_special:
-{ // normal_builtin vmgen.newsynth.DecisionDiagram$Leaf@54
+{ // normal_fixnum vmgen.newsynth.DecisionDiagram$Leaf@54
 
 /*
    isundef dst reg

@@ -17,7 +17,7 @@ TLisobject_flonum:
 TLisobject_boolean_object:
 TLisobject_array:
 TLisobject_fixnum:
-{ // normal_builtin vmgen.newsynth.DecisionDiagram$Leaf@54
+{ // normal_fixnum vmgen.newsynth.DecisionDiagram$Leaf@54
 
 /*
    isobject dst reg

@@ -18,7 +18,7 @@ TLsetarg_flonum:
 TLsetarg_function:
 TLsetarg_iterator:
 TLsetarg_boolean_object:
-{ // normal_flonum vmgen.newsynth.DecisionDiagram$Leaf@54
+{ // normal_builtin vmgen.newsynth.DecisionDiagram$Leaf@41d
 
   FunctionFrame *fr;
   JSValue arguments;

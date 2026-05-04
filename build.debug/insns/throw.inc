@@ -16,7 +16,7 @@ TLthrow_builtin:
 TLthrow_fixnum:
 TLthrow_simple_object:
 TLthrow_string_object:
-{ // normal_flonum vmgen.newsynth.DecisionDiagram$Leaf@54
+{ // normal_builtin vmgen.newsynth.DecisionDiagram$Leaf@41d
 
   save_context();
   set_a(context, src);

@@ -30,6 +30,10 @@ long write_barrier_calls = 0;
 long write_barrier_duplicate_filtered = 0;
 int in_minor_gc = 0;
 
+#ifndef CACHE_SIZE_KB
+#define CACHE_SIZE_KB 512
+#endif
+
 // Performance profiling: GC breakdown
 long long total_scan_roots_time = 0;
 long long total_scan_rs_time = 0;
@@ -700,7 +704,7 @@ void space_init(size_t bytes, size_t threshold_bytes)
     printf("object_header size: %lu bytes\n", sizeof(object_header));
     initial_alloc_bytes = 0;
     //initial cache space
-    long cache_size = 512*1024; // 512KB cache space
+    long cache_size = CACHE_SIZE_KB * 1024; // cache space
     // long cache_size = 100*1024*1024; // 100MB cache space
     cache_space.begin = (uintptr_t) malloc(cache_size); // 512KB cache space
     cache_space.current = cache_space.begin;
