@@ -60,6 +60,33 @@ struct GiYFTSlotSet {
 };
 
 GiYFTSlotSet g_ft_slot_set = {NULL, 0, 0, false};
+
+struct GiYASUpdateEntry {
+  AllocSite *as;
+  PropertyMap *pm;
+  int polymorphic;
+};
+
+struct GiYASUpdateLog {
+  GiYASUpdateEntry *items;
+  size_t count;
+  size_t capacity;
+};
+
+struct GiYASObjectUpdateEntry {
+  cell_type_t type;
+  uintptr_t payload;
+};
+
+struct GiYASObjectUpdateLog {
+  GiYASObjectUpdateEntry *items;
+  size_t count;
+  size_t capacity;
+};
+
+GiYASUpdateLog g_as_update_log = {NULL, 0, 0};
+GiYASObjectUpdateLog g_as_object_update_log = {NULL, 0, 0};
+bool g_as_object_update_applying = false;
 bool g_used_nt_old_store = false;
 
 static const uintptr_t GIY_FT_PTR_SLOT_TAG = 1;
@@ -73,6 +100,14 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 
 #ifndef GIY_AS_DRY_PROFILE
 #define GIY_AS_DRY_PROFILE 0
+#endif
+
+#ifndef GIY_AS_UPDATE
+#define GIY_AS_UPDATE 0
+#endif
+
+#ifndef GIY_AS_FT_ADVANCE
+#define GIY_AS_FT_ADVANCE 1
 #endif
 
 struct GiYProfile {
@@ -117,6 +152,16 @@ struct GiYProfile {
   unsigned long long as_dry_pm_null;
   unsigned long long as_dry_pm_match;
   unsigned long long as_dry_pm_mismatch;
+  unsigned long long as_update_observations;
+  unsigned long long as_update_entries;
+  unsigned long long as_update_applied;
+  unsigned long long as_update_pm_changed;
+  unsigned long long as_update_invalid_shape;
+  unsigned long long as_update_invalid_pm;
+  unsigned long long as_update_invalid_old_pm;
+  unsigned long long as_update_lub_failed;
+  unsigned long long as_shape_advance_attempts;
+  unsigned long long as_shape_advance_changed;
 
   size_t aux_stack_bytes;
   size_t aux_edge_bytes;
@@ -615,6 +660,356 @@ static void giy_ft_slot_set_add(uintptr_t raw_slot) {
 
 static void giy_traverse_stack_and_copy();
 static inline uintptr_t forwarded_or_self(uintptr_t ptr);
+static uintptr_t copy_for_minor(uintptr_t payload_ptr);
+
+#if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
+static bool giy_managed_payload_has_type(void *value, cell_type_t type) {
+  uintptr_t ptr = (uintptr_t) value;
+  if (ptr == 0 || (ptr & (sizeof(uintptr_t) - 1)) != 0)
+    return false;
+  if (!in_young_space(ptr) && !in_dram_space(ptr) && !in_init_space(ptr))
+    return false;
+
+  object_header *hdr = (object_header *) ptr - 1;
+  return hdr->type == type;
+}
+
+static bool giy_valid_property_map(PropertyMap *pm) {
+  return giy_managed_payload_has_type(pm, CELLT_PROPERTY_MAP);
+}
+
+static bool giy_valid_shape(Shape *shape) {
+  return giy_managed_payload_has_type(shape, CELLT_SHAPE);
+}
+
+static bool giy_valid_hash_table(HashTable *map) {
+  return giy_managed_payload_has_type(map, CELLT_HASHTABLE);
+}
+
+static PropertyMap *giy_find_lub(PropertyMap *a, PropertyMap *b) {
+  if (a == NULL)
+    return b;
+  if (b == NULL)
+    return a;
+  if (!giy_valid_property_map(a) || !giy_valid_property_map(b))
+    return NULL;
+
+  while (!GC_PM_EQ(a, b) && a->prev != NULL) {
+    if (a->n_props < b->n_props) {
+      if (b->prev == NULL || !giy_valid_property_map(b->prev))
+        return NULL;
+      b = b->prev;
+    } else {
+      if (!giy_valid_property_map(a->prev))
+        return NULL;
+      a = a->prev;
+    }
+  }
+  return a;
+}
+
+static void giy_as_update_log_reset() {
+  g_as_update_log.count = 0;
+}
+
+static GiYASUpdateEntry *giy_as_update_entry_for(AllocSite *as) {
+  for (size_t i = 0; i < g_as_update_log.count; i++) {
+    if (g_as_update_log.items[i].as == as)
+      return &g_as_update_log.items[i];
+  }
+
+  if (g_as_update_log.count >= g_as_update_log.capacity) {
+    size_t new_capacity =
+      g_as_update_log.capacity == 0 ? 1024 : g_as_update_log.capacity * 2;
+    GiYASUpdateEntry *new_items =
+      (GiYASUpdateEntry *) realloc(g_as_update_log.items,
+                                   new_capacity * sizeof(GiYASUpdateEntry));
+    if (new_items == NULL) {
+      printf("GiY allocation-site update log allocation failed (capacity=%zu)\n",
+             new_capacity);
+      exit(1);
+    }
+    g_as_update_log.items = new_items;
+    g_as_update_log.capacity = new_capacity;
+  }
+
+  GiYASUpdateEntry *entry = &g_as_update_log.items[g_as_update_log.count++];
+  entry->as = as;
+  if (giy_valid_property_map(as->pm)) {
+    entry->pm = as->pm;
+  } else {
+    if (as->pm != NULL)
+      giy_profile.as_update_invalid_old_pm++;
+    entry->pm = NULL;
+  }
+  entry->polymorphic = as->polymorphic;
+  giy_profile.as_update_entries++;
+  return entry;
+}
+
+static void giy_as_update_entry_observe(GiYASUpdateEntry *entry,
+                                        PropertyMap *pm) {
+  if (pm == NULL)
+    return;
+  if (entry->pm != NULL && GC_PM_EQ(pm, entry->pm))
+    return;
+
+  if (entry->pm == NULL) {
+    entry->pm = pm;
+    return;
+  }
+
+  PropertyMap *lub = giy_find_lub(pm, entry->pm);
+  if (lub == NULL) {
+    giy_profile.as_update_lub_failed++;
+    return;
+  }
+  if (GC_PM_EQ(lub, entry->pm)) {
+    if (!entry->polymorphic)
+      entry->pm = pm;
+  } else if (!GC_PM_EQ(lub, pm)) {
+    entry->polymorphic = 1;
+    entry->pm = lub;
+  }
+}
+
+static void giy_record_alloc_site_shape(Shape *shape) {
+  if (shape == NULL || !giy_valid_shape(shape)) {
+    giy_profile.as_update_invalid_shape++;
+    return;
+  }
+  if (shape->alloc_site == NULL)
+    return;
+  if (!giy_valid_property_map(shape->pm)) {
+    giy_profile.as_update_invalid_pm++;
+    return;
+  }
+
+  giy_profile.as_update_observations++;
+  GiYASUpdateEntry *entry = giy_as_update_entry_for(shape->alloc_site);
+  giy_as_update_entry_observe(entry, shape->pm);
+}
+#else
+static void giy_as_update_log_reset() {}
+#endif
+
+static Shape *giy_materialize_shape(Shape *shape) {
+  if (shape == NULL)
+    return NULL;
+
+  uintptr_t ptr = (uintptr_t) shape;
+  if (!in_young_space(ptr))
+    return shape;
+
+  (void) copy_for_minor(ptr);
+  giy_traverse_stack_and_copy();
+  return (Shape *) forwarded_or_self(ptr);
+}
+
+static PropertyMap *giy_materialize_property_map(PropertyMap *pm) {
+  if (pm == NULL)
+    return NULL;
+
+  uintptr_t ptr = (uintptr_t) pm;
+  if (!in_young_space(ptr))
+    return pm;
+
+  (void) copy_for_minor(ptr);
+  giy_traverse_stack_and_copy();
+  return (PropertyMap *) forwarded_or_self(ptr);
+}
+
+#if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
+static bool giy_cell_type_has_jsobject_shape(cell_type_t type) {
+  switch (type) {
+  case CELLT_SIMPLE_OBJECT:
+  case CELLT_ARRAY:
+  case CELLT_FUNCTION:
+  case CELLT_BUILTIN:
+  case CELLT_BOXED_NUMBER:
+  case CELLT_BOXED_STRING:
+  case CELLT_BOXED_BOOLEAN:
+#ifdef USE_REGEXP
+  case CELLT_REGEXP:
+#endif
+    return true;
+  default:
+    return false;
+  }
+}
+
+static void giy_as_object_update_log_reset() {
+  g_as_object_update_log.count = 0;
+}
+
+static void giy_record_materialized_jsobject_for_as_update(cell_type_t type,
+                                                          uintptr_t payload) {
+  if (!giy_cell_type_has_jsobject_shape(type))
+    return;
+
+  if (g_as_object_update_log.count >= g_as_object_update_log.capacity) {
+    size_t new_capacity =
+      g_as_object_update_log.capacity == 0 ? 1024 :
+                                             g_as_object_update_log.capacity * 2;
+    GiYASObjectUpdateEntry *new_items =
+      (GiYASObjectUpdateEntry *) realloc(
+        g_as_object_update_log.items,
+        new_capacity * sizeof(GiYASObjectUpdateEntry));
+    if (new_items == NULL) {
+      printf("GiY allocation-site object update log allocation failed "
+             "(capacity=%zu)\n",
+             new_capacity);
+      exit(1);
+    }
+    g_as_object_update_log.items = new_items;
+    g_as_object_update_log.capacity = new_capacity;
+  }
+
+  GiYASObjectUpdateEntry *entry =
+    &g_as_object_update_log.items[g_as_object_update_log.count++];
+  entry->type = type;
+  entry->payload = payload;
+}
+
+static void giy_apply_materialized_object_alloc_site_updates() {
+  if (g_as_object_update_applying)
+    return;
+
+  g_as_object_update_applying = true;
+  for (size_t i = 0; i < g_as_object_update_log.count; i++) {
+    GiYASObjectUpdateEntry *entry = &g_as_object_update_log.items[i];
+    if (!giy_cell_type_has_jsobject_shape(entry->type))
+      continue;
+    JSObject *obj = (JSObject *) entry->payload;
+    giy_record_alloc_site_shape(obj->shape);
+  }
+  g_as_object_update_log.count = 0;
+  g_as_object_update_applying = false;
+}
+
+static Shape *giy_next_valid_shape(Shape *shape) {
+  if (shape == NULL)
+    return NULL;
+  Shape *next = shape->next;
+  if (next == NULL || !giy_valid_shape(next))
+    return NULL;
+  return next;
+}
+
+static void giy_advance_alloc_site_shape(AllocSite *as) {
+  if (as == NULL || as->shape == NULL || !giy_valid_shape(as->shape))
+    return;
+  giy_profile.as_shape_advance_attempts++;
+
+  Shape *os = giy_materialize_shape(as->shape);
+  if (os == NULL || !giy_valid_shape(os))
+    return;
+  as->shape = os;
+
+  while (((os->n_enter - os->n_leave) << 3) < os->n_enter) {
+    PropertyMap *pm = os->pm;
+    if (!giy_valid_property_map(pm) || !giy_valid_hash_table(pm->map))
+      break;
+
+    HashTransitionIterator iter = createHashTransitionIterator(pm->map);
+    HashTransitionCell *cell;
+    Shape *next_os = NULL;
+    while (nextHashTransitionCell(pm->map, &iter, &cell) != FAIL) {
+      PropertyMap *next_pm = hash_transition_cell_pm(cell);
+      if (!giy_valid_property_map(next_pm))
+        continue;
+      for (Shape *candidate = next_pm->shapes;
+           candidate != NULL && giy_valid_shape(candidate);
+           candidate = giy_next_valid_shape(candidate)) {
+        if (candidate->alloc_site == as) {
+          if (next_os == NULL)
+            next_os = candidate;
+          else
+            return;
+        }
+      }
+    }
+    if (next_os == NULL)
+      break;
+    os = next_os;
+  }
+
+  if (as->shape == os)
+    return;
+
+  giy_profile.as_shape_advance_changed++;
+  PropertyMap *new_pm = giy_materialize_property_map(os->pm);
+  if (new_pm == NULL || !giy_valid_property_map(new_pm))
+    return;
+
+#ifdef DUMP_HCG
+  if (as->shape != NULL)
+    as->shape->is_cached = 0;
+#endif
+  as->pm = new_pm;
+  as->shape = NULL;
+
+  for (Shape *candidate = new_pm->shapes;
+       candidate != NULL && giy_valid_shape(candidate);
+       candidate = giy_next_valid_shape(candidate)) {
+    if (candidate->alloc_site == as &&
+        candidate->n_embedded_slots == new_pm->n_props) {
+      Shape *materialized = giy_materialize_shape(candidate);
+      if (materialized != NULL && giy_valid_shape(materialized)) {
+        as->shape = materialized;
+#ifdef DUMP_HCG
+        as->shape->is_cached = 1;
+#endif
+      }
+      break;
+    }
+  }
+}
+#endif
+
+static void giy_apply_alloc_site_updates() {
+#if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
+  for (size_t i = 0; i < g_as_update_log.count; i++) {
+    GiYASUpdateEntry *entry = &g_as_update_log.items[i];
+    AllocSite *as = entry->as;
+    PropertyMap *new_pm = giy_materialize_property_map(entry->pm);
+    if (new_pm == NULL)
+      continue;
+
+    bool old_pm_valid = giy_valid_property_map(as->pm);
+    bool pm_changed = !old_pm_valid || !GC_PM_EQ(as->pm, new_pm);
+    bool poly_changed = as->polymorphic != entry->polymorphic;
+    if (!pm_changed && !poly_changed)
+      continue;
+
+    giy_profile.as_update_applied++;
+    if (pm_changed)
+      giy_profile.as_update_pm_changed++;
+#ifdef DUMP_HCG
+    if (as->shape != NULL)
+      as->shape->is_cached = 0;
+#endif
+    as->pm = new_pm;
+    as->polymorphic = entry->polymorphic;
+    as->shape = NULL;
+  }
+
+#endif
+}
+
+#if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE) && GIY_AS_FT_ADVANCE
+static void giy_advance_function_table_alloc_sites(Context *ctx) {
+  for (int i = 0; i < FUNCTION_TABLE_LIMIT; i++) {
+    FunctionTable *p = &ctx->function_table[i];
+    for (int j = 0; j < p->n_insns; j++) {
+      AllocSite *as = &p->insns[j].alloc_site;
+      giy_advance_alloc_site_shape(as);
+    }
+  }
+}
+#else
+static void giy_advance_function_table_alloc_sites(Context *) {}
+#endif
 
 template<typename Tracer>
 static void giy_scan_jsobject_conservative(JSObject *p) {
@@ -1352,13 +1747,14 @@ static void giy_traverse_stack_and_copy() {
 		while (!gc_stack_empty()) {
 			uintptr_t src_payload = gc_stack_pop();
 			object_header *src_hdr = (object_header *) src_payload - 1;
+      cell_type_t type = src_hdr->type;
       int align_bytes = ALIGN(src_hdr->size + sizeof(object_header));
-      giy_profile_current_cell_type = (unsigned int) src_hdr->type;
-      giy_profile_note_materialized(src_hdr->type, (size_t) align_bytes);
+      giy_profile_current_cell_type = (unsigned int) type;
+      giy_profile_note_materialized(type, (size_t) align_bytes);
 
     // Traverse children and directly patch young in-object slots before memcpy.
     edge_log_reset();
-    giy_process_young_node<GiYReserveTracer>(src_hdr->type, src_payload);
+    giy_process_young_node<GiYReserveTracer>(type, src_payload);
 
 			uintptr_t dst_payload = src_hdr->forwarding_pointer;
 		if (dst_payload == 0) {
@@ -1373,8 +1769,14 @@ static void giy_traverse_stack_and_copy() {
                          (const void *) src_hdr,
                          (size_t) align_bytes,
                          &used_nt_store);
+#if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
+    giy_record_materialized_jsobject_for_as_update(type, dst_payload);
+#endif
 		}
   giy_profile_current_cell_type = GIY_PROFILE_CELL_TYPES;
+#if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
+  giy_apply_materialized_object_alloc_site_updates();
+#endif
 
   if (used_nt_store)
     g_used_nt_old_store = true;
@@ -1396,6 +1798,28 @@ void giy_print_profile() {
            giy_profile.aux_edge_bytes / 1024.0,
            giy_profile.aux_ft_slot_bytes / 1024.0);
     printf("Small memcpy limit:  %zu bytes\n", GIY_NT_COPY_MIN_BYTES);
+#if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
+    printf("AS update observations: %llu\n",
+           giy_profile.as_update_observations);
+    printf("AS update entries:      %llu\n",
+           giy_profile.as_update_entries);
+    printf("AS update applied:      %llu\n",
+           giy_profile.as_update_applied);
+    printf("AS update pm changed:   %llu\n",
+           giy_profile.as_update_pm_changed);
+    printf("AS update invalid shape:%llu\n",
+           giy_profile.as_update_invalid_shape);
+    printf("AS update invalid pm:   %llu\n",
+           giy_profile.as_update_invalid_pm);
+    printf("AS update invalid oldpm:%llu\n",
+           giy_profile.as_update_invalid_old_pm);
+    printf("AS update LUB failed:   %llu\n",
+           giy_profile.as_update_lub_failed);
+    printf("AS shape advance tries: %llu\n",
+           giy_profile.as_shape_advance_attempts);
+    printf("AS shape advance chg:   %llu\n",
+           giy_profile.as_shape_advance_changed);
+#endif
     return;
   }
 
@@ -1473,6 +1897,28 @@ void giy_print_profile() {
   printf("AS dry pm match:      %llu\n", giy_profile.as_dry_pm_match);
   printf("AS dry pm mismatch:   %llu\n", giy_profile.as_dry_pm_mismatch);
 #endif
+#if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
+  printf("AS update observations: %llu\n",
+         giy_profile.as_update_observations);
+  printf("AS update entries:      %llu\n",
+         giy_profile.as_update_entries);
+  printf("AS update applied:      %llu\n",
+         giy_profile.as_update_applied);
+  printf("AS update pm changed:   %llu\n",
+         giy_profile.as_update_pm_changed);
+  printf("AS update invalid shape:%llu\n",
+         giy_profile.as_update_invalid_shape);
+  printf("AS update invalid pm:   %llu\n",
+         giy_profile.as_update_invalid_pm);
+  printf("AS update invalid oldpm:%llu\n",
+         giy_profile.as_update_invalid_old_pm);
+  printf("AS update LUB failed:   %llu\n",
+         giy_profile.as_update_lub_failed);
+  printf("AS shape advance tries: %llu\n",
+         giy_profile.as_shape_advance_attempts);
+  printf("AS shape advance chg:   %llu\n",
+         giy_profile.as_shape_advance_changed);
+#endif
 
   printf("Materialized by cell type:\n");
   for (unsigned int i = 0; i < GIY_PROFILE_CELL_TYPES; i++) {
@@ -1511,6 +1957,10 @@ void giy_minor_collect(Context *ctx,
 		ensure_gc_stack_capacity();
   giy_profile_begin_minor_gc();
 			gc_stack_reset();
+  giy_as_update_log_reset();
+#if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
+  giy_as_object_update_log_reset();
+#endif
   g_used_nt_old_store = false;
   giy_old_guard_begin();
 
@@ -1534,6 +1984,9 @@ void giy_minor_collect(Context *ctx,
   //phase 3: traverse the live young objects and copy them to old generation
   giy_old_guard_set_phase("young_traverse_copy");
 	giy_traverse_stack_and_copy();
+  giy_old_guard_set_phase("allocation_site_update");
+  giy_apply_alloc_site_updates();
+  giy_advance_function_table_alloc_sites(ctx);
 
   //phase 4: patch the roots
   giy_old_guard_set_phase("scan_roots_patch");

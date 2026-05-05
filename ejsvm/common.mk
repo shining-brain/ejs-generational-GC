@@ -118,6 +118,16 @@ ifeq ($(GIY_AS_DRY_PROFILE),true)
 CPPFLAGS += -DGIY_AS_DRY_PROFILE=1
 endif
 
+ifeq ($(GIY_AS_UPDATE),true)
+CPPFLAGS += -DGIY_AS_UPDATE=1
+endif
+
+ifeq ($(GIY_AS_FT_ADVANCE),true)
+CPPFLAGS += -DGIY_AS_FT_ADVANCE=1
+else ifeq ($(GIY_AS_FT_ADVANCE),false)
+CPPFLAGS += -DGIY_AS_FT_ADVANCE=0
+endif
+
 ifeq ($(GIY_RSET_INDEX_FAST),true)
 CPPFLAGS += -DGIY_RSET_INDEX_FAST=1
 endif

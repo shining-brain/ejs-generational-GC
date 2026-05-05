@@ -3570,3 +3570,221 @@ GiY 是否可以像 Cheney 一样做：
 - 在所有相关 young object、PropertyMap、Shape 都完成 reserve/materialize/patch 后，再统一计算 LUB 并更新 allocation-site cache。
 - 更新 `as->pm/as->shape` 时，必须把函数表里的这些字段当作 GC root/slot 处理，保证其中的 young 指针也被 reserve 和 patch。
 - 这样 GiY 才能获得 Cheney 的 allocation-site 学习效果，同时不破坏 GiY 两阶段复制的不变量。
+
+## 2026-05-04 GiY allocation-site 修补实验和结论
+
+代码修补：
+- 在 `ejsvm/GiY.cc` 中新增 GiY-safe allocation-site update 路径：GiY 不再在扫描 young JSObject 时直接更新 allocation site，而是在对象完成 materialize 后，把其 shape 聚合进每轮 AS update log，最后按 allocation site 统一 LUB/apply。
+- 保留函数表 allocation-site shape advance，并新增编译开关 `GIY_AS_FT_ADVANCE` 用于 A/B。
+- 直接对每个 materialized JSObject 调用 Cheney 的 `alloc_site_update_info()` 已被否定：CD 立即 SIGSEGV，崩在 `alloc_site_update_info()` 内部。
+- 直接对每个对象做安全版 AS update 也被否定：CD 运行 6 分钟仍未完成，单次迭代已到 `34-37s`，明显引入不可接受的 per-object 更新开销。
+
+关键验证结果：
+- 最终采用的方案是“materialize 后记录对象 shape，但按 allocation site 聚合后统一更新”。
+- CD（out48，FT advance 开启）：
+  - business `230.655s`，Cheney out37 为 `238.945s`，GiY 快 `8.290s`。
+  - GC overhead `12.694s`，GC core `8.425s`。
+  - allocations `2,006,796,747`，低于 Cheney `2,099,019,821`。
+  - AS observations `64,858,050`，entries `1,740,399`，applied `24`，LUB failed `104`，invalid shape/pm/oldpm 全为 `0`。
+- Havlak（out48，FT advance 开启）：
+  - business `377.401s`，Cheney out37 为 `378.276s`，GiY 快 `0.875s`。
+  - GC overhead `37.310s`，GC core `28.103s`。
+  - allocations `1,817,371,816`，低于 Cheney `1,856,819,962`。
+  - shape cache search `28,237,581`，远低于旧 GiY out36 的 `285,943,062`，也低于 Cheney out37 的 `84,926,065`。
+  - AS observations `254,211,608`，entries `3,387,604`，applied `33`，LUB failed `11`，invalid shape/pm/oldpm 全为 `0`。
+
+FT advance A/B：
+- 关闭 FT advance 后 CD（out49）：
+  - business `238.949s`，比 FT 开启慢 `8.294s`。
+  - GC core 从 `8.425s` 降到 `7.246s`，只省 `1.179s`。
+- 关闭 FT advance 后 Havlak（out49）：
+  - business `384.739s`，比 FT 开启慢 `7.338s`。
+  - GC core 从 `28.103s` 降到 `24.955s`，只省 `3.148s`。
+- 结论：FT advance 虽有 GC 成本，但 business 收益更大，最终配置应保留。
+
+当前结论：
+- 之前剩余 business gap 的主要原因确实是 GiY 没有训练 allocation-site cache，导致对象 layout 预分配落后，进而触发额外 `set_prop_()`、shape search、allocation 和 write barrier。
+- 修补后，CD 和 Havlak 的 business 时间都已经达到或超过 Cheney；剩余差异主要转移到 GC overhead，而不是 mutator/business。
+- 下一步应以最终配置跑完整 benchmarks suite，验证全局结果是否也支持这个结论。
+
+## 2026-05-04 最终 full-suite 验证与反复修补结论
+
+最终保留的代码方案：
+- GiY minor GC 在对象完成 materialize 后，把 JSObject 的 shape 记录到 allocation-site update log。
+- 每轮 GC 按 allocation site 聚合 shape->pm，统一计算 LUB，再更新 `as->pm/as->shape`。
+- 保留 `GIY_AS_FT_ADVANCE=true` 的函数表 allocation-site shape advance，因为 CD/Havlak A/B 显示它的 business 收益大于 GC 成本。
+- 放弃两个错误/负收益方案：
+  - 直接调用 Cheney `alloc_site_update_info()`：CD 立即 SIGSEGV。
+  - 对每个 materialized object 逐个直接更新 AS：CD 6 分钟未完成，单次迭代已到 `34-37s`。
+- 也放弃后续“提前过滤/fast-path”方案：out53 full-suite total `3496.306s`，不如最终采用的 out50 `3485.047s`。
+
+完整 suite 目录：
+- 最终采用：`build.debug/benchmarks/out50_giy_as_update_final_full`
+- 对照 Cheney：`build.debug/benchmarks/out24`
+- 对照旧 GiY：`build.debug/benchmarks/out29_giy_current_full`
+- 被否定的提前过滤版本：`build.debug/benchmarks/out53_giy_as_update_prefilter_full`
+
+最终 full-suite 总量（12 项：Bounce/List/Sieve/Queens/Permute/Storage/Towers/Mandelbrot/Richards/CD/NBody/Havlak）：
+- Cheney out24：
+  - total `3499.343s`
+  - business `3379.894s`
+  - GC `119.450s`
+  - allocations `19,789,564,672`
+  - forward ops `1,696,428,830`
+- 旧 GiY out29：
+  - total `3521.378s`
+  - business `3428.880s`
+  - GC `92.497s`
+  - allocations `20,177,532,732`
+  - forward ops `1,636,291,388`
+- 新 GiY out50：
+  - total `3485.047s`
+  - business `3378.598s`
+  - GC `106.448s`
+  - allocations `19,637,117,887`
+  - forward ops `1,468,807,058`
+
+最终差异：
+- 新 GiY vs 旧 GiY：
+  - total `-36.331s`
+  - business `-50.282s`
+  - GC `+13.951s`
+  - allocations `-540,414,845`
+  - forward ops `-167,484,330`
+- 新 GiY vs Cheney：
+  - total `-14.296s`
+  - business `-1.296s`
+  - GC `-13.002s`
+  - allocations `-152,446,785`
+  - forward ops `-227,621,772`
+
+关键单项：
+- CD：新 GiY business `229.997s`，Cheney `239.056s`，旧 GiY `245.134s`。
+- Havlak：新 GiY business `376.846s`，Cheney `378.938s`，旧 GiY `414.267s`。
+- Storage 是主要反例项：新 GiY out50 business `178.553s`，但复跑最终配置为 `164.625s`；no-AS 基线为 `163.462s`。Storage 的 AS observations 可达 `546,200,007`，applied 只有 `5`，说明它对 AS update 几乎没有收益，额外成本主要来自巨量 live JSObject 的 eligibility/record 检查。提前过滤把 observations 降到 `8`，但 full-suite 总体反而变差，因此没有保留。
+
+最终结论：
+- 原先和 Cheney 相比的 GiY business gap，核心确实是 allocation-site cache 没有被 GiY minor GC 训练。
+- 修补后 full-suite business 从旧 GiY `3428.880s` 降到 `3378.598s`，收回 `50.282s`，已经略快于 Cheney `1.296s`。
+- 因此“allocation-site cache 训练缺失导致 mutator 做额外对象 layout/属性扩展工作”这个判断成立。
+- 剩余主要工程问题不是这个根因是否成立，而是如何降低 Storage 这类 benchmark 上 AS 检查本身的 GC 成本；需要更细的 dirty allocation-site 机制，而不是简单全对象检查。
+
+## 2026-05-04 背景解释：allocation-site cache、CheneyGC 与修复前 GiY 的区别
+
+背景：
+- JavaScript 对象通常不是一次性拥有所有属性，而是在运行过程中逐步写入属性。
+- VM 用 `Shape` / `PropertyMap` 描述对象当前的属性布局。
+- `allocation site` 是“某条 new/对象创建指令的位置”。同一个位置反复创建出来的对象，通常会长成相似的属性布局。
+- `allocation-site cache` 的作用是让 VM 记住“这个创建位置的对象最终通常长成什么布局”，下次从这个位置创建对象时直接使用更接近最终状态的 layout。
+- 如果这个 cache 训练得好，mutator 后续少做 `set_prop_()`、shape search、property map/shape allocation、write barrier。
+- 如果这个 cache 落后，对象刚创建时 layout 太小/太旧，程序运行中就要一步步扩展属性，产生大量额外 business time。
+
+CheneyGC 的行为：
+- CheneyGC 扫描存活 JSObject 时会调用 `alloc_site_update_info(p)`。
+- 它用存活对象当前真实的 `shape->pm` 更新该对象所属 allocation site 的 `as->pm/as->shape/as->polymorphic`。
+- 这等价于 GC 顺手学习“活下来的对象最终长成什么形状”。
+- 因为 Cheney 是普通复制扫描流程，扫描对象时 shape/property-map 状态满足 `alloc_site_update_info()` 的假设。
+
+修复前 GiY 的行为：
+- GiY 有自己的 minor GC 扫描/复制路径，核心是 reserve/materialize 两阶段。
+- 修复前 GiY 只负责找 live object、复制对象、patch 指针，没有执行 Cheney 那一步 allocation-site cache 训练。
+- 所以 GiY 的 `as->pm` 经常停留在旧 layout 上。
+- 结果是下一轮 mutator 从同一个 allocation site 创建对象时，拿到的是过时 layout，后面再通过 `set_prop_()` 补属性扩展。
+
+数据证据：
+- 修复前 GiY vs Cheney：
+  - CD business：GiY `245.134s`，Cheney `239.056s`。
+  - Havlak business：GiY `414.267s`，Cheney `378.938s`。
+- 修复后：
+  - CD business：新 GiY `229.997s`。
+  - Havlak business：新 GiY `376.846s`。
+- full-suite business：
+  - 旧 GiY `3428.880s`。
+  - Cheney `3379.894s`。
+  - 新 GiY `3378.598s`。
+- 因此修复前 GiY 在这方面慢的核心原因，是没有像 Cheney 那样利用 GC 扫描 live object 的机会训练 allocation-site cache。
+
+## 2026-05-04 最终实验大结论：当前 GiY vs CheneyGC
+
+最终采用的数据：
+- 当前 GiY：`build.debug/benchmarks/out50_giy_as_update_final_full`
+- CheneyGC：`build.debug/benchmarks/out24`
+- 修复前 GiY：`build.debug/benchmarks/out29_giy_current_full`
+
+full-suite 总结论：
+- 当前 GiY total `3485.047s`，CheneyGC total `3499.343s`，当前 GiY 快 `14.296s`。
+- 当前 GiY business `3378.598s`，CheneyGC business `3379.894s`，当前 GiY 快 `1.296s`。
+- 当前 GiY GC `106.448s`，CheneyGC GC `119.450s`，当前 GiY 快 `13.002s`。
+- 修复前 GiY business 是 `3428.880s`，修复后降到 `3378.598s`，收回 `50.282s`。
+- 因此，当前 GiY 在 full-suite 总时间、business 时间、GC 时间上都已经不慢于 CheneyGC；总时间上当前 GiY 更快。
+
+关键单项：
+- CD：
+  - CheneyGC business `239.056s`
+  - 修复前 GiY business `245.134s`
+  - 当前 GiY business `229.997s`
+  - 当前 GiY 比 CheneyGC 快 `9.059s`，比修复前 GiY 快 `15.137s`
+- Havlak：
+  - CheneyGC business `378.938s`
+  - 修复前 GiY business `414.267s`
+  - 当前 GiY business `376.846s`
+  - 当前 GiY 比 CheneyGC 快 `2.092s`，比修复前 GiY 快 `37.421s`
+
+原因分析：
+- 修复前 GiY 和 CheneyGC 的主要 business gap，不是 GC copy 本身，而是 mutator 被迫多做对象 layout/属性扩展工作。
+- CheneyGC 在扫描 live JSObject 时会调用 `alloc_site_update_info(p)`，用存活对象当前真实的 `shape->pm` 训练 allocation-site cache。
+- 修复前 GiY 没有这一步，所以 allocation site 的 `as->pm` 经常落后；下一次对象创建时 layout 偏旧，后续要靠 `set_prop_()` 继续扩展属性。
+- 这会带来额外 `set_prop_()`、shape search、PropertyMap/Shape allocation 和 write barrier。
+- 当前修复给 GiY 补上了 GiY-safe allocation-site training：materialize 后记录 live JSObject shape，按 allocation site 聚合，再统一 LUB/update。
+
+直接证据：
+- 修复前 GiY full-suite business 比 CheneyGC 慢 `48.986s`：`3428.880s - 3379.894s`。
+- 修复后当前 GiY full-suite business 比修复前快 `50.282s`。
+- 修复后当前 GiY business 已经比 CheneyGC 快 `1.296s`。
+- CD/Havlak 是原先 gap 最明显的项目，修复后 CD 从 `245.134s` 降到 `229.997s`，Havlak 从 `414.267s` 降到 `376.846s`。
+- Havlak 的 shape-cache/search 诊断也支持原因判断：旧 GiY no-AS profile 中 Havlak shape search 曾是 `285,943,062`，Cheney 是 `84,926,065`；修复实验中 Havlak shape search 降到 `28,237,581`，说明对象 layout 训练确实减少了属性扩展相关路径。
+
+剩余问题：
+- Storage 是主要反例/风险点。当前 GiY 对 Storage 的 AS update 收益很小，观察到 AS observations 可达 `546,200,007`，但 applied 只有 `5`。
+- 这说明某些 benchmark 上，GiY 仍会为“几乎不需要更新的 allocation site”付出检查成本。
+- 后续优化方向不是重新否定 allocation-site 训练，而是做更细的 dirty allocation-site / dirty object-site 机制，避免 Storage 这类场景全量检查。
+
+## 2026-05-05 当前 GiY vs CheneyGC 所有 benchmark 逐项数据
+
+数据来源：
+- 当前 GiY：`build.debug/benchmarks/out50_giy_as_update_final_full`
+- CheneyGC：`build.debug/benchmarks/out24`
+- Δ = 当前 GiY - CheneyGC；负数表示当前 GiY 更快或更少。
+
+| benchmark | Cheney total | GiY total | Δ total | Cheney business | GiY business | Δ business | Cheney GC | GiY GC | Δ GC | Cheney alloc | GiY alloc | Δ alloc |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | `158.885` | `157.335` | `-1.550` | `158.741` | `157.216` | `-1.525` | `0.145` | `0.119` | `-0.026` | `45,604,143` | `30,608,585` | `-14,995,558` |
+| List | `98.878` | `99.094` | `+0.216` | `98.863` | `99.082` | `+0.219` | `0.014` | `0.012` | `-0.002` | `9,302,050` | `4,655,378` | `-4,646,672` |
+| Sieve | `123.732` | `120.831` | `-2.901` | `120.971` | `119.419` | `-1.552` | `2.761` | `1.412` | `-1.349` | `601,999` | `601,999` | `0` |
+| Queens | `116.048` | `116.321` | `+0.273` | `116.018` | `116.281` | `+0.263` | `0.030` | `0.040` | `+0.010` | `8,002,056` | `8,002,056` | `0` |
+| Permute | `382.245` | `388.003` | `+5.758` | `382.243` | `388.001` | `+5.758` | `0.002` | `0.002` | `0.000` | `404,153` | `304,698` | `-99,455` |
+| Storage | `209.181` | `213.328` | `+4.147` | `158.234` | `178.553` | `+20.319` | `50.947` | `34.774` | `-16.173` | `1,092,302,019` | `1,092,301,898` | `-121` |
+| Towers | `185.360` | `184.093` | `-1.267` | `185.357` | `184.090` | `-1.267` | `0.003` | `0.003` | `0.000` | `1,802,073` | `968,893` | `-833,180` |
+| Mandelbrot | `234.111` | `235.048` | `+0.937` | `228.344` | `226.881` | `-1.463` | `5.767` | `8.167` | `+2.400` | `6,547,928,783` | `6,547,928,783` | `0` |
+| Richards | `943.234` | `936.209` | `-7.025` | `943.121` | `936.072` | `-7.049` | `0.113` | `0.138` | `+0.025` | `52,753,056` | `52,552,966` | `-200,090` |
+| CD | `251.045` | `242.589` | `-8.456` | `239.056` | `229.997` | `-9.059` | `11.989` | `12.592` | `+0.603` | `2,099,019,821` | `2,006,796,747` | `-92,223,074` |
+| NBody | `378.798` | `378.113` | `-0.685` | `370.008` | `366.160` | `-3.848` | `8.790` | `11.952` | `+3.162` | `8,075,024,557` | `8,075,024,068` | `-489` |
+| Havlak | `417.826` | `414.083` | `-3.743` | `378.938` | `376.846` | `-2.092` | `38.889` | `37.237` | `-1.652` | `1,856,819,962` | `1,817,371,816` | `-39,448,146` |
+
+总计：
+- total：CheneyGC `3499.343s`，当前 GiY `3485.047s`，Δ `-14.296s`。
+- business：CheneyGC `3379.894s`，当前 GiY `3378.598s`，Δ `-1.296s`。
+- GC：CheneyGC `119.450s`，当前 GiY `106.448s`，Δ `-13.002s`。
+- minor GC count：CheneyGC `2,341,014`，当前 GiY `2,302,292`，Δ `-38,722`。
+- write barrier calls：CheneyGC `2,054,529,628`，当前 GiY `2,079,088,412`，Δ `+24,558,784`。
+- allocations：CheneyGC `19,789,564,672`，当前 GiY `19,637,117,887`，Δ `-152,446,785`。
+- forward operations：CheneyGC `1,696,428,830`，当前 GiY `1,468,807,058`，Δ `-227,621,772`。
+- GC core：CheneyGC `89.940s`，当前 GiY `72.829s`，Δ `-17.111s`。
+
+逐项结论：
+- 当前 GiY total 更快的项目：Bounce、Sieve、Towers、Richards、CD、NBody、Havlak，共 7 项。
+- 当前 GiY total 更慢的项目：List、Queens、Permute、Storage、Mandelbrot，共 5 项。
+- 当前 GiY business 更快的项目：Bounce、Sieve、Towers、Mandelbrot、Richards、CD、NBody、Havlak，共 8 项。
+- 当前 GiY business 更慢的项目：List、Queens、Permute、Storage，共 4 项。
+- 最大正收益来自 CD、Richards、Havlak、Sieve/Bounce。
+- 最大负项是 Storage business `+20.319s` 和 Permute business `+5.758s`；Storage 同时 GC 快 `16.173s`，所以 total 只慢 `4.147s`。
