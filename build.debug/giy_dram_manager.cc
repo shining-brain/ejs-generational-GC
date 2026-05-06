@@ -801,8 +801,13 @@ void space_init(size_t bytes, size_t threshold_bytes)
     dram_space.available_bytes = bytes;
     dram_space.end = dram_space.begin + dram_space.total_size;
 
+#ifdef USE_GIYOL
+        printf("Now we are using GiYOL GC. Cache DRAM Manager initialized: Cache size %d Kbytes, DRAM size %zu Kbytes\n",
+            cache_space.total_size / 1024, dram_space.total_size / 1024);
+#else
         printf("Now we are using GiY GC. Cache DRAM Manager initialized: Cache size %d Kbytes, DRAM size %zu Kbytes\n",
             cache_space.total_size / 1024, dram_space.total_size / 1024);
+#endif
         printf("DRAM address info: begin=%p, end=%p, total_size=%zuKB\n",
             (void*)dram_space.begin, (void*)dram_space.end, dram_space.total_size/1024);
 

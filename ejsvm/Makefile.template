@@ -69,6 +69,7 @@ OPT_REGEXP    = none
 OPT_GC        = native
 # OPT_GC        = cache_cheney
 # OPT_GC        = giy
+# OPT_GC        = giyol
 #OPT_GC        = bibop
 #OPT_GC        = copy
 #OPT_GC        = none

@@ -945,3 +945,1262 @@ full-suite 总结论：
 - 当前 GiY business 更慢的项目：List、Queens、Permute、Storage，共 4 项。
 - 最大正收益来自 CD、Richards、Havlak、Sieve/Bounce。
 - 最大负项是 Storage business `+20.319s` 和 Permute business `+5.758s`；Storage 同时 GC 快 `16.173s`，所以 total 只慢 `4.147s`。
+
+2026-05-05 当前 GiY 与 CheneyGC 的内存布局
+
+共同基础：
+- 两者都使用 `Cache_space` + `Dram_space`。
+- `Cache_space` 字段：`begin / work_begin / current / end / total_size / threshold_size`。
+- `Dram_space` 字段：`begin / free / current / end / total_size / available_bytes`。
+- 每个对象前面都有 `object_header`：`forwarding_pointer / type / size`，payload 紧跟 header 后面，对象 footprint 按 `ALIGN(size + object_header)` 对齐。
+- `[cache_space.begin, cache_space.work_begin)` 是 init/static area；minor GC 不回收，指针判断中视为 init/old。
+- `[cache_space.work_begin, cache_space.current)` 是当前 young allocation area 中已经分配的对象。
+- `[cache_space.current, cache_space.end)` 是 young free area。
+- `Dram_space [begin, free)` 是 old generation；minor GC 之后存活 young object 被放到这里。
+- minor GC 结束后，两者都会执行 `cache_space.current = cache_space.work_begin`，整块 young work area 被回收。
+
+CheneyGC 当前布局：
+- 不是传统两个等大的 from-space/to-space semispace。
+- 它使用 cache 作为 young/from area，DRAM 作为 old/to area。
+- 对象先分配到 cache 的 young area。
+- minor GC 时，Cheney tracer 遇到 young pointer 后立即 `memcpy` 到 `dram_space.free`，推进 `dram_space.free`，并在源 cache object header 里写 forwarding pointer。
+- 然后从 `dram_space.current = scan_start` 开始扫描新复制到 DRAM 的对象，直到 `dram_space.current == dram_space.free`。
+- CheneyGC 会在 cache 顶部保留 function-table slot set：大小为 young bytes 的 `1/8`，至少 `32KB`。
+- 以 out24/CD 实际输出为例：
+  - cache total `320KB`
+  - DRAM total `64GB`
+  - init 后 `work_begin` 位于 `cache_space.begin + ~19.9KB`
+  - 按代码推算，Cheney function-table slot set 约 `37.5KB`，可用于 normal young allocation 的区域约 `262.7KB`
+
+CheneyGC 图示：
+```text
+Cache_space:
+  [begin, work_begin)        init/static objects, minor GC 不回收
+  [work_begin, current)      young allocated objects
+  [current, cheney_end)      young free area
+  [cheney_end, original_end) function-table slot set
+
+Dram_space:
+  [begin, free)              old/live copied objects
+  [free, end)                DRAM free
+```
+
+GiY 当前布局：
+- GiY 也用 cache 作为 young area，DRAM 作为 old area。
+- 与 CheneyGC 最大区别不是最终空间归属，而是 minor GC 过程中的 transient layout。
+- GiY 在 cache 顶部额外绑定 GC auxiliary area：
+  - GC stack：young bytes 的 `1/8`，至少 `8KB`
+  - edge log：当前为 `0`
+  - function-table slot set：young bytes 的 `1/64`，至少 `32KB`
+- `giy_bind_stack_to_cache()` 会把 `cache_space.end` 往前移动，所以 normal young allocation 不能占用这些 auxiliary 区域。
+- 以 out50/CD 实际输出为例：
+  - cache total `360KB`
+  - DRAM total `64GB`
+  - init 后 young before aux `340.24KB`
+  - GiY aux total `74.52KB`：stack `42.52KB`，edge `0KB`，ft `32KB`
+  - normal young after aux `265.72KB`
+
+GiY 图示：
+```text
+Cache_space:
+  [begin, work_begin)        init/static objects, minor GC 不回收
+  [work_begin, current)      young allocated objects
+  [current, giy_end)         young free area
+  [giy_end, edge_begin)      GiY GC stack
+  [edge_begin, ft_begin)     edge log, 当前 0
+  [ft_begin, original_end)   function-table slot set
+
+Dram_space:
+  [begin, free)              old/live materialized objects
+  [free, end)                DRAM free
+```
+
+GiY minor GC 的 transient layout：
+- reserve 阶段：遇到 young object 时，先在 DRAM 中预留一段 destination slot，推进 `dram_space.free`，但对象内容还没复制过去。
+- source young object header 的 `forwarding_pointer` 指向 DRAM reserved payload。
+- source young object 被压入 GiY GC stack。
+- traversal/materialize 阶段：从 GC stack 弹出 source young object，扫描其字段、reserve 子对象、patch source 内部 young slot，然后把整个对象 copy/materialize 到已预留的 DRAM 位置。
+- 当前实现会对较大对象使用 non-temporal store copy。
+
+GiY 与 CheneyGC 的关键区别：
+- 最终布局相似：活下来的 young object 都进入 DRAM old generation，cache young area 被整体清空。
+- CheneyGC 是“遇到对象就立即 copy 到 DRAM，然后扫描 DRAM 中的新对象”。
+- GiY 是“先 reserve DRAM 位置并建立 forwarding pointer，再用 cache 内 GC stack 驱动 traversal，最后 materialize/copy 到 DRAM”。
+- CheneyGC 不需要额外的 GiY GC stack；GiY 需要在 cache 顶部保留 GC stack/FT slot set。
+- GiY 的设计为后续紧凑排列、non-temporal copy、cache/DRAM 分工提供了空间，但也引入了 auxiliary area 和两阶段不变量。
+
+2026-05-05 function table slot set 是什么，为什么需要
+
+结论：
+- `function table slot set` 不是对象集合，而是“function table 中哪些 slot 当前保存了 young pointer”的 slot 地址集合。
+- slot set 里存的是 slot 的地址，不是 slot 指向的对象。
+- 它的作用是让 minor GC 把这些 function table slot 当作 root/old-to-young edge 处理：先 reserve 它们指向的 young object，再在对象 forwarding 后 patch slot。
+
+为什么不能只靠普通 remembered set：
+- 普通 remembered set 主要记录 heap 内 old/init 对象里的 slot。
+- function table 是 VM 的全局/静态元数据区，不在 `cache_space` / `dram_space` 的普通 heap object 范围内。
+- 当前 GiY 的 remembered-set patch/scan 会检查 slot 地址是否在 DRAM 或 init area；function table slot 地址通常不满足这个条件。
+- 所以如果 function table slot 指向 young object，而没有专门记录，minor GC 可能不会把这个 young object 当作 root，也不会把 slot patch 到 copied old address。
+
+function table 里为什么会有 young pointer：
+- code loader 可能把 JSValue 常量写进 function table 的 constant area。
+- allocation-site cache 存在 function table 的 instruction metadata 里，例如 `as->pm`、`as->shape`。
+- inline cache / property metadata 也可能短期持有 heap pointer。
+- 这些 slot 不一定是 heap object 字段，但它们仍然可能指向 heap object。
+
+当前实现：
+- 写 function table slot 时调用：
+  - `giy_record_ft_jsvalue_slot(JSValue *slot, JSValue value)`
+  - `giy_record_ft_ptr_slot(void **slot, void *value)`
+- 如果 value 是 young pointer，就把 slot 地址加入 `g_ft_slot_set`。
+- 为了区分 slot 类型，低 bit 用作 tag：
+  - 普通 `JSValue *slot`
+  - tagged `void **slot`
+- minor GC 中：
+  - `giy_reserve_function_table_slots()` 扫描 slot set，把 slot 当前 value 当 root reserve。
+  - `giy_patch_function_table_slots()` 在 forwarding 完成后把 slot 改成新地址。
+  - `giy_clear_function_table_slots()` 清空集合。
+- CheneyGC 也有对应的 `cache_cheney_ft_slot_set` 和同名记录接口。
+
+为什么不每次扫描整个 function table：
+- function table 很大，里面包括大量 instruction、constant、inline cache、allocation-site metadata。
+- 每次 minor GC 全量扫描会很贵。
+- 其中很多字段是 weak cache，不应全部当 strong root。
+- slot set 只记录“确实写入过 young pointer 的 slot”，因此是一个精确的强 root 子集。
+
+和 allocation-site 修复的关系：
+- 这次修复后，GiY 会更新 allocation-site cache。
+- `as->pm/as->shape` 位于 function table 的 instruction metadata 中。
+- 如果这些字段短期指向 young `PropertyMap` / `Shape`，就必须通过 function table slot set 让 minor GC reserve/patch 它们。
+- 否则 allocation-site cache 可能保存悬空 young pointer，下一轮访问时出错或退化。
+
+2026-05-05 GiYOL 初始设计与实现记录
+
+目标：
+- 新增 GC 名称：`GiYOL`，构建方式为 `OPT_GC=giyol`。
+- 主体 GC 逻辑必须保持 GiY 一样：roots、remembered set、function table slot set、weak clear、allocation-site update、reserve/patch 都复用 GiY。
+- 唯一改变 live object materialize/copy 策略：GiYOL 不在每个 live object 扫描后立刻 copy，而是先把 live object 的 source/destination/size 放进 batch，累计到阈值后一起用 non-temporal store flush。
+
+当前实现：
+- `ejsvm/common.mk` 新增 `OPT_GC=giyol`：
+  - 编译同一组文件：`giy_dram_manager.cc giy_rset.cc GiY.cc`
+  - 定义：`USE_GIY_MINOR` + `USE_GIYOL`
+- `ejsvm/giy_dram_manager.cc` 在 `USE_GIYOL` 下打印 `Now we are using GiYOL GC`。
+- `ejsvm/GiY.cc` 新增：
+  - `GIYOL_BATCH_BYTES`，默认 `64KB`
+  - `GiYOLCopyEntry { dst, src, nbytes }`
+  - `GiYOLCopyBatch`
+  - `giyol_enqueue_copy()`
+  - `giyol_flush_copy_batch()`
+- GiYOL flush 时会对 batch 按 `dst` 地址排序，尽量让 streaming store 按 DRAM 目标地址递增写入。
+- batch bytes 达到 `GIYOL_BATCH_BYTES` 后，使用 non-temporal store 复制整个 batch。
+- minor GC 结束前剩余不足阈值的 batch 用普通 GiY copy 策略 flush，避免对很小尾批次强行 streaming store。
+
+为什么仍符合 GiY 原则：
+- GiY 的 reserve 阶段仍然先在 DRAM 预留目标位置，并在 young source header 写 forwarding pointer。
+- GiY 的 traversal 仍然在 young/cache 内完成字段扫描和 young pointer patch。
+- GiYOL 只是延迟 materialize/copy 到 DRAM 的时间点；不会改变对象发现顺序、forwarding pointer 语义、root/RS/FT patch 语义。
+- 在 roots/RS/FT patch 之前，GiYOL 会 flush 所有 pending live objects，保证 DRAM destination 已经 materialized。
+
+需要验证：
+- `OPT_GC=giyol` 构建能否通过。
+- smoke tests：`hello_world.sbc`、`giy_gc_probe.sbc`。
+- 关键 benchmarks：CD/Havlak/Storage，和当前 GiY out50 对比。
+- 如果关键项稳定，再跑 full suite。
+
+## 2026-05-05 GiYOL targeted 阈值实验记录
+
+已完成的 GiYOL 修正：
+- `GIYOL_SORT_BATCH` 默认改为 `0`。原因：按 batch 对 copy entry 做 `qsort` 的成本太高，尤其 Storage 会产生大量 batch。
+- `GIYOL_BATCH_BYTES` 默认改为 `128KB`。原因：targeted benchmark 中 128KB 是目前 CD/Havlak/Storage 三项总和最好的阈值。
+- GiYOL 的主体仍复用 GiY；改变的只有 live object materialize/copy：先记录 `{dst, src, nbytes}`，达到阈值后批量 flush。
+
+smoke test：
+- `build.debug/benchmarks/out54_giyol_smoke`
+- `hello_world.sbc` 通过。
+- `giy_gc_probe.sbc` 通过。
+- 输出中确认使用的是 `Now we are using GiYOL GC`。
+
+targeted benchmark 输出目录：
+- 当前 GiY baseline：`build.debug/benchmarks/out50_giy_as_update_final_full`
+- GiYOL 64KB + sort 初版：`build.debug/benchmarks/out55_giyol_key`
+- GiYOL 256KB + no-sort：`build.debug/benchmarks/out56_giyol_key_nosort_256k`
+- GiYOL 128KB + no-sort：`build.debug/benchmarks/out57_giyol_key_nosort_128k`
+- GiYOL 64KB + no-sort：`build.debug/benchmarks/out58_giyol_key_nosort_64k`
+
+三项 targeted 总和，单位秒：
+
+| 版本 | total | business | GC full | GC core |
+|---|---:|---:|---:|---:|
+| GiY out50 | 870.000 | 785.396 | 84.603 | 68.152 |
+| GiYOL 64KB + sort | 937.938 | 778.880 | 159.059 | 139.681 |
+| GiYOL 64KB + no-sort | 893.431 | 796.156 | 97.275 | 77.034 |
+| GiYOL 128KB + no-sort | 870.568 | 774.226 | 96.341 | 77.003 |
+| GiYOL 256KB + no-sort | 876.894 | 780.086 | 96.808 | 77.193 |
+
+关键单项数据，单位秒：
+
+| benchmark | 版本 | total | business | GC full | GC core | GiYOL NT batches | GiYOL NT MB | small MB |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| CD | GiY out50 | 242.589 | 229.997 | 12.592 | 8.446 | - | - | - |
+| CD | 64KB + sort | 250.218 | 233.102 | 17.117 | 12.088 | 16522 | 1035.28 | 6748.72 |
+| CD | 64KB + no-sort | 246.376 | 232.994 | 13.382 | 8.087 | 16522 | 1035.28 | 6748.72 |
+| CD | 128KB + no-sort | 243.934 | 231.096 | 12.838 | 7.825 | 0 | 0.00 | 7784.00 |
+| CD | 256KB + no-sort | 246.530 | 233.579 | 12.951 | 7.902 | 0 | 0.00 | 7784.00 |
+| Havlak | GiY out50 | 414.083 | 376.846 | 37.237 | 27.765 | - | - | - |
+| Havlak | 64KB + sort | 429.508 | 380.344 | 49.164 | 38.275 | 344297 | 21909.04 | 9023.47 |
+| Havlak | 64KB + no-sort | 420.494 | 384.206 | 36.288 | 24.780 | 344297 | 21909.04 | 9023.47 |
+| Havlak | 128KB + no-sort | 411.838 | 376.656 | 35.182 | 24.271 | 153897 | 19286.55 | 11645.96 |
+| Havlak | 256KB + no-sort | 417.041 | 381.024 | 36.017 | 24.875 | 60997 | 15251.37 | 15681.13 |
+| Storage | GiY out50 | 213.328 | 178.553 | 34.774 | 31.941 | - | - | - |
+| Storage | 64KB + sort | 258.212 | 165.434 | 92.778 | 89.318 | 907547 | 56746.07 | 2025.47 |
+| Storage | 64KB + no-sort | 226.561 | 178.956 | 47.605 | 44.167 | 907547 | 56746.07 | 2025.47 |
+| Storage | 128KB + no-sort | 214.796 | 166.474 | 48.321 | 44.907 | 453773 | 56730.28 | 2041.25 |
+| Storage | 256KB + no-sort | 213.323 | 165.483 | 47.840 | 44.416 | 226886 | 56727.26 | 2044.28 |
+
+当前结论：
+- GiYOL 已经能正确构建和运行，且 CD/Havlak/Storage targeted benchmark 全部退出码 0。
+- 64KB + sort 是错误方向：排序和过多 flush 叠加，使三项总时间比 GiY 慢 67.938s。
+- 64KB + no-sort 仍比 GiY 慢 23.431s，说明主要问题不只是排序；过早对小批量 survivor 使用 NT store 本身也有明显成本。
+- 256KB + no-sort 对 Storage 最稳，但 Havlak/CD 不如 128KB。
+- 128KB + no-sort 是当前 targeted 最优：三项总时间 870.568s，只比 GiY out50 慢 0.568s；其中 Havlak 比 GiY 快 2.245s，Storage 比 GiY 慢 1.468s，CD 比 GiY 慢 1.345s。
+- 这个实验也说明：把 survivor 合批以后使用 NT store 并不是无条件收益。对 Storage 这种几乎全是小对象的 workload，NT store 会明显降低 GC copy 本身效率，但可能减少后续 business cache 污染；最终 total 取决于两者抵消。
+
+下一步：
+- 使用 128KB + no-sort 作为 GiYOL 当前默认配置。
+- 重新构建 `OPT_GC=giyol`。
+- 跑完整 benchmark suite，输出新目录，确认 full suite 上是否有隐藏 regression。
+
+## 2026-05-05 GiYOL 最终实现、完整 suite 与结论
+
+最终代码状态：
+- 新 GC 名称：`GiYOL`。
+- 构建方式：`make -C build.debug OPT_GC=giyol GIY_RSET_INDEX_FAST=true CACHE_SIZE_KB=552 GIY_AS_UPDATE=true GIY_AS_FT_ADVANCE=true -j4`
+- `OPT_GC=giyol` 使用和 GiY 相同的主体文件：`giy_dram_manager.cc giy_rset.cc GiY.cc`。
+- GiYOL 只额外定义 `USE_GIYOL`，主体 GC 逻辑仍复用 GiY。
+- 默认参数：
+  - `GIYOL_BATCH_BYTES = 128KB`
+  - `GIYOL_SORT_BATCH = 0`
+  - `GIYOL_INLINE_COPY_ENTRIES = 64`
+  - `GIYOL_ADAPTIVE_BATCH = 0`
+
+最终实现要点：
+- GiY 仍然先 reserve 目标 old/DRAM 地址，并在 young header 写 forwarding pointer。
+- GiY 仍然在 young/cache 内扫描 object children，并 patch young object 内部 slot。
+- GiYOL 不立刻 materialize 每个 live object，而是记录 `{dst, src, nbytes}` 到 `GiYOLCopyBatch`。
+- batch 达到 128KB 时，用 non-temporal store flush batch。
+- 不足阈值的尾批次在 traversal 结束时用普通 GiY copy flush。
+- batch 自带 64 个 inline entry，避免小 GC 每次 malloc/free copy descriptor。
+- 排序默认关闭。64KB + sort 实验证明排序成本太高，不适合作为默认策略。
+- `GIYOL_ADAPTIVE_BATCH` 曾测试过；它可以避免部分 no-NT workload 的 delayed-copy 副作用，但在 Storage 上完全不触发 GiYOL NT batch，偏离本实验目标，因此保留为可选宏，默认关闭。
+
+最终 smoke：
+- 输出目录：`build.debug/benchmarks/out67_giyol_final_smoke`
+- `hello_world.sbc` 退出码 0。
+- `giy_gc_probe.sbc` 退出码 0。
+- 输出确认：`Now we are using GiYOL GC`。
+- `giy_gc_probe` 中确认 `GiYOL batch bytes = 131072`，`GiYOL NT batches = 11`。
+
+最终 full suite：
+- 输出目录：`build.debug/benchmarks/out63_giyol_inline_full`
+- 12 项全部退出码 0。
+- 注意：`out59_giyol_full` 是 inline 优化前的一轮 full suite，其中 Sieve 出现单次异常 166.861s；单独重跑 Sieve 为 122.099s，最终 out63 的 Sieve 为 123.542s，因此最终结论不用 out59。
+
+全 suite 总和，单位秒：
+
+| 版本 | total | business | GC full | GC core | minor GC | allocations | forward ops |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Cheney out24 | 3499.343 | 3379.894 | 119.450 | 89.940 | 2341014 | 19789564672 | 1696428830 |
+| GiY out50 | 3485.047 | 3378.598 | 106.448 | 72.829 | 2302292 | 19637117887 | 1468807058 |
+| GiYOL out63 | 3560.942 | 3438.931 | 122.013 | 82.446 | 2302292 | 19637117867 | 1468807204 |
+
+GiYOL out63 相对 GiY out50：
+- total 慢 75.895s。
+- business 慢 60.333s。
+- GC full 慢 15.565s。
+- GC core 慢 9.617s。
+- minor GC 次数相同：2302292。
+- allocations 基本相同：GiYOL 少 20 次，可以视为同口径。
+- forward ops 基本相同：GiYOL 多 146 次，可以视为同口径。
+
+GiYOL out63 相对 Cheney out24：
+- total 慢 61.599s。
+- business 慢 59.037s。
+- GC full 慢 2.563s。
+- GC core 快 7.494s。
+- 也就是说，GiYOL 的 GC core 仍比 Cheney 少，但 total 被 business/non-GC 时间和部分 GC full overhead 抵消。
+
+GiYOL out63 相对 GiY out50 的逐项数据，单位秒：
+
+| benchmark | GiY total | GiYOL total | Δtotal | Δbusiness | ΔGC full | ΔGC core | GiYOL NT batches | NT MB | small MB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 157.335 | 165.578 | +8.243 | +8.226 | +0.017 | +0.002 | 0 | 0.00 | 36.55 |
+| List | 99.094 | 97.165 | -1.929 | -1.930 | +0.001 | +0.000 | 0 | 0.00 | 0.55 |
+| Sieve | 120.831 | 123.542 | +2.711 | +2.577 | +0.134 | +0.036 | 0 | 0.00 | 1910.76 |
+| Queens | 116.321 | 116.288 | -0.033 | -0.038 | +0.006 | +0.000 | 0 | 0.00 | 1.62 |
+| Permute | 388.003 | 390.197 | +2.194 | +2.194 | +0.000 | +0.000 | 0 | 0.00 | 0.03 |
+| Storage | 213.328 | 213.332 | +0.004 | -13.220 | +13.225 | +12.650 | 453773 | 56730.28 | 2041.25 |
+| Towers | 184.093 | 182.606 | -1.487 | -1.488 | +0.001 | +0.000 | 0 | 0.00 | 0.12 |
+| Mandelbrot | 235.048 | 238.696 | +3.648 | +2.532 | +1.116 | +0.055 | 0 | 0.00 | 71.07 |
+| Richards | 936.209 | 936.094 | -0.115 | -0.132 | +0.016 | +0.002 | 0 | 0.00 | 14.92 |
+| CD | 242.589 | 243.676 | +1.087 | +0.756 | +0.331 | -0.506 | 0 | 0.00 | 7784.00 |
+| NBody | 378.113 | 436.307 | +58.194 | +55.897 | +2.299 | +0.343 | 0 | 0.00 | 626.01 |
+| Havlak | 414.083 | 417.461 | +3.378 | +4.959 | -1.581 | -2.965 | 153897 | 19286.55 | 11645.96 |
+
+额外验证：
+- NBody 在 out63 中异常慢，但它没有触发 GiYOL NT batch。
+- 单独重跑 GiYOL NBody：`build.debug/benchmarks/out64_giyol_inline_nbody_rerun`，total 396.067s。
+- 同一时间点重建 GiY 单独重跑 NBody：`build.debug/benchmarks/out65_giy_nbody_rerun`，total 380.737s。
+- 这说明 out63 的 NBody +58.194s 有明显单次噪音成分；但即使用单独重跑，GiYOL NBody 仍比当前 GiY 慢 15.330s。
+- 原因不是 NT store，因为 NBody `GiYOL NT batches = 0`；更可能是 delayed materialization 改变了 GC 后的 cache 状态，导致 business 阶段多付出 cache/locality 成本。
+
+实验总判断：
+- GiYOL 已经实现，并且可以完整跑完 suite。
+- 这个 OL 思路在当前实现下没有带来全局收益。
+- 对真正触发 NT batch 的 Storage：business 快 13.220s，但 GC full 慢 13.225s，total 几乎打平。这说明小对象大批量 streaming store 的代价几乎完全抵消了 cache pollution 减少带来的收益。
+- 对 Havlak：GC core 快 2.965s、GC full 快 1.581s，但 business 慢 4.959s，total 仍慢 3.378s。
+- 对不触发 NT batch 的项目，GiYOL 仍可能因为 delayed copy 改变 cache 状态而慢，例如 NBody 单独复测仍慢 15.330s。
+- 因此目前最可靠结论是：GiYOL 证明“批量 survivor + NT store”可以工作并保持正确性，但默认实现不应替代当前 GiY；它更适合作为实验分支继续研究。
+
+后续如果继续优化：
+- 不要对小对象无差别 streaming store。Storage 说明小对象 NT copy 的 GC 成本太高。
+- 需要按对象大小或按 batch 内平均 object size 决定是否 NT。
+- 对没有达到阈值的 workload，应避免 delayed materialization，或者把 `GIYOL_ADAPTIVE_BATCH=1` 作为实验方向继续修。
+- 如果要真正实现“先拷贝到 staging buffer 再整块 NT 到 DRAM”，需要解决 destination reservation 顺序和 traversal/LIFO 顺序不一致的问题，否则无法保证一个 batch 对应连续目标区间。
+
+## 2026-05-05 当前 GiYOL 使用的策略
+
+当前默认 GiYOL 策略：
+- GiYOL 通过 `OPT_GC=giyol` 构建。
+- 构建宏为：`USE_GIY_MINOR + USE_GIYOL`。
+- 主体 GC 仍然复用 GiY：root scan、remembered set、function table slot set、weak/AS update、reserve/patch 逻辑不变。
+- 唯一改变的是 live object 的 materialize/copy 策略。
+
+具体策略：
+- 在 `giy_traverse_stack_and_copy()` 中，GiY 原本会在扫描完一个 live object 后立刻把它 copy 到 old/DRAM。
+- GiYOL 不立刻 copy，而是把每个 live object 记录成一个 descriptor：
+  - `dst`：已经 reserve 出来的 DRAM/old 目标地址。
+  - `src`：young/cache 中的原对象地址。
+  - `nbytes`：对象 footprint 大小，包含 header 后的 aligned size。
+- descriptor 放进 `GiYOLCopyBatch`。
+- batch 累计到 `GIYOL_BATCH_BYTES = 128KB` 后，flush 这个 batch。
+- flush 时如果是达到阈值触发的 flush，就对 batch 中的对象逐个使用 non-temporal store 写到目标地址。
+- minor GC traversal 结束后，如果还有没达到 128KB 的尾 batch，则不用强制 NT store，而是用普通 GiY copy 路径 flush。
+
+当前默认参数：
+- `GIYOL_BATCH_BYTES = 128KB`
+- `GIYOL_SORT_BATCH = 0`
+- `GIYOL_INLINE_COPY_ENTRIES = 64`
+- `GIYOL_ADAPTIVE_BATCH = 0`
+
+几个关键含义：
+- `GIYOL_SORT_BATCH = 0`：当前不对 batch 按 `dst` 排序。之前 64KB + sort 的实验显示排序成本太高。
+- `GIYOL_INLINE_COPY_ENTRIES = 64`：每个 batch 自带 64 个 descriptor 的 inline 空间，避免小 GC 每次 malloc/free descriptor 数组。
+- `GIYOL_ADAPTIVE_BATCH = 0`：当前默认不是自适应策略，而是只要是 GiYOL build，就在 traversal 中启用 batch delayed-copy。
+- 如果手动编译 `GIYOL_ADAPTIVE_BATCH=1`，才会让上一轮 survivor 大小决定下一轮是否启用 batch；但这个策略默认关闭，因为它会让 Storage 这种实验目标 workload 完全不触发 GiYOL NT batch。
+
+一句话总结：
+- 当前 GiYOL 是“GiY 主体不变 + live object 延迟物化 + 128KB descriptor batch + 达阈值后逐对象 non-temporal store flush”的策略。
+
+## 2026-05-05 为什么 GiYOL 当前是逐对象使用 non-temporal store
+
+问题：为什么 GiYOL 达到 128KB batch 后，仍然是对 batch 里的对象逐对象使用 non-temporal store，而不是把几个对象真正放在一起后整块使用 NT store？
+
+结论：
+- 当前 GiYOL 的 batch 是“descriptor batch”，不是“staging buffer batch”。
+- 它把多个 object 的 `{dst, src, nbytes}` 记录到一起，但没有把这些对象的 bytes 先搬到一个连续临时 buffer。
+- 因此 flush 时只能逐对象从各自的 `src` 读，再写到各自的 `dst`。
+
+为什么不能直接整块 NT：
+- NT store 是对目标地址写数据，不会自动把多个分散的 source object 合成一个连续数据流。
+- 当前 young/cache 中的 source object 通常不是“这些 survivor 按 batch 顺序连续排好”的。
+- 当前 DRAM destination 是在 reserve 阶段按 object 发现顺序分配的，但 copy/traverse 使用 GC stack，实际处理顺序是 LIFO/图遍历顺序。
+- 这导致一个 copy batch 中的 `dst` 可能不是严格连续的完整区间；中间可能有还没被弹出/还没 copy 的 object。
+- 即使按 `dst` 排序，也只能让写入顺序更接近递增地址，不能保证可以把整个 batch 当成一个没有洞的连续大块来写。
+
+如果要真正“把几个对象放在一起使用 NT store”，需要换成 staging buffer 方案：
+1. 先为一组 live object 确定一个连续 old/DRAM 目标区间。
+2. 把这些对象按目标顺序打包到一个连续 staging buffer。
+3. 再用 NT store 从 staging buffer 连续写到 DRAM 目标区间。
+4. 同时确保 forwarding pointer、object 内部指针 patch、roots/RSet/FT patch 都指向最终 DRAM 地址。
+
+这个方案可能更接近用户说的“把几个对象放在一起使用”，但代价是：
+- 多了一次 copy：young -> staging，再 staging -> DRAM。
+- 需要 staging buffer 空间。
+- 需要保证 batch 对应连续目标区间，否则仍然不能整块写。
+- 需要重新设计 reserve/copy 顺序，避免当前 LIFO traversal 导致目标区间和 copy batch 不一致。
+
+所以当前 GiYOL 选择逐对象 NT 的原因是：
+- 它最大限度保持 GiY 主体不变。
+- 不改变 forwarding pointer 语义。
+- 不引入二次 copy buffer。
+- 不要求重排对象布局。
+- 但代价是它只能做到“多个对象累计到阈值后一起 flush”，不是“把多个对象物理合成一个连续大块后整块 NT”。
+
+性能判断：
+- 用户说的方向理论上可能更强，特别是如果能形成真正连续的大块 store。
+- 但在当前实现里，逐对象 NT 已经显示出小对象 workload 的成本很高，Storage 中 business 快了但 GC copy 慢了几乎同样多。
+- 因此下一步如果继续做 GiYOL，不应该继续扩大“逐对象 NT”的范围，而应该研究 staging buffer 或者按对象大小/平均对象大小选择是否启用 NT。
+
+## 2026-05-05 GiYOL staging buffer 连续目标块实验
+
+用户提出的新方向：
+- 想尽办法让目标地也成为一个大连续块。
+- 可以开辟一个小 staging 空间，达到一定阈值后，把 staging 中的内容一口气送到具体的一整块 DRAM/old 空间。
+
+我实现并测试了这个方向。
+
+最终实现策略：
+- `GIYOL_STAGING_COPY = 1`，当前默认开启。
+- GiYOL 不再只是 descriptor batch 后逐对象 NT。
+- 在 `copy_for_minor()` reserve DRAM 目标地址时，按 reserve 顺序记录 `{dst, src, nbytes}`。
+- reserve 顺序天然对应 DRAM 目标地址递增，因此比 traversal/LIFO 顺序更接近连续目标块，也不需要 qsort。
+- `giy_traverse_stack_and_copy()` 仍然扫描并 patch young object 内部指针，但 staging 模式不在这里逐对象 copy。
+- traversal 完成后，GiYOL 按 reserve-order batch 分块：
+  - 把多个 source object 先 memcpy 到连续 staging buffer。
+  - staging buffer 达到阈值后，用 non-temporal store 连续写到 DRAM 目标区间。
+  - 尾部不足阈值的对象走普通 GiY copy。
+- 当前默认阈值仍是 `GIYOL_BATCH_BYTES = 128KB`。
+
+这次实验跑过的版本：
+- `out69_giyol_staging_key`：第一版 staging，按 traversal batch 排序后 staging。问题是 chunk 分割过保守，大量 fallback。
+- `out70_giyol_staging_key2`：修正 chunk 逻辑，达到/跨过阈值再 flush，但仍需要 qsort。
+- `out72_giyol_staging_reserve_key`：reserve-order staging，不再依赖 qsort。
+- `out73_giyol_staging_reserve_512k`：reserve-order + 512KB 阈值。
+- `out74_giyol_staging_reserve_256k`：reserve-order + 256KB 阈值。
+- `out75_giyol_staging_final_smoke`：最终源码默认 128KB reserve-order staging 的 smoke。
+
+smoke 结果：
+- `hello_world.sbc` 通过。
+- `giy_gc_probe.sbc` 通过。
+- `giy_gc_probe` 显示：
+  - `GiYOL batch bytes = 131072`
+  - `GiYOL NT batches = 11`
+  - `GiYOL staging batches = 11`
+  - `GiYOL staging bytes = 1.38 MB`
+- 说明 staging buffer -> contiguous DRAM NT store 路径实际执行到了。
+
+关键 benchmark 数据，单位秒：
+
+| benchmark | 版本 | total | business | GC full | GC core | NT batches | NT MB | fallback MB |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Storage | GiY out50 | 213.328 | 178.553 | 34.774 | 31.941 | - | - | - |
+| Storage | old GiYOL 逐对象 NT out62 | 210.855 | 162.572 | 48.283 | 44.893 | 453773 | 56730.28 | - |
+| Storage | staging reserve 128KB out72 | 261.811 | 165.208 | 96.603 | 93.725 | 453773 | 56732.81 | 2038.73 |
+| Storage | staging reserve 256KB out74 | 260.986 | 165.108 | 95.878 | 92.970 | 226886 | 56727.15 | 2044.39 |
+| Storage | staging reserve 512KB out73 | 250.712 | 164.277 | 86.434 | 83.556 | 0 | 0.00 | 58771.54 |
+| Havlak | GiY out50 | 414.083 | 376.846 | 37.237 | 27.765 | - | - | - |
+| Havlak | old GiYOL 逐对象 NT out62 | 417.428 | 381.641 | 35.787 | 24.878 | 153897 | 19286.55 | - |
+| Havlak | staging reserve 128KB out72 | 428.732 | 381.020 | 47.712 | 38.602 | 153799 | 19263.29 | 11669.22 |
+| Havlak | staging reserve 256KB out74 | 430.968 | 382.614 | 48.354 | 39.233 | 60997 | 15254.27 | 15678.24 |
+| Havlak | staging reserve 512KB out73 | 430.537 | 380.294 | 50.243 | 41.114 | 0 | 0.00 | 30932.51 |
+| CD | GiY out50 | 242.589 | 229.997 | 12.592 | 8.446 | - | - | - |
+| CD | old GiYOL 逐对象 NT out62 | 242.945 | 229.991 | 12.954 | 7.943 | 0 | 0.00 | - |
+| CD | staging reserve 128KB out72 | 245.869 | 230.539 | 15.330 | 11.158 | 0 | 0.00 | 7784.00 |
+
+三项总和：
+- GiY out50：870.000s。
+- old GiYOL 逐对象 NT out62：871.228s。
+- staging reserve 128KB out72：936.412s。
+
+最终结论：
+- 功能上，这个方案成功了：现在 GiYOL 的确能把多个对象先打包到 staging buffer，再对一个连续 DRAM 目标区间做 NT store。
+- reserve-order 方案也成功避免了 qsort，并且能证明目标区间可以按 reserve 顺序形成连续块。
+- 性能上，这个方案失败了：Storage 的 staging NT 覆盖 56.7GB，但 GC core 从 GiY 的 31.941s 增加到 93.725s；相比 old GiYOL 逐对象 NT 的 44.893s 也慢很多。
+- 核心原因是 staging 方案多了一次完整 copy：`young -> staging`，然后 `staging -> DRAM`。对 Storage 这种小对象海量复制 workload，这个额外 copy 的成本远大于“整块 NT store”带来的收益。
+- 提高阈值不能解决：
+  - 256KB 仍触发 NT，但性能几乎没改善。
+  - 512KB 基本不触发 NT，退化成 delayed ordinary copy，仍然慢。
+
+当前判断：
+- “目标地成为大连续块 + staging buffer 一口气 NT”是可实现的，当前代码已经实现并验证。
+- 但在当前 benchmarks 上，它不是性能正确方向。
+- 更可能有价值的下一步不是继续 staging 双拷贝，而是：
+  - 只对大对象或大平均对象 batch 使用 staging/NT。
+  - 对小对象继续使用 GiY 即时 copy 或旧 GiYOL 逐对象 NT。
+  - 或者更激进地改变 reserve/copy 结构，使对象直接按目标连续顺序从 young 写到 DRAM，避免 staging 二次 copy。
+
+## 2026-05-06 当前 GiYOL staging 性能失败原因解释
+
+核心结论：
+- 当前 staging 版 GiYOL 的性能失败，根本原因不是“目标区间不连续”，因为 reserve-order staging 已经能形成连续 DRAM 目标块。
+- 真正的失败原因是：为了实现“连续 staging buffer -> 连续 DRAM NT store”，它把每个存活对象的数据多搬运了一次。
+- 原 GiY/旧 GiYOL 是一次搬运：`young/cache -> DRAM`。
+- staging 版 GiYOL 是两次搬运：`young/cache -> staging buffer -> DRAM`。
+- 对 Storage/Havlak 这类大量小对象 workload，多出来的第一段 `young -> staging` memcpy 成本，比“连续大块 NT store”节省的 cache pollution 成本更大。
+
+为什么连续目标块没有带来收益：
+- NT store 的主要收益是避免把写入的 DRAM 目标地址污染 cache。
+- 但是 staging 方案为了得到连续 source stream，先把对象从 young/cache 拷贝到 staging buffer。
+- 这一步仍然要读每个 young object、写 staging buffer，并且这些对象非常小，函数/循环/descriptor 开销和内存写入开销都很高。
+- 然后再从 staging buffer 读一次，并用 NT store 写 DRAM。
+- 因此总内存流量从“大约读 young 一次 + 写 DRAM 一次”变成“大约读 young 一次 + 写 staging 一次 + 读 staging 一次 + 写 DRAM 一次”。
+- 对小对象海量复制来说，内存流量和循环次数都接近翻倍，收益不够抵消。
+
+数据证据：
+- Storage：
+  - GiY out50：total 213.328s，GC core 31.941s。
+  - old GiYOL 逐对象 NT out62：total 210.855s，GC core 44.893s。
+  - staging reserve 128KB out72：total 261.811s，GC core 93.725s。
+  - staging 版确实 NT 写了 56.7GB：`NT MB = 56732.81`。
+  - 但 GC core 相比 GiY 增加 61.784s，相比旧 GiYOL 逐对象 NT 也增加 48.832s。
+- Havlak：
+  - GiY out50：total 414.083s，GC core 27.765s。
+  - old GiYOL 逐对象 NT out62：total 417.428s，GC core 24.878s。
+  - staging reserve 128KB out72：total 428.732s，GC core 38.602s。
+  - staging 版 NT 写了 19.263GB，但 GC core 比旧 GiYOL 慢 13.724s。
+- CD：
+  - CD 不触发 staging NT，`NT MB = 0`。
+  - GiY out50：total 242.589s，GC core 8.446s。
+  - staging reserve 128KB out72：total 245.869s，GC core 11.158s。
+  - 这说明即使没有真正 NT，staging/delayed-copy 结构本身也会带来额外开销。
+
+为什么阈值调整没解决：
+- 128KB：能大量触发 staging NT，但双拷贝成本太高。
+- 256KB：Storage/Havlak 仍触发 staging NT，但 GC core 几乎没有改善：
+  - Storage 256KB：GC core 92.970s，仍远慢于 GiY 31.941s 和 old GiYOL 44.893s。
+  - Havlak 256KB：GC core 39.233s，仍慢于 old GiYOL 24.878s。
+- 512KB：很多 GC 的 survivor 总量达不到阈值，基本不触发 NT：
+  - Storage 512KB：NT MB 0，fallback 58.771GB，GC core 83.556s。
+  - Havlak 512KB：NT MB 0，fallback 30.933GB，GC core 41.114s。
+- 说明问题不是“batch 太小”，而是 staging 双拷贝路径本身太贵。
+
+更具体的开销来源：
+1. 二次数据搬运：
+   - 每个 survivor object 先 memcpy 到 staging。
+   - staging 再 NT 写到 DRAM。
+   - 相比 GiY/旧 GiYOL，多了 staging 写入和 staging 读取。
+2. 小对象粒度太细：
+   - Storage 平均对象 footprint 很小。
+   - 把很多几十字节对象打包时，descriptor 遍历、memcpy 调用/循环、分支判断成本都很明显。
+3. staging buffer 本身污染 cache：
+   - staging buffer 是普通内存，`young -> staging` 会写入 cache。
+   - 虽然后续 DRAM 写是 NT，但 staging 写入本身仍占 cache bandwidth/cache lines。
+4. 延迟 materialization 改变 cache 时序：
+   - GiY 是扫描完对象后立即 copy。
+   - staging 版把 copy 推迟到 traversal 后统一做，可能改变 young object、metadata、后续 patch 的 cache locality。
+5. 对未达到阈值的尾部/fallback 仍要普通 copy：
+   - fallback 部分没有 NT 收益，却仍承担 delayed-copy/staging 管理成本。
+
+最终判断：
+- 用户提出的方案“目标地连续块 + staging buffer 一口气 NT”在工程上可实现，并已实现。
+- 性能失败不是因为做不到连续块，而是因为当前 workload 的对象太小、数量太多，staging 额外 copy 的代价远超过整块 NT 的收益。
+- 如果继续研究，方向应该改成选择性 staging：
+  - 只对大对象或平均对象足够大的 batch 使用 staging/NT。
+  - 小对象不要 staging，继续 GiY 即时 copy或旧 GiYOL 路径。
+  - 更激进的方向是直接按 reserve-order 从 young 写 DRAM，避免 staging buffer 这次额外 copy。
+
+## 2026-05-06 关于“在 young/cache 区保留 staging 暂存区”的判断
+
+用户提出：
+- 能不能在 young 区/cache 区保留一块空间，专门作为 staging 暂存区；
+- evacuation 阶段一旦 staging 满足阈值，就触发一次 non-temporal store；
+- 目标是防止 DRAM old destination 的 cache pollution。
+
+结论：
+- 这个方案可以实现，但它不一定能解决当前 staging 失败的问题。
+- 它可能比 malloc 普通 staging buffer 更贴近 GiY 的 cache-space 设计，但会付出非常明显的 young/cache 容量代价。
+- 最大风险是：cache_space 本来就很小，拿出一块 staging buffer 会减少 young 可用空间，导致 minor GC 更频繁。
+
+为什么可实现：
+- 可以在 cache_space 初始化后，从 young/cache 可用区切出一段固定 staging buffer。
+- 这段 buffer 不作为普通对象分配区，也不被 GC 当成 object 扫描。
+- evacuation 时把多个 survivor object 的 bytes 先 memcpy 到这个 staging buffer。
+- staging 达到阈值后，用 NT store 连续写到已经 reserve 好的 DRAM 目标区间。
+- 写完后 staging offset 清零，重复使用这段固定空间。
+
+它相对当前 malloc staging 的潜在好处：
+- staging buffer 位于 GiY 的 cache/young 区，理论上访问延迟更低。
+- staging buffer 固定复用，cache pollution 被限制在一块固定区域内。
+- staging -> DRAM 使用 NT store，可以避免 DRAM destination 被普通写分配进 cache。
+
+但关键问题仍然存在：
+1. 仍然是双拷贝。
+   - 数据路径还是：`young object -> staging buffer -> DRAM`。
+   - 相比 GiY/旧 GiYOL 的 `young object -> DRAM`，仍多了一次 staging 写入和 staging 读取。
+2. staging buffer 自己也会污染 cache。
+   - 即使 buffer 在 cache_space 中，写 staging 也会占用 cache lines 和 bandwidth。
+   - 它只是把 pollution 限定在固定 staging 区，不是消除 pollution。
+3. 会减少 young/cache 可用容量。
+   - 当前 GiY 输出里 young after aux 约 265.72KB。
+   - 如果切 128KB 做 staging，实际 young 分配空间会大幅减少。
+   - minor GC 可能显著增加；Storage 已经有 226887 次 minor GC，再减少 young 容量风险很大。
+4. 不能随便复用当前 young 空间。
+   - GC 发生时，young/cache 里还保存着待扫描/待复制的 source object。
+   - staging 不能覆盖这些对象，否则还没读完 source 就破坏对象内容。
+   - 所以 staging 必须是预留的独立区域，不能简单拿“空闲 young 区”来用；minor GC 触发时通常也没有足够空闲空间。
+
+所以这个方案的本质：
+- 它可能减少“DRAM destination 普通写导致的 cache pollution”。
+- 但它增加了“cache-space 内部 staging 写入/读取”和“young 容量减少导致更多 GC”。
+- 旧 GiYOL 逐对象 NT 已经能避免 DRAM destination 的普通 cache pollution；staging 的额外价值主要是把很多小对象聚合成连续 NT stream。
+- 但此前 staging 实验证明：聚合 stream 的收益没有覆盖双拷贝成本。
+
+如果要实验，应该小心地做成可选配置，而不是默认替换：
+- 例如 `GIYOL_CACHE_STAGING=1`。
+- staging 大小不要一开始用 128KB，可以先试 16KB/32KB/64KB。
+- 必须记录：
+  - staging bytes；
+  - staging flush 次数；
+  - fallback bytes；
+  - minor GC count 是否增加；
+  - young after aux 实际减少多少；
+  - Storage/CD/Havlak 的 total、business、GC full、GC core。
+
+预期判断：
+- 如果 staging 空间太大：minor GC 次数上升，性能大概率更差。
+- 如果 staging 空间太小：NT stream 太碎，接近逐对象 NT，收益有限。
+- 它唯一可能赢的场景是：staging 足够小，不明显增加 GC 次数；同时 survivor batch 平均对象足够大，能减少很多小对象逐个 NT 的固定成本。
+
+当前建议：
+- 可以实现并测试，但不要期待它一定解决问题。
+- 最值得验证的实验是“小 cache staging buffer + 选择性启用”：只在 batch 平均 object size 或单对象 size 足够大时使用 cache staging；小对象仍走 GiY 即时 copy或旧 GiYOL。
+
+## 2026-05-06 关于 400B 小暂存区 + 256B non-temporal store 的判断
+
+用户进一步说明：
+- 计划使用 256 字节宽的 non-temporal store。
+- 因此只想预留非常小的一块 cache/young 暂存区，例如 400B 左右。
+- 只让小对象使用这个区域。
+- 问题：这样是否能解决此前说的 staging 成本问题？
+
+结论：
+- 这个方案比之前 128KB staging buffer 更合理，值得实验。
+- 它能解决两个之前的大问题：
+  1. staging buffer 挤占 young/cache 空间的问题基本消失，因为 400B 相对 265KB young 可用空间很小。
+  2. staging buffer 自身 cache pollution 被限制在极小范围内，基本就是几个 cache line 反复复用。
+- 但它不能完全消除双拷贝问题，只是把双拷贝成本限制在很小的窗口里。
+- 它是否赢，取决于“把许多小对象聚合成 256B 连续 NT store”节省的 per-object NT/普通写成本，是否大于 `young -> staging` 这次额外 memcpy 成本。
+
+为什么这个方案可能比大 staging 好：
+- 之前 128KB staging 的失败，主要是每次把大量 survivor 多搬一遍：`young -> staging -> DRAM`。
+- 400B staging 不追求收集一个很大的 batch，而是追求把多个几十字节小对象凑成 256B/384B 的连续写。
+- 对 Storage 这种平均对象很小的 workload，如果每个对象逐个 NT，固定开销和尾部处理很多；小 staging 可以把多个对象合并成更少的连续 NT 写。
+- staging 区很小，长期保持 hot，写 staging 的 cache 代价可能远小于大 staging。
+
+仍然需要注意的问题：
+1. 仍然是双拷贝：
+   - 小对象先 copy 到 staging，再 NT 到 DRAM。
+   - 只是每次额外 copy 的窗口很小，不再是几十 MB/GB 级别的大 staging 流。
+2. 目标 DRAM 必须连续：
+   - reserve-order 记录 `{dst, src, nbytes}` 仍然有价值。
+   - 只有连续目标区间才能把 staging 一口气送到 DRAM。
+3. 对齐问题很关键：
+   - 如果使用 256-bit / 512-bit streaming store，目标地址通常需要 32B/64B 对齐。
+   - 当前对象/DRAM 分配多半是 8B/16B 对齐，不一定满足 32B/64B。
+   - 如果用户说的“256字节宽”是指每次 flush 256B，而不是单条指令 256B，则可以用多个 16B/32B/64B NT store 拼出来。
+   - 需要处理 misaligned head/tail，否则会出错或退化。
+4. 只适合小对象：
+   - 大对象不应该先塞 400B staging。
+   - 大对象可以直接用原 GiY/旧 GiYOL 的 copy path。
+5. flush 尾部策略：
+   - staging 不满 256B 的尾部最好普通 copy，或者等到本次 minor GC 结束时普通 copy。
+   - 强行对很小尾部 NT 可能继续亏。
+
+我认为最值得实验的策略：
+- 新增一个可选模式，例如 `GIYOL_TINY_STAGING=1`。
+- 固定 staging buffer 大小，例如 512B，而不是正好 400B，便于 64B cache line 和 256B flush 对齐。
+- 只接收小对象，例如 `nbytes <= 128B` 或 `nbytes <= 256B`。
+- staging flush 阈值设为 256B。
+- 当 reserve-order 中目标地址连续时：
+  - 把小对象 bytes 追加到 tiny staging。
+  - staging 达到 256B 后，用 NT store 写到 DRAM。
+- 遇到大对象、目标地址不连续、或者 staging 无法保持对象边界时：
+  - 先 flush 当前 staging。
+  - 大对象走普通 GiY/旧 GiYOL copy。
+
+预期：
+- 这个方案有机会解决“大 staging 双拷贝太贵”和“逐对象 NT 对小对象太碎”之间的矛盾。
+- 它不保证成功，但比 128KB staging 更有实验价值。
+- 关键 benchmark 仍应先看 Storage，因为 Storage 小对象最多；如果 Storage GC core 不能从 staging reserve 的 93.725s 明显降回 old GiYOL 的 44.893s 附近，这个方向就不成立。
+
+## 2026-05-06 GiYOL tiny staging 实现与实验结论
+
+本轮实际做了实现和多轮 benchmark。目标是验证“小暂存区，把多个小对象凑成连续块后再 non-temporal store”的方向。
+
+实现策略：
+- 新增 `GIYOL_TINY_STAGING` 路径，默认开启。
+- 当前源码默认参数：`GIYOL_TINY_STAGING_BYTES=2048`，`GIYOL_TINY_FLUSH_BYTES=2048`，`GIYOL_TINY_MAX_OBJECT_BYTES=64`。
+- `copy_for_minor()` 仍然按 GiY/GiYOL 原规则为 survivor 在 DRAM 预留最终位置，并写 forwarding pointer。
+- 只有 `align_bytes <= GIYOL_TINY_MAX_OBJECT_BYTES` 的小对象会记录到 reserve-order staging batch。
+- 大于阈值的对象不进入 tiny staging，在 traversal 中立即按原 GiYOL/GiY copy path 写到 DRAM。
+- flush 时只合并目标 DRAM 地址连续的小对象 run；达到阈值后把 staging buffer 用 NT copy 写到最终 DRAM 位置。
+- 目标不连续、对象过大、或者尾部不足阈值时，退回普通 `giy_copy_live_object()`，避免为了很小碎片强行 NT。
+
+参数扫描结果，先以 Storage 筛选：
+
+| variant | Storage total | business | GC full | GC core | tiny flushes | NT tiny bytes | 结论 |
+|---|---:|---:|---:|---:|---:|---:|---|
+| 1024B flush, max 64B | 209.742s | 161.243s | 48.499s | 45.619s | 1,238,569 | 1209.54MB | flush 次数太多，GC core 变差 |
+| 1536B flush, max 64B | 209.690s | 164.704s | 44.986s | 42.069s | 241,107 | 353.18MB | 中间点，仍不如 2048B |
+| 2048B flush, max 64B | 208.061s full-suite rerun | 163.544s | 44.517s | 41.602s | 23,629 | 46.15MB | 当前最合理候选 |
+| 4096B flush, max 64B | 209.691s | 164.931s | 44.760s | 41.829s | 0 | 0.00MB | 阈值太高，基本等于不触发 NT |
+| 2048B flush, max 96B | 211.927s | 163.378s | 48.549s | 45.585s | 4,292,051 | 8382.91MB | 小对象阈值放大后被 flush 固定成本反噬 |
+
+完整 suite 汇总：
+
+| GC/version | total | business | GC full | GC core |
+|---|---:|---:|---:|---:|
+| GiY current (`out50`) | 3485.047s | 3378.598s | 106.448s | 72.829s |
+| old GiYOL full (`out59`) | 3560.613s | 3438.391s | 122.222s | 81.546s |
+| GiYOL tiny current (`out89`) | 3489.905s | 3369.331s | 120.575s | 86.167s |
+
+对之前三项重点集 Storage/CD/Havlak，用旧 GiYOL key run `out62` 对比：
+
+| version | total | business | GC full | GC core |
+|---|---:|---:|---:|---:|
+| old GiYOL key (`out62`) | 871.228s | 774.204s | 97.024s | 77.714s |
+| GiYOL tiny current key subset (`out89`) | 871.765s | 774.214s | 97.550s | 80.778s |
+
+最终结论：
+- 小暂存区方案可以实现，而且 2048B/2048B/64B 是目前测到的最合理参数。
+- 但它不是全局性能成功：完整 suite 相比 GiY 仍慢 4.858s total，GC full 多 14.127s，GC core 多 13.338s。
+- 与旧 GiYOL key run (`out62`) 在 Storage/CD/Havlak 三项上相比，当前 tiny staging 反而略慢 0.537s total，GC core 多 3.064s。
+- Storage 单项有收益：相对 GiY 快 5.267s total，相对 old GiYOL full 快 7.916s total；但 Havlak 退化明显，相对 GiY 慢 6.521s，相对 old GiYOL full 慢 2.075s。
+- 根因是小对象连续 run 的自然长度分布不理想：阈值低会产生海量 flush，阈值高又完全触发不了；扩大“小对象”范围会让 staging 双拷贝和 flush 固定成本迅速超过 NT store 的收益。
+- 因此，这个方向最多适合作为可选/实验模式，或只在检测到类似 Storage 的对象布局时启用；不应该作为 GiYOL 的默认全局优化结论。
+
+## 2026-05-06 只使用 GiY / GiYOL 两个名称的最终性能对比
+
+命名约定：
+- `GiY`：没有开启 tiny staging / GiYOL 功能的当前 GiY。
+- `GiYOL`：开启 tiny staging 功能的 GiYOL，当前参数为 2048B staging、2048B flush、64B 小对象上限。
+- 以下不再把中间实验目录名当成 GC 名称。
+
+完整 suite 汇总：
+
+| metric | GiY | GiYOL | GiYOL - GiY | 百分比 |
+|---|---:|---:|---:|---:|
+| total | 3485.047s | 3489.905s | +4.858s | +0.14% |
+| business | 3378.598s | 3369.331s | -9.267s | -0.27% |
+| GC full | 106.448s | 120.575s | +14.127s | +13.27% |
+| GC core | 72.829s | 86.167s | +13.338s | +18.31% |
+
+GiYOL 在完整 suite 中累计触发 tiny staging flush 275,622 次，NT tiny bytes 共 538.32MB。
+
+逐项 total 对比：
+
+| benchmark | GiY total | GiYOL total | GiYOL - GiY | 百分比 |
+|---|---:|---:|---:|---:|
+| Bounce | 157.335 | 157.307 | -0.028 | -0.02% |
+| List | 99.094 | 97.105 | -1.989 | -2.01% |
+| Sieve | 120.831 | 121.270 | +0.439 | +0.36% |
+| Queens | 116.321 | 115.810 | -0.511 | -0.44% |
+| Permute | 388.003 | 391.063 | +3.060 | +0.79% |
+| Storage | 213.328 | 208.061 | -5.267 | -2.47% |
+| Towers | 184.093 | 183.741 | -0.352 | -0.19% |
+| Mandelbrot | 235.048 | 237.680 | +2.632 | +1.12% |
+| Richards | 936.209 | 934.953 | -1.256 | -0.13% |
+| CD | 242.589 | 243.100 | +0.511 | +0.21% |
+| NBody | 378.113 | 379.211 | +1.098 | +0.29% |
+| Havlak | 414.083 | 420.604 | +6.521 | +1.57% |
+
+结论：
+- GiYOL 的 business 时间比 GiY 少 9.267s，这是正向结果。
+- 但 GiYOL 的 GC full 多 14.127s，GC core 多 13.338s，超过了 business 的收益。
+- 所以完整 suite 总体上 GiYOL 比 GiY 慢 4.858s，约 +0.14%。
+- GiYOL 明显赢在 Storage：total 快 5.267s，business 快 15.009s；但是 Storage 的 GC core 也多 9.661s。
+- GiYOL 明显输在 Havlak：total 慢 6.521s，business 慢 3.926s，GC core 多 2.549s。
+- 当前最准确的大结论：GiYOL 的 tiny staging 功能能改善一部分 mutator/business 表现，尤其 Storage，但它增加的 GC copy/flush 成本在完整 suite 上抵消了收益；因此当前 GiYOL 不是全局优于 GiY。
+
+## 2026-05-06 当前 GiYOL 复制策略与选择理由
+
+当前只使用两个名字：
+- `GiY`：不开启 GiYOL tiny staging 功能。
+- `GiYOL`：开启 tiny staging 功能。
+
+当前 GiYOL 的复制策略不是“所有对象都先放进暂存区再搬”，而是选择性策略：
+
+1. 发现存活对象时，先 reserve 最终 DRAM 位置
+   - `copy_for_minor()` 检查对象是否已经有 forwarding pointer。
+   - 如果没有，就在 `dram_space.free` 上按对象大小预留最终位置。
+   - 然后把 young 对象 header 的 `forwarding_pointer` 写成新 DRAM payload 地址。
+   - 同时把原 young payload 压入 GC stack，后续继续扫描它的字段。
+   - 这一步和 GiY 的原则一致：最终地址在第一次发现对象时确定，所有后续 slot 更新都指向这个最终地址。
+
+2. GiY 的普通复制路径
+   - 扫描对象时，先用 reserve tracer 处理对象内部 young pointer，把字段更新成目标 forwarding pointer。
+   - 然后把整个对象从 young 复制到预留好的 DRAM 位置。
+   - `giy_copy_live_object()` 的规则是：
+     - `nbytes <= 256B`：普通 `memcpy`。
+     - `nbytes > 256B`：在 x86 上使用 streaming/non-temporal store。
+
+3. GiYOL 的新增部分：只让很小对象进入 tiny staging
+   - 当前参数：2048B staging，2048B flush，64B 小对象上限。
+   - 当 `copy_for_minor()` reserve 目标地址时，只有 `align_bytes <= 64B` 的对象会被记录为 `{dst, src, nbytes}`。
+   - 大于 64B 的对象不会进入 tiny staging。
+   - 这些大对象在 traversal 中立即调用 `giy_copy_live_object()`，也就是继续走 GiY 的即时复制策略。
+
+4. tiny staging 的 flush 规则
+   - GiYOL 按 reserve-order 遍历记录的小对象。
+   - 只有当下一个对象的 DRAM 目标地址正好等于 `expected`，也就是和前一个对象连续时，才会追加到同一个 staging chunk。
+   - 小对象先 `memcpy` 到 `giyol_staging_buffer`。
+   - staging buffer 达到 2048B 时，用 `giyol_stream_copy_region()` 一次性 non-temporal store 到最终 DRAM 连续区间。
+   - 如果目标地址不连续、对象不满足条件、或者最后尾部不足 2048B，就退回逐对象 `giy_copy_live_object()`。
+
+为什么这么选择：
+- 先 reserve 最终地址，是为了保持 GiY 的核心语义，避免临时地址再搬迁导致二次 slot 更新。
+- 大对象不进 staging，是因为 `young -> staging -> DRAM` 的双拷贝成本太高。
+- 只合并目标地址连续的小对象，是因为 NT store 必须写连续目标内存；不连续对象不能安全合并。
+- 2048B flush 是实验折中点：1024B flush 次数太多，4096B 完全触发不了，1536B 仍不如 2048B。
+- 64B 小对象上限是为了避免把太多对象拖进双拷贝路径；96B 实验虽然 NT bytes 更多，但 flush 次数暴涨，性能更差。
+
+当前复制策略的一句话总结：
+- `GiY`：对象扫描后直接复制到最终 DRAM 位置；小于等于 256B 用 `memcpy`，大于 256B 用 NT store。
+- `GiYOL`：保持 GiY 的地址确定和大对象复制策略不变；只把 64B 以内、目标 DRAM 地址连续的小对象先放进 2048B tiny staging buffer，凑满 2048B 后用 NT store 写到最终 DRAM；不连续或不满阈值则退回 GiY 的复制路径。
+
+当前选择的原因：
+- 这是在“减少小对象逐个复制/NT 的固定成本”和“避免 staging 双拷贝过重”之间的折中。
+- 它能在 Storage 上带来收益，但完整 suite 上仍未赢过 GiY，说明该策略目前只能算实验性优化，不是默认全局胜利策略。
+
+## 2026-05-06 当前方案下 old 区指针什么时候修复
+
+结论：
+- old 区里的 remembered-set slot 不是在扫描 remembered set 时立刻修复。
+- 它是在 minor GC 的后半段，也就是 young live objects 都完成 reserve/traverse/copy 之后，在 `remembered_set_patch` 阶段统一修复。
+- GiYOL 的 tiny staging 不改变这个时机；它只改变部分小对象的物理复制方式，不改变 forwarding pointer 和 old slot patch 的逻辑。
+
+当前 minor GC 顺序：
+1. `scan_roots_reserve`：从 roots 发现 young live object，调用 `copy_for_minor()` 在 DRAM reserve 最终位置，并写 forwarding pointer。
+2. `function_table_reserve`：对 function table 中记录的 slot 做 reserve。
+3. `remembered_set_reserve`：遍历 remembered set，读取写屏障记录的 `values[i]`；如果 value 指向 young，就调用 `copy_for_minor()`。这个阶段只发现 live object，不改 old slot。
+4. `young_traverse_copy`：遍历 young live objects，先修复 young object 内部字段，再复制到 DRAM。GiYOL 会在该阶段结束前 flush tiny staging。
+5. `scan_roots_patch`：修复 roots。
+6. `function_table_patch`：修复 function table slots。
+7. `remembered_set_patch`：真正修复 old 区 remembered-set slots。
+
+`remembered_set_patch` 具体做法：
+- 遍历 remembered set。
+- 对每个 slot 取 `remembered_set.values[i]` 作为旧 value。
+- 用 `forwarded_or_self()` 查询这个 value 是否已经有 forwarding pointer。
+- 如果有，就把 old slot 写成新 DRAM 地址。
+- 如果 slot 在 DRAM old 区，写回时走 `giy_store_ptr_slot()` 或 `giy_store_jsvalue_slot()`，内部会用 old-write guard，并在 x86 上通过 64-bit streaming store 写 old slot。
+
+为什么不在 remembered-set reserve 阶段立刻修复 old slot：
+- 当前实现把“发现/预留 live set”和“修复外部 slot”分成两个阶段。
+- 前半段只建立 forwarding pointer；中间完成 young object 内部指针 patch 和物理复制；后半段再统一把 roots/function table/old slots 改到新地址。
+- 这样 old slot patch 只依赖稳定的 forwarding pointer，不和对象扫描/复制过程耦合。
+
+需要区分两类指针修复：
+- young object 内部指针：在 `young_traverse_copy` 中，复制对象前就修复；这样复制到 DRAM 的对象内容已经是修复后的。
+- old 区 remembered-set 指针：在 `remembered_set_patch` 中最后统一修复；这样 old 区 slot 从 young 地址变成 DRAM forwarding 地址。
+
+一句话回答：
+- 当前方案下，old 区指针是在 minor GC 的 `remembered_set_patch` 阶段修复的；在此之前 remembered set 只用于 reserve live young objects，GiYOL 的 tiny staging 不改变这个顺序。
+
+## 2026-05-06 关于“用 source 顺序 + 中介区完全避免 old 区 memcpy”的想法
+
+用户提出的新想法：
+- 在批量 NT store 小对象的思路下，能不能把同顺序下 SRC 地址相邻/同组的 object 先 copy 到同一个中介位置。
+- 如果累积到一定数值后遇到一个很大的对象，就把前一大组和这个大对象一起用 NT store 写回。
+- 如果没有这么大，就先放进中介区再立刻 NT store。
+- 目标是完全避免普通 GiY 对 old/DRAM 区的 `memcpy`，减少 old 区 cache pollution。
+
+结论：
+- 可以做一个“更激进的 GiYOL all-NT/staging”实验版本，但不能按“source 地址连续”作为核心判据。
+- 真正决定能不能一口气 NT store 的是目标 DRAM 地址是否连续，而不是 source 地址是否连续。
+- source 连续只说明从 young 读数据可能比较顺，但 NT store 写回时如果目标 old/DRAM 地址不连续，就不能把 staging buffer 当成一个连续块直接写过去。
+
+什么情况下这个想法可以成立：
+- 必须按 `copy_for_minor()` 的 reserve-order 处理对象，因为 DRAM 目标地址就是按 reserve-order 单调分配出来的。
+- 如果把所有 live object 都记录成 `{dst, src, nbytes}`，而不是只记录小对象，那么这些记录在 reserve-order 下的目标地址通常天然连续。
+- 这种情况下，可以在扫描完成后，按 reserve-order 把一段对象组装进 staging buffer，再用 NT store 连续写到 DRAM。
+
+主要风险：
+- 会变成 `young -> staging -> DRAM`，也就是所有进入 staging 的对象都多拷贝一次。
+- 大对象本身直接 NT store 就可以；如果也先放进 staging，会把最大的数据也多搬一次。
+- “完全避免 old memcpy”不一定更快。当前 GiY 已经对 `>256B` 对象使用 NT store，old 区普通 `memcpy` 主要来自小对象；小对象强行 NT 如果 flush 太碎，可能更慢。
+
+更可实现的版本：
+- 不以 source 地址连续为核心。
+- 以 reserve-order 的目标 DRAM 连续性为核心。
+- 小对象进入 staging。
+- 遇到大对象时，先 flush staging；大对象自己直接 NT store 到 DRAM。
+- 对 staging 尾部可以实验“也用 streaming store 写尾部”，但必须单独开配置测试，因为小尾部 streaming store 固定成本可能更高。
+
+一句话判断：
+- 这个想法的正确改写是：“按最终 DRAM reserve-order 来构造连续写回块，而不是按 source 地址；小对象用 staging 聚合，大对象直接 NT，尽量减少 old 区 memcpy。”
+- 如果目标是“完全避免 old 区 memcpy”，可以实现，但风险是把大量工作变成双拷贝，实验上很可能只在特定 benchmark 赢，不会自然成为全局胜利策略。
+
+## 2026-05-06 关于“大对象自己 NT，小对象全部进中介区再 NT，以完全避免 old memcpy”
+
+用户修正后的想法：
+- 判据是 TARGET/DRAM 目标地址连续，不是 SRC 连续。
+- 足够大的对象自己直接 non-temporal store 到最终 DRAM。
+- 小对象全部按目标顺序进入中介区/staging buffer，然后用 NT store 写回。
+- 目标是完全避免普通 GiY 对 old/DRAM 区的 `memcpy`，防止 old 区 cache pollution。
+
+结论：
+- 这个方案在语义上可行。
+- 但“完全避免 memcpy”需要精确定义：
+  - 可以完全避免对 old/DRAM 目标区的普通 `memcpy` 写入。
+  - 但小对象仍然需要从 young 复制到 staging buffer，这一步通常仍是普通 `memcpy` 或普通 load/store。
+  - 区别在于 staging buffer 很小、反复复用、停留在 cache 中；被污染的是 staging 的少量 cache line，而不是大量 old/DRAM 目标 cache line。
+
+可行的策略应是：
+1. 按 reserve-order 处理对象，因为 reserve-order 下最终 DRAM target 最可能连续。
+2. 对大对象：先 flush 当前小对象 staging；大对象直接 `young -> DRAM` NT store；不把大对象放 staging。
+3. 对小对象：按 target 顺序 append 到 staging buffer；staging 满阈值后，NT store 到连续 target 区间；target 不连续时 flush 当前 staging。
+4. 为了真的“完全避免 old memcpy”：staging 尾部即使不满阈值，也不能 fallback 到 `memcpy(dst_old, src_young)`，必须用小粒度 streaming store 写掉尾部。
+
+最大的风险：
+- 小对象尾部强制 NT 可能非常慢。
+- 以前实验已经显示 flush 太小会导致 flush 次数爆炸，捕获 NT bytes 更多不一定更快。
+- 因此，这个方案能减少 old cache pollution，但可能增加指令开销、streaming store 固定开销、以及 `young -> staging` 双拷贝成本。
+
+建议实验版本：
+- `大对象`: `nbytes > 256B` 直接 NT。
+- `小对象`: `nbytes <= 64B` 全部 staging。
+- `staging flush`: 达到 2048B 时 NT。
+- `tail flush`: 不满 2048B 时也用 streaming store，而不是 old memcpy。
+- `target gap`: 遇到 target 不连续就强制 tail NT flush，然后新开 chunk。
+
+判断：
+- 如果用户目标是“从机制上避免 old 区 cache pollution”，这个方案成立。
+- 如果目标是“必然更快”，不能保证；之前数据表明小对象 NT 的固定成本非常敏感，必须实现后用 benchmarks 验证。
+
+## 2026-05-06 关于 64-256B 对象如何处理，以及 tail NT flush 的含义
+
+用户追问：
+- 在建议实验版本里，`64B < object <= 256B` 的对象应该怎么处理？
+- 什么叫 `tail NT flush`？
+
+结论：
+- 如果目标是“严格避免 old/DRAM 目标区普通 memcpy”，那么 `64B < nbytes <= 256B` 这段不能走当前 GiY 的 `giy_copy_live_object()`。
+- 因为当前 `giy_copy_live_object()` 的规则是 `nbytes <= 256B` 用普通 `memcpy(dst_old, src_young)`。
+- 所以在严格实验版里，64-256B 对象应单独走 direct NT store，而不是普通 GiY copy。
+
+建议把对象分成三类：
+1. tiny object：`nbytes <= 64B`
+   - 进入 tiny staging。
+   - staging 满 2048B 时，用 NT store 写到连续 target。
+   - target 不连续、遇到中/大对象、或者 minor GC 结束时，触发 tail NT flush。
+2. medium object：`64B < nbytes <= 256B`
+   - 不建议进入 staging。
+   - 严格避免 old memcpy 的实验里，medium object 应直接 `young -> old/DRAM` 用 NT store。
+   - 注意：不能调用当前 `giy_copy_live_object()`，因为它会对 256B 以内对象使用 memcpy；需要新增一个“强制 NT copy”函数或给 copy 函数加 force-NT 参数。
+3. large object：`nbytes > 256B`
+   - 当前 GiY 已经会用 NT store。
+   - 可以继续直接 `young -> old/DRAM` NT。
+
+为什么不建议 64-256B 也进 staging：
+- 扩大 staging 对象范围会很容易失败。
+- 例如 96B 上限时，NT tiny bytes 变大，但 flush 次数暴涨，Storage GC core 恶化。
+- 64-256B 对象如果都进 staging，会明显增加 `young -> staging -> DRAM` 双拷贝量。
+
+什么是 tail NT flush：
+- staging buffer 有一个 flush 阈值，例如 2048B。
+- 正常 flush 是：staging 累积到 `>=2048B`，就把这段连续 bytes 用 NT store 写到 old/DRAM。
+- 但是经常会出现“不满阈值的剩余部分”，这就是 tail。
+- 例如 staging 里只有 384B 小对象，但马上遇到 target 不连续对象、medium/large object、或者 minor GC 结束；这 384B 就是 tail。
+
+当前保守做法：
+- tail 小于阈值时 fallback，逐对象调用 `giy_copy_live_object()`。
+- 对 tiny object 来说，这会用 old memcpy。
+
+tail NT flush 的意思：
+- 即使 staging tail 只有 384B、128B、甚至 64B，也不 fallback 到 old memcpy。
+- 而是把 staging buffer 中这段 tail 也用 streaming/non-temporal store 写到 old/DRAM target。
+- 这样可以从机制上保证 tiny staging 产生的数据不会用普通 memcpy 写 old 区。
+
+tail NT flush 的风险：
+- 小 tail 使用 NT store 的固定成本可能高。
+- tail 太小会导致很多小 NT 写，性能可能差。
+- 还必须处理 8B/16B 对齐和尾部长度限制。
+
+严格实验版的复制策略可以写成：
+- `nbytes <= 64B`: staging；满 2048B 或必须断开时，tail 也强制 NT flush。
+- `64B < nbytes <= 256B`: direct forced NT，不进 staging，不走 old memcpy。
+- `nbytes > 256B`: direct NT，沿用当前大对象路径。
+
+这才是真正意义上的“避免 old/DRAM 目标区普通 memcpy”版本。
+
+## 2026-05-07 GiYOL forced-NT 实验结果
+
+本轮实现内容：
+- 新增 `GIYOL_FORCE_TINY_TAIL_NT`，默认 1。
+- 新增 `GIYOL_DIRECT_NONTINY_NT`，默认 1。
+- 当前完整实验版 GiYOL 的复制策略是：
+  - `nbytes <= 64B`: 先进入 tiny staging buffer；满 2048B 或遇到 target 不连续/本轮 GC 结束时 flush；即使 tail 小于 2048B，也强制用 NT store flush。
+  - `nbytes > 64B`: 不再走 GiY 的 `giy_copy_live_object()` 小对象 memcpy 路径，直接使用 GiYOL forced NT copy。
+- 目的：机制上尽量避免 survivor object materialization 对 old/DRAM target 的普通 `memcpy`。
+
+冒烟测试：
+- `Sieve` 正常结束，无 alignment invariant 失败。
+- `Storage` 正常结束，无 alignment invariant 失败。
+
+关键结论：
+- 这个“完全避免 old memcpy”的 forced-NT 方案失败了。
+- 失败不是正确性问题，而是性能问题。
+- 主要原因是它把大量很小的写入强行变成了 NT store，尤其是 tiny tail 和 64B 以上对象的 direct NT。
+- NT store 适合较大、连续、不会马上重读的写入；当前 workload 下很多 survivor copy 是小块、频繁、每轮 GC 都要收尾的写入，强制 NT 的固定成本压过了避免 cache pollution 的收益。
+
+10 个已跑 benchmarks 合计，不含 Richards/Havlak：
+- GiY: total 2134.394s, business 2065.690s, GC full 68.706s, GC core 45.023s。
+- 旧 GiYOL: total 2133.990s, business 2053.243s, GC full 80.747s, GC core 55.808s。
+- forced-NT GiYOL: total 2188.201s, business 2054.996s, GC full 133.206s, GC core 107.857s。
+- forced-NT GiYOL 相对旧 GiYOL：total +54.211s, business +1.753s, GC full +52.459s, GC core +52.049s。
+- forced-NT GiYOL 相对 GiY：total +53.807s, business -10.694s, GC full +64.500s, GC core +62.834s。
+
+逐项 total/core 对比，GiY / 旧 GiYOL / forced-NT GiYOL：
+- Bounce: total 157.303 / 157.275 / 158.365s；GC core 0.044 / 0.051 / 0.056s。
+- List: total 99.082 / 97.091 / 96.854s；GC core 0.003 / 0.003 / 0.003s。
+- Sieve: total 120.809 / 121.248 / 123.278s；GC core 0.803 / 0.812 / 0.864s。
+- Queens: total 116.298 / 115.794 / 117.687s；GC core 0.009 / 0.009 / 0.012s。
+- Permute: total 387.931 / 391.007 / 389.864s；GC core 0.001 / 0.001 / 0.001s。
+- Storage: total 213.283 / 208.025 / 253.573s；GC core 31.941 / 41.602 / 87.427s。
+- Towers: total 184.069 / 183.708 / 182.655s；GC core 0.001 / 0.001 / 0.001s。
+- Mandelbrot: total 235.001 / 237.636 / 237.864s；GC core 1.305 / 1.498 / 1.546s。
+- CD: total 242.552 / 243.058 / 247.883s；GC core 8.446 / 8.862 / 15.057s。
+- NBody: total 378.066 / 379.148 / 380.178s；GC core 2.470 / 2.969 / 2.890s。
+
+forced-NT GiYOL 的 NT 写入规模：
+- Bounce: tiny tail flush 22,290 次，32.01MB；direct NT 5,878 objects，4.54MB。
+- List: tiny tail flush 815 次，0.55MB；direct NT 45 objects，0.01MB。
+- Sieve: tiny tail flush 50,122 次，2.68MB；direct NT 50,041 objects，1908.08MB。
+- Queens: tiny tail flush 2,686 次，0.55MB；direct NT 10,022 objects，1.07MB。
+- Permute: tiny tail flush 199 次，0.02MB；direct NT 116 objects，0.01MB。
+- Storage: tiny tail flush 113,686,097 次，45,677.56MB；direct NT 163,300,046 objects，13,047.80MB。
+- Towers: tiny tail flush 280 次，0.11MB；direct NT 48 objects，0.01MB。
+- Mandelbrot: tiny tail flush 578,706 次，71.07MB；direct NT 40 objects，0.00MB。
+- CD: tiny tail flush 16,840,682 次，2,372.96MB；direct NT 26,453,850 objects，5,403.47MB。
+- NBody: tiny tail flush 719,069 次，625.97MB；direct NT 550 objects，0.04MB。
+
+Storage 消融实验：
+- 旧 GiYOL：total 208.025s，business 163.546s，GC full 44.479s，GC core 41.602s。
+- tail-only，即 tiny tail 强制 NT、非 tiny 仍走旧 GiY copy：total 230.549s，business 163.060s，GC full 67.489s，GC core 63.365s。
+- full forced，即 tiny tail 强制 NT + 非 tiny direct NT：total 253.573s，business 162.837s，GC full 90.736s，GC core 87.427s。
+- tiny tail 强制 NT 单独让 Storage GC core 增加 21.763s。
+- 非 tiny direct NT 在此基础上再让 Storage GC core 增加 24.062s。
+- 两部分共同造成 Storage GC core 相对旧 GiYOL 增加 45.825s，几乎完全解释了 total 增加 45.548s。
+
+最终判断：
+- “所有小对象 staging tail 都 NT flush + 所有 64B 以上对象 direct NT，以完全避免 old memcpy”不是一个好的当前方向。
+- 当前数据支持回退到更保守的选择：只在目标连续且累计到足够大块时使用 NT；小 tail 继续 fallback 到 GiY 的 memcpy；64-256B 中等对象也不应该无条件 direct NT。
+- 如果还要继续探索 NT，重点应是减少 tiny tail flush 次数、提高单次 NT 粒度、只对真正大块连续 target 使用 NT，而不是追求形式上完全消除 `memcpy`。
+
+## 2026-05-07 关于“256B 以下全部先复制到中介区，再到阈值 NT store”的判断
+
+问题：
+- 是否可以把 `<=256B` 的 survivor object 全部先复制到中介区，然后累计到阈值后再一次 NT store 到 old/DRAM target？
+
+机制结论：
+- 可以实现，但必须有一个前提：这些 object 的 target 地址在 old/DRAM 里必须是连续的。
+- 如果 target 连续，那么 staging buffer 可以组织成一段连续 bytes，然后一次 NT store 到连续 target。
+- 如果 target 不连续，就不能把 staging buffer 一口气 NT store 到一个 target 地址；否则会覆盖中间不属于这批对象的 old/DRAM 内容。
+- 因此这个策略的真实形态不是“所有 256B 以下都无脑凑满阈值”，而是“按 target 连续 run 分组，每个连续 run 达到阈值才 NT flush”。
+
+按现有数据的判断：
+- 不建议把 `<=256B` 全部强制 staging + 强制 tail NT 作为默认策略。
+- 上一轮 forced-NT 实验已经显示，强制把小块写变成 NT store 会明显失败。
+- Storage 中：
+  - 旧 GiYOL GC core 41.602s。
+  - tiny tail 强制 NT 后 GC core 63.365s，单独增加 21.763s。
+  - 再加上 `>64B` direct NT 后 GC core 87.427s，又增加 24.062s。
+- 这说明瓶颈不是“是否通过中介区”本身，而是“是否产生大量小 NT flush”和“是否对不够大的对象强制 NT”。
+
+为什么 `<=256B` 全 staging 也有风险：
+- 对 `64B~256B` 对象，旧 GiY/GiYOL 的保守路径通常是一次 `memcpy(dst, src, nbytes)`。
+- staging 方案会变成两步：
+  - 先 `memcpy(staging, src, nbytes)`。
+  - 再 `NT store(dst, staging, nbytes或chunk)`。
+- 如果最后形成的是大块连续 NT flush，这可能值得。
+- 如果最后只是很多小 tail flush，就会同时承担“多一次 staging memcpy”和“小 NT store 固定成本”，性能会更差。
+
+可实验的正确版本：
+- `<=256B` 对象可以进入 staging log，但必须按 target 地址连续性切 run。
+- 只有连续 run 累计到阈值，例如 2048B、4096B 或更大时，才 NT flush。
+- 未达阈值的 tail 不应该强制 NT；应 fallback 到普通 GiY copy。
+- `>256B` 对象继续使用原来的 GiY 阈值策略：足够大时 NT，否则 memcpy。
+- 这样做的目标不是完全消灭 old memcpy，而是只在“连续且足够大”的场景使用 NT。
+
+最终结论：
+- `<=256B` 全部先放中介区在机制上可行。
+- 但如果目标是“所有 256B 以下最终都强制 NT store”，根据现有数据大概率会失败。
+- 更合理的实验方向是：`<=256B` 可以进入 staging，但只有连续 run 达到阈值才 NT；tail fallback。
+- 这个版本可能减少 64B~256B 对象 direct NT 的固定成本，同时避免 forced-tail NT 的灾难性小 flush。
+
+## 2026-05-07 什么是 tail fallback
+
+定义：
+- `tail` 指 staging buffer 里已经收集了一些 object bytes，但还没有达到 NT flush 阈值的尾部剩余数据。
+- `fallback` 指这部分尾部剩余数据不再强制用 NT store 写回 old/DRAM，而是回退到普通 GiY copy 路径。
+
+例子：
+- 假设 NT flush 阈值是 2048B。
+- 当前一段 target-contiguous run 中，staging 已经收集了 320B、512B 或 1536B。
+- 这时遇到 target 不连续、遇到一个不该进入 staging 的大对象，或者本轮 minor GC 结束。
+- 这段不足 2048B 的 staging 内容就是 tail。
+
+tail forced NT：
+- 即使 tail 只有 320B，也执行 `NT store(staging -> old target)`。
+- 优点：形式上避免了 old/DRAM target 的普通 `memcpy`。
+- 缺点：会产生大量小 NT store；上一轮 Storage 实验中 tiny tail forced NT 单独让 GC core 从 41.602s 增到 63.365s，增加 21.763s。
+
+tail fallback：
+- 如果 tail 没达到阈值，就不对这段 staging bytes 做 NT flush。
+- 而是把 tail 中对应的 object 按原来的对象记录逐个复制到 old/DRAM：
+  - 小对象通常走 `memcpy(dst, src, nbytes)`。
+  - 大于 GiY NT 阈值的对象仍可走原来的 NT copy。
+- 本质是：只有“大且连续”的 chunk 才值得 NT；小尾巴不要硬上 NT。
+
+为什么需要保留每个 object 的记录：
+- tail fallback 不能只看 staging buffer 的一段 bytes。
+- 因为 fallback 时要知道每个 object 的原始 `src`、最终 `dst` 和 `nbytes`。
+- 这样才能逐对象调用普通 GiY copy，而不是把 staging buffer 的 tail 盲目写到某个连续 target。
+
+最终结论：
+- tail fallback 是一种性能保护机制。
+- 它承认小 tail 用普通 memcpy 可能比小 NT store 更快。
+- 对当前 GiYOL 来说，tail fallback 比“完全消灭 memcpy”更符合已有 benchmark 数据。
+
+## 2026-05-07 `<=256B staging + tail fallback` 实验
+
+实验目标：
+- 测试此前认为“值得试验的正确版本”：
+  - `<=256B` survivor object 进入 staging。
+  - 按 old/DRAM target 连续性切 run。
+  - run 达到阈值才 NT flush。
+  - tail 不强制 NT，fallback 到普通 GiY copy。
+  - `>256B` 不 direct forced NT，回到 GiY 原来的复制策略。
+
+主实验配置：
+- `GIYOL_TINY_MAX_OBJECT_BYTES=256`
+- `GIYOL_FORCE_TINY_TAIL_NT=0`
+- `GIYOL_DIRECT_NONTINY_NT=0`
+- `GIYOL_TINY_STAGING_BYTES=2048`
+- `GIYOL_TINY_FLUSH_BYTES=2048`
+
+正确性：
+- 12 个 benchmark 全部正常结束。
+- profile 确认所有 12 项都是：
+  - `GiYOL tiny max object:256`
+  - `GiYOL force tiny tail NT:0`
+  - `GiYOL direct non-tiny NT:0`
+- `GiYOL tiny tail NT flushes` 全部为 0。
+- `GiYOL direct NT objects` 全部为 0。
+
+12 项 CPU time 汇总：
+- GiY: total 3484.477s, business 3378.482s, GC full 105.998s, GC core 72.829s。
+- 旧 GiYOL: total 3489.323s, business 3368.807s, GC full 120.518s, GC core 86.167s。
+- `<=256B staging + tail fallback, 2048B`: total 3506.420s, business 3380.944s, GC full 125.476s, GC core 91.571s。
+- 新版本相对旧 GiYOL：total +17.097s, business +12.137s, GC full +4.958s, GC core +5.404s。
+- 新版本相对 GiY：total +21.943s, business +2.462s, GC full +19.478s, GC core +18.742s。
+
+10 项汇总，不含 Richards/Havlak，用于和 forced-NT 版本对比：
+- GiY: total 2134.394s, business 2065.690s, GC full 68.706s, GC core 45.023s。
+- 旧 GiYOL: total 2133.990s, business 2053.243s, GC full 80.747s, GC core 55.808s。
+- forced-NT GiYOL: total 2188.201s, business 2054.996s, GC full 133.206s, GC core 107.857s。
+- `<=256B staging + tail fallback, 2048B`: total 2150.274s, business 2064.792s, GC full 85.483s, GC core 61.320s。
+- 新版本相对 forced-NT：total -37.927s, GC core -46.537s。
+- 新版本相对旧 GiYOL：total +16.284s, GC core +5.512s。
+
+逐项 total/core 对比，旧 GiYOL -> `<=256B staging + tail fallback, 2048B`：
+- Bounce: total 157.275 -> 157.407s；GC core 0.051 -> 0.051s。
+- List: total 97.091 -> 99.074s；GC core 0.003 -> 0.003s。
+- Sieve: total 121.248 -> 120.295s；GC core 0.812 -> 0.844s。
+- Queens: total 115.794 -> 119.533s；GC core 0.009 -> 0.009s。
+- Permute: total 391.007 -> 391.513s；GC core 0.001 -> 0.001s。
+- Storage: total 208.025 -> 215.605s；GC core 41.602 -> 47.104s。
+- Towers: total 183.708 -> 181.979s；GC core 0.001 -> 0.001s。
+- Mandelbrot: total 237.636 -> 237.399s；GC core 1.498 -> 1.447s。
+- Richards: total 934.810 -> 939.186s；GC core 0.045 -> 0.044s。
+- CD: total 243.058 -> 246.475s；GC core 8.862 -> 8.935s。
+- NBody: total 379.148 -> 380.994s；GC core 2.969 -> 2.925s。
+- Havlak: total 420.523 -> 416.960s；GC core 30.314 -> 30.207s。
+
+2048B 阈值下的 staging/NT 规模：
+- Storage: NT batches 4,291,828，NT bytes 8,382.48MB，fallback objects 936,238,037，fallback bytes 50,389.06MB。
+- CD: NT batches 22,118，NT bytes 43.20MB，fallback objects 71,919,520，fallback bytes 3,435.72MB。
+- Havlak: NT batches 341,799，NT bytes 667.58MB，fallback objects 310,588,946，fallback bytes 16,417.46MB。
+- 对比旧 GiYOL 的 Storage：NT batches 23,629，NT bytes 46.15MB。
+- 说明 `<=256B` staging 确实大幅增加了可 NT flush 的连续 run，但也增加了大量 `src -> staging` 的中介拷贝和 flush 管理成本。
+
+Storage 阈值扫描：
+- 旧 GiYOL：total 208.025s，business 163.546s，GC full 44.479s，GC core 41.602s；NT batches 23,629，NT bytes 46.15MB。
+- 2048B：total 215.605s，business 166.499s，GC full 49.106s，GC core 47.104s；NT batches 4,291,828，NT bytes 8,382.48MB。
+- 4096B：total 234.405s，business 185.258s，GC full 49.146s，GC core 45.660s；NT batches 2,067,726，NT bytes 8,077.05MB。此轮 business time 明显偏高，total 噪声较大，但 GC core 可参考。
+- 8192B：total 210.934s，business 163.730s，GC full 47.203s，GC core 44.655s；NT batches 1,189,927，NT bytes 9,296.30MB。
+- 16384B：total 212.975s，business 165.423s，GC full 47.553s，GC core 45.045s；NT batches 542,020，NT bytes 8,469.06MB。
+- Storage 上 8192B 是扫描里最好的阈值，但仍慢于旧 GiYOL：total +2.909s，GC core +3.053s。
+
+CD/Havlak 的 8192B 补测：
+- CD 旧 GiYOL：total 243.058s，GC core 8.862s。
+- CD 8192B：total 242.530s，GC core 8.873s；NT batches 4,552，NT bytes 35.56MB。
+- Havlak 旧 GiYOL：total 420.523s，GC core 30.314s。
+- Havlak 8192B：total 419.708s，GC core 30.416s；NT batches 128,503，NT bytes 1003.93MB。
+- 8192B 在 CD/Havlak 上没有表现出明显 GC core 优势；total 的小幅变化更像 business/noise 与局部收益混合。
+
+最终结论：
+- `<=256B staging + tail fallback` 是机制上正确的版本，且明显优于 forced-NT。
+- 但它没有击败旧 GiYOL。
+- 2048B 阈值 full suite 相对旧 GiYOL：total +17.097s，GC core +5.404s。
+- 调到 8192B 后，Storage 明显改善，但仍比旧 GiYOL 慢：total +2.909s，GC core +3.053s。
+- 主要原因不是 tail NT，也不是 direct NT；这两者已经关闭。
+- 主要成本变成了：`64B~256B` 对象进入 staging 后，多了一次 `src -> staging` memcpy、更多 batch bookkeeping，以及更多 NT flush。即使 tail fallback 避免了灾难性小 NT，扩大 staging 范围本身仍然带来额外开销。
+- 当前数据支持的方向：不要把所有 `<=256B` 都纳入 staging；应只让“预计能形成足够大 target-contiguous run”的对象进入 staging，或者维持旧 GiYOL 的 `<=64B` 更保守策略。
+
+## 2026-05-07 阶段性总结：GiY vs 旧 GiYOL vs 当前 GiYOL
+
+这里的三个版本定义：
+- GiY：当前普通 GiY baseline，数据来自 `out50_giy_as_update_final_full`。
+- 旧 GiYOL：先前的保守 GiYOL，`<=64B` tiny staging，tail 小于阈值 fallback 到普通 GiY copy；它仍然有大量 old/DRAM target 的 `memcpy`，因此仍有 cache pollution 风险。数据来自 `out89_giyol_tiny_selective_2048_64_full`。
+- 当前 GiYOL：本轮实验的 `<=256B staging + tail fallback`，full suite 使用 2048B 阈值；另对 Storage/CD/Havlak 扫描了 8192B 阈值。数据来自 `out93_giyol_256_staging_tailfb_full`，以及部分 `out95/out97` 补测。
+
+12 项 full suite 总数据：
+- GiY：total 3484.477s，business 3378.482s，GC full 105.998s，GC core 72.829s。
+- 旧 GiYOL：total 3489.323s，business 3368.807s，GC full 120.518s，GC core 86.167s。
+- 当前 GiYOL 2048B：total 3506.420s，business 3380.944s，GC full 125.476s，GC core 91.571s。
+
+相对 GiY：
+- 旧 GiYOL：total +4.846s，business -9.675s，GC full +14.520s，GC core +13.338s。
+- 当前 GiYOL 2048B：total +21.943s，business +2.462s，GC full +19.478s，GC core +18.742s。
+
+相对旧 GiYOL：
+- 当前 GiYOL 2048B：total +17.097s，business +12.137s，GC full +4.958s，GC core +5.404s。
+
+核心观察：
+- 旧 GiYOL 的 business time 比 GiY 少 9.675s，说明保守 staging/NT 确实可能减少一部分业务阶段可见的 cache pollution 或缓存干扰。
+- 但旧 GiYOL 的 GC core 比 GiY 多 13.338s，说明 staging/batch/remembered-set/额外复制管理的 GC 成本超过了 business 收益。
+- 因此旧 GiYOL 总时间比 GiY 仍慢 4.846s。
+- 当前 GiYOL 进一步把 staging 范围从 `<=64B` 扩到 `<=256B`，理论上希望减少更多 old target memcpy。
+- 实际结果是：business 不但没有继续改善，反而比旧 GiYOL 慢 12.137s；GC core 也比旧 GiYOL 多 5.404s。
+- 因此当前 GiYOL 总时间比旧 GiYOL 慢 17.097s。
+
+Storage 是最能说明问题的项：
+- GiY：total 213.283s，business 178.595s，GC core 31.941s。
+- 旧 GiYOL：total 208.025s，business 163.546s，GC core 41.602s。
+- 当前 GiYOL 2048B：total 215.605s，business 166.499s，GC core 47.104s。
+- 当前 GiYOL 8192B 补测：total 210.934s，business 163.730s，GC core 44.655s。
+
+Storage 解释：
+- 旧 GiYOL 相比 GiY，business 快 15.049s，但 GC core 慢 9.661s；最终 total 快 5.258s。
+- 当前 2048B 相比旧 GiYOL，business 慢 2.953s，GC core 慢 5.502s；最终 total 慢 7.580s。
+- 当前 8192B 相比当前 2048B 有改善，GC core 从 47.104s 降到 44.655s，但仍慢于旧 GiYOL 的 41.602s。
+
+cache pollution 与性能的关系：
+- 旧 GiYOL 确实没有完全解决 cache pollution。
+- Storage 中旧 GiYOL 只有 46.15MB 通过 staging NT 写回，仍有 45,677.59MB tiny fallback bytes 通过普通 GiY copy 写 old/DRAM。
+- 这意味着旧 GiYOL 仍有大量 ordinary memcpy old writes，会污染 cache。
+- 但是尝试把更多对象纳入 staging 后，当前 GiYOL 虽然大幅增加了 NT bytes，却付出了更高的中介复制和管理成本。
+
+当前 GiYOL 的额外成本：
+- Storage 2048B 下，当前 GiYOL NT batches 4,291,828，NT bytes 8,382.48MB，fallback bytes 50,389.06MB。
+- 对比旧 GiYOL Storage：NT batches 23,629，NT bytes 46.15MB，fallback bytes 45,677.59MB。
+- 当前 GiYOL 让更多连续 run 走 NT，但代价是：
+  - 许多 `64B~256B` object 多了一次 `src -> staging` memcpy。
+  - batch bookkeeping 和 run 切分次数大幅增加。
+  - NT flush 次数大幅增加，即使 tail forced NT 已经关闭。
+  - fallback bytes 仍然很大，说明并没有彻底消灭 old target memcpy。
+
+forced-NT 失败提供的反证：
+- forced-NT GiYOL 在 Storage 上 total 253.573s，GC core 87.427s。
+- 它更接近“尽量消灭 old memcpy”的目标，但性能远差于旧 GiYOL和当前 tail-fallback 版本。
+- 这说明“减少 cache pollution”不能靠无条件 NT；NT 必须只用于足够大、足够连续、收益能覆盖固定成本的写入。
+
+阶段性结论：
+- GiY 当前仍是 full-suite total 最好的版本：3484.477s。
+- 旧 GiYOL 在 business time 上最好：3368.807s，但 GC 成本过高，total 比 GiY 慢 4.846s。
+- 当前 GiYOL 2048B 没有达到目标：它既没有保持旧 GiYOL 的 business 优势，也进一步增加了 GC 成本，total 比旧 GiYOL 慢 17.097s。
+- 当前 GiYOL 的正确价值是验证了一个方向：tail fallback 是必要的，forced NT 不可取；但扩大到 `<=256B` 全 staging 不值得。
+- 后续最合理方向不是继续扩大 staging，而是做选择性 staging：只让能形成大 target-contiguous run 的对象进入 staging，否则保持 GiY/旧 GiYOL 的普通 copy。

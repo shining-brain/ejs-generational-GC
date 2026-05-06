@@ -110,6 +110,75 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 #define GIY_AS_FT_ADVANCE 1
 #endif
 
+#ifndef GIYOL_BATCH_BYTES
+#define GIYOL_BATCH_BYTES (128 * 1024)
+#endif
+
+#ifndef GIYOL_SORT_BATCH
+#define GIYOL_SORT_BATCH 0
+#endif
+
+#ifndef GIYOL_INLINE_COPY_ENTRIES
+#define GIYOL_INLINE_COPY_ENTRIES 64
+#endif
+
+#ifndef GIYOL_ADAPTIVE_BATCH
+#define GIYOL_ADAPTIVE_BATCH 0
+#endif
+
+#ifndef GIYOL_STAGING_COPY
+#define GIYOL_STAGING_COPY 1
+#endif
+
+#ifndef GIYOL_TINY_STAGING
+#define GIYOL_TINY_STAGING 1
+#endif
+
+#ifndef GIYOL_TINY_STAGING_BYTES
+#define GIYOL_TINY_STAGING_BYTES 2048
+#endif
+
+#ifndef GIYOL_TINY_FLUSH_BYTES
+#define GIYOL_TINY_FLUSH_BYTES 2048
+#endif
+
+#ifndef GIYOL_TINY_MAX_OBJECT_BYTES
+#define GIYOL_TINY_MAX_OBJECT_BYTES 64
+#endif
+
+#ifndef GIYOL_FORCE_TINY_TAIL_NT
+#define GIYOL_FORCE_TINY_TAIL_NT 1
+#endif
+
+#ifndef GIYOL_DIRECT_NONTINY_NT
+#define GIYOL_DIRECT_NONTINY_NT 1
+#endif
+
+struct GiYOLCopyEntry {
+  void *dst;
+  const void *src;
+  size_t nbytes;
+};
+
+struct GiYOLCopyBatch {
+  GiYOLCopyEntry *items;
+  size_t count;
+  size_t capacity;
+  size_t bytes;
+  GiYOLCopyEntry inline_items[GIYOL_INLINE_COPY_ENTRIES];
+};
+
+#if defined(USE_GIYOL) && GIYOL_ADAPTIVE_BATCH
+static bool giyol_batch_next_traversal = false;
+#endif
+
+#if defined(USE_GIYOL) && GIYOL_STAGING_COPY
+static unsigned char *giyol_staging_buffer = NULL;
+static size_t giyol_staging_capacity = 0;
+static GiYOLCopyBatch giyol_reserve_order_batch;
+static bool giyol_reserve_order_batch_active = false;
+#endif
+
 struct GiYProfile {
   unsigned long long minor_collections;
   unsigned long long stack_pushes;
@@ -138,6 +207,25 @@ struct GiYProfile {
 
   unsigned long long nt_copy_objects;
   unsigned long long nt_copy_bytes;
+  unsigned long long giyol_batches;
+  unsigned long long giyol_batch_objects;
+  unsigned long long giyol_batch_bytes;
+  unsigned long long giyol_small_flush_objects;
+  unsigned long long giyol_small_flush_bytes;
+  unsigned long long giyol_staging_batches;
+  unsigned long long giyol_staging_objects;
+  unsigned long long giyol_staging_bytes;
+  unsigned long long giyol_staging_fallback_objects;
+  unsigned long long giyol_staging_fallback_bytes;
+  unsigned long long giyol_tiny_flushes;
+  unsigned long long giyol_tiny_objects;
+  unsigned long long giyol_tiny_bytes;
+  unsigned long long giyol_tiny_fallback_objects;
+  unsigned long long giyol_tiny_fallback_bytes;
+  unsigned long long giyol_tiny_tail_nt_flushes;
+  unsigned long long giyol_tiny_tail_nt_bytes;
+  unsigned long long giyol_direct_nt_objects;
+  unsigned long long giyol_direct_nt_bytes;
   unsigned long long old_slot_stream_stores;
 
   unsigned long long ft_slots_recorded;
@@ -1060,6 +1148,12 @@ static void giy_process_young_node(cell_type_t type, uintptr_t ptr) {
   }
 }
 
+#if defined(USE_GIYOL) && GIYOL_STAGING_COPY
+static void giyol_reserve_order_log_append(void *dst,
+                                           const void *src,
+                                           size_t nbytes);
+#endif
+
 // Reserve destination in old generation and mark source young object.
 static uintptr_t copy_for_minor(uintptr_t payload_ptr) {
   object_header *hdr = (object_header *) payload_ptr - 1;
@@ -1079,6 +1173,13 @@ static uintptr_t copy_for_minor(uintptr_t payload_ptr) {
 
   hdr->forwarding_pointer = (uintptr_t) (dest_hdr + 1);
   gc_stack_push(payload_ptr);
+#if defined(USE_GIYOL) && GIYOL_STAGING_COPY
+  if (!GIYOL_TINY_STAGING ||
+      (size_t) align_bytes <= (size_t) GIYOL_TINY_MAX_OBJECT_BYTES) {
+    giyol_reserve_order_log_append((void *) dest_hdr, (const void *) hdr,
+                                   (size_t) align_bytes);
+  }
+#endif
   return hdr->forwarding_pointer;
 }
 
@@ -1742,8 +1843,477 @@ static inline void giy_copy_live_object(void *dst,
   giy_old_guard_protect_old_write(dst, nbytes);
 }
 
+#if defined(USE_GIYOL)
+#if GIYOL_SORT_BATCH || GIYOL_STAGING_COPY
+static int giyol_copy_entry_compare(const void *a, const void *b) {
+  const GiYOLCopyEntry *x = (const GiYOLCopyEntry *) a;
+  const GiYOLCopyEntry *y = (const GiYOLCopyEntry *) b;
+  if (x->dst < y->dst)
+    return -1;
+  if (x->dst > y->dst)
+    return 1;
+  return 0;
+}
+#endif
+
+static inline void giyol_stream_copy_region(void *dst,
+                                            const void *src,
+                                            size_t nbytes,
+                                            bool *used_nt_store) {
+  giy_old_guard_allow_old_write(dst, nbytes);
+#if defined(__x86_64__) || defined(__i386__)
+  unsigned char *d = (unsigned char *) dst;
+  const unsigned char *s = (const unsigned char *) src;
+  size_t n = nbytes;
+
+  if ((((uintptr_t) d) & 15) != 0) {
+    if ((((uintptr_t) d) & 15) != 8 || n < 8) {
+      printf("GiYOL NT copy alignment invariant failed (dst=%p, n=%zu)\n",
+             (void *) d, n);
+      exit(1);
+    }
+    uint64_t v;
+    memcpy(&v, s, sizeof(v));
+    _mm_stream_si64((long long *) d, (long long) v);
+    s += 8;
+    d += 8;
+    n -= 8;
+  }
+
+  while (n >= 16) {
+    __m128i v = _mm_loadu_si128((const __m128i *) s);
+    _mm_stream_si128((__m128i *) d, v);
+    s += 16;
+    d += 16;
+    n -= 16;
+  }
+
+  if (n != 0) {
+    if (n != 8) {
+      printf("GiYOL NT copy tail invariant failed (n=%zu)\n", n);
+      exit(1);
+    }
+    uint64_t v;
+    memcpy(&v, s, sizeof(v));
+    _mm_stream_si64((long long *) d, (long long) v);
+  }
+
+  *used_nt_store = true;
+  if (GIY_PROFILE_DETAIL) {
+    giy_profile.nt_copy_objects++;
+    giy_profile.nt_copy_bytes += nbytes;
+  }
+#else
+  memcpy(dst, src, nbytes);
+#endif
+  giy_old_guard_protect_old_write(dst, nbytes);
+}
+
+static inline void giyol_stream_copy_live_object(void *dst,
+                                                const void *src,
+                                                size_t nbytes,
+                                                bool *used_nt_store) {
+  giyol_stream_copy_region(dst, src, nbytes, used_nt_store);
+}
+
+static inline void giyol_direct_nt_copy_live_object(void *dst,
+                                                   const void *src,
+                                                   size_t nbytes,
+                                                   bool *used_nt_store) {
+  giyol_stream_copy_region(dst, src, nbytes, used_nt_store);
+  giy_profile.giyol_direct_nt_objects++;
+  giy_profile.giyol_direct_nt_bytes += nbytes;
+}
+
+static void giyol_copy_batch_init(GiYOLCopyBatch *batch) {
+  batch->items = batch->inline_items;
+  batch->count = 0;
+  batch->capacity = GIYOL_INLINE_COPY_ENTRIES;
+  batch->bytes = 0;
+}
+
+#if !GIYOL_STAGING_COPY
+static void giyol_copy_batch_destroy(GiYOLCopyBatch *batch) {
+  if (batch->items != batch->inline_items)
+    free(batch->items);
+  batch->items = batch->inline_items;
+  batch->count = 0;
+  batch->capacity = GIYOL_INLINE_COPY_ENTRIES;
+  batch->bytes = 0;
+}
+#endif
+
+static void giyol_copy_batch_reserve_entry(GiYOLCopyBatch *batch) {
+  if (batch->count < batch->capacity)
+    return;
+
+  size_t new_capacity = batch->capacity == 0 ?
+                        GIYOL_INLINE_COPY_ENTRIES : batch->capacity * 2;
+  GiYOLCopyEntry *new_items;
+  if (batch->items == batch->inline_items) {
+    new_items =
+      (GiYOLCopyEntry *) malloc(new_capacity * sizeof(GiYOLCopyEntry));
+    if (new_items != NULL)
+      memcpy(new_items, batch->inline_items,
+             batch->count * sizeof(GiYOLCopyEntry));
+  } else {
+    new_items =
+      (GiYOLCopyEntry *) realloc(batch->items,
+                                 new_capacity * sizeof(GiYOLCopyEntry));
+  }
+  if (new_items == NULL) {
+    printf("GiYOL copy batch allocation failed (capacity=%zu)\n",
+           new_capacity);
+    exit(1);
+  }
+  batch->items = new_items;
+  batch->capacity = new_capacity;
+}
+
+static void giyol_copy_batch_append(GiYOLCopyBatch *batch,
+                                    void *dst,
+                                    const void *src,
+                                    size_t nbytes) {
+  giyol_copy_batch_reserve_entry(batch);
+  GiYOLCopyEntry *entry = &batch->items[batch->count++];
+  entry->dst = dst;
+  entry->src = src;
+  entry->nbytes = nbytes;
+  batch->bytes += nbytes;
+}
+
+#if GIYOL_STAGING_COPY
+static void giyol_reserve_order_batch_begin() {
+  if (!giyol_reserve_order_batch_active) {
+    giyol_copy_batch_init(&giyol_reserve_order_batch);
+    giyol_reserve_order_batch_active = true;
+  }
+  giyol_reserve_order_batch.count = 0;
+  giyol_reserve_order_batch.bytes = 0;
+}
+
+static void giyol_reserve_order_log_append(void *dst,
+                                           const void *src,
+                                           size_t nbytes) {
+  if (!giyol_reserve_order_batch_active)
+    giyol_reserve_order_batch_begin();
+  giyol_copy_batch_append(&giyol_reserve_order_batch, dst, src, nbytes);
+}
+
+static void giyol_ensure_staging_capacity(size_t bytes) {
+  if (giyol_staging_capacity >= bytes)
+    return;
+
+  size_t new_capacity = giyol_staging_capacity == 0 ?
+                        (size_t) GIYOL_BATCH_BYTES : giyol_staging_capacity;
+  while (new_capacity < bytes)
+    new_capacity *= 2;
+
+  unsigned char *new_buffer =
+    (unsigned char *) realloc(giyol_staging_buffer, new_capacity);
+  if (new_buffer == NULL) {
+    printf("GiYOL staging buffer allocation failed (capacity=%zu)\n",
+           new_capacity);
+    exit(1);
+  }
+
+  giyol_staging_buffer = new_buffer;
+  giyol_staging_capacity = new_capacity;
+}
+
+static void giyol_flush_staging_chunk(GiYOLCopyEntry *items,
+                                      size_t start,
+                                      size_t end,
+                                      void *dst,
+                                      size_t bytes,
+                                      bool use_nt,
+                                      bool *used_nt_store) {
+  if (bytes == 0)
+    return;
+
+  if (use_nt) {
+    giyol_ensure_staging_capacity(bytes);
+    size_t off = 0;
+    for (size_t i = start; i < end; i++) {
+      memcpy(giyol_staging_buffer + off, items[i].src, items[i].nbytes);
+      off += items[i].nbytes;
+    }
+    giyol_stream_copy_region(dst, giyol_staging_buffer, bytes, used_nt_store);
+    giy_profile.giyol_batches++;
+    giy_profile.giyol_batch_objects += (end - start);
+    giy_profile.giyol_batch_bytes += bytes;
+    giy_profile.giyol_staging_batches++;
+    giy_profile.giyol_staging_objects += (end - start);
+    giy_profile.giyol_staging_bytes += bytes;
+  } else {
+    for (size_t i = start; i < end; i++) {
+      giy_copy_live_object(items[i].dst, items[i].src, items[i].nbytes,
+                           used_nt_store);
+      giy_profile.giyol_small_flush_objects++;
+      giy_profile.giyol_small_flush_bytes += items[i].nbytes;
+      giy_profile.giyol_staging_fallback_objects++;
+      giy_profile.giyol_staging_fallback_bytes += items[i].nbytes;
+    }
+  }
+}
+
+#if GIYOL_TINY_STAGING
+static void giyol_flush_tiny_chunk(GiYOLCopyEntry *items,
+                                   size_t start,
+                                   size_t end,
+                                   void *dst,
+                                   size_t bytes,
+                                   bool force_nt,
+                                   bool *used_nt_store) {
+  if (bytes == 0)
+    return;
+
+  bool use_nt = force_nt &&
+                (bytes >= (size_t) GIYOL_TINY_FLUSH_BYTES ||
+                 GIYOL_FORCE_TINY_TAIL_NT);
+  if (use_nt) {
+    giyol_stream_copy_region(dst, giyol_staging_buffer, bytes, used_nt_store);
+    giy_profile.giyol_batches++;
+    giy_profile.giyol_batch_objects += (end - start);
+    giy_profile.giyol_batch_bytes += bytes;
+    giy_profile.giyol_staging_batches++;
+    giy_profile.giyol_staging_objects += (end - start);
+    giy_profile.giyol_staging_bytes += bytes;
+    giy_profile.giyol_tiny_flushes++;
+    giy_profile.giyol_tiny_objects += (end - start);
+    giy_profile.giyol_tiny_bytes += bytes;
+    if (bytes < (size_t) GIYOL_TINY_FLUSH_BYTES) {
+      giy_profile.giyol_tiny_tail_nt_flushes++;
+      giy_profile.giyol_tiny_tail_nt_bytes += bytes;
+    }
+  } else {
+    for (size_t i = start; i < end; i++) {
+      giy_copy_live_object(items[i].dst, items[i].src, items[i].nbytes,
+                           used_nt_store);
+      giy_profile.giyol_small_flush_objects++;
+      giy_profile.giyol_small_flush_bytes += items[i].nbytes;
+      giy_profile.giyol_staging_fallback_objects++;
+      giy_profile.giyol_staging_fallback_bytes += items[i].nbytes;
+      giy_profile.giyol_tiny_fallback_objects++;
+      giy_profile.giyol_tiny_fallback_bytes += items[i].nbytes;
+    }
+  }
+}
+
+static void giyol_flush_tiny_staging_batch(GiYOLCopyBatch *batch,
+                                           bool force_nt,
+                                           bool *used_nt_store) {
+  if (batch->count == 0)
+    return;
+
+  giyol_ensure_staging_capacity((size_t) GIYOL_TINY_STAGING_BYTES);
+
+  size_t chunk_start = 0;
+  size_t chunk_end = 0;
+  uintptr_t chunk_dst = 0;
+  uintptr_t expected = 0;
+  size_t off = 0;
+
+#define GIYOL_TINY_FLUSH_CURRENT()                                           \
+  do {                                                                       \
+    if (off != 0) {                                                          \
+      giyol_flush_tiny_chunk(batch->items, chunk_start, chunk_end,           \
+                             (void *) chunk_dst, off, force_nt,              \
+                             used_nt_store);                                 \
+      off = 0;                                                               \
+      chunk_start = chunk_end;                                               \
+      chunk_dst = 0;                                                         \
+      expected = 0;                                                          \
+    }                                                                        \
+  } while (0)
+
+  for (size_t i = 0; i < batch->count; i++) {
+    GiYOLCopyEntry *entry = &batch->items[i];
+    uintptr_t dst = (uintptr_t) entry->dst;
+    bool small = entry->nbytes <= (size_t) GIYOL_TINY_MAX_OBJECT_BYTES;
+
+    if (!small) {
+      GIYOL_TINY_FLUSH_CURRENT();
+      giy_copy_live_object(entry->dst, entry->src, entry->nbytes,
+                           used_nt_store);
+      giy_profile.giyol_small_flush_objects++;
+      giy_profile.giyol_small_flush_bytes += entry->nbytes;
+      giy_profile.giyol_staging_fallback_objects++;
+      giy_profile.giyol_staging_fallback_bytes += entry->nbytes;
+      giy_profile.giyol_tiny_fallback_objects++;
+      giy_profile.giyol_tiny_fallback_bytes += entry->nbytes;
+      chunk_start = i + 1;
+      chunk_end = i + 1;
+      continue;
+    }
+
+    if (off != 0 && dst != expected) {
+      GIYOL_TINY_FLUSH_CURRENT();
+      chunk_start = i;
+      chunk_end = i;
+    }
+
+    if (off == 0) {
+      chunk_start = i;
+      chunk_dst = dst;
+      expected = dst;
+    }
+
+    if (off + entry->nbytes > (size_t) GIYOL_TINY_STAGING_BYTES) {
+      GIYOL_TINY_FLUSH_CURRENT();
+      chunk_start = i;
+      chunk_dst = dst;
+      expected = dst;
+    }
+
+    memcpy(giyol_staging_buffer + off, entry->src, entry->nbytes);
+    off += entry->nbytes;
+    expected += entry->nbytes;
+    chunk_end = i + 1;
+
+    if (off >= (size_t) GIYOL_TINY_FLUSH_BYTES) {
+      GIYOL_TINY_FLUSH_CURRENT();
+      chunk_start = i + 1;
+      chunk_end = i + 1;
+    }
+  }
+
+  GIYOL_TINY_FLUSH_CURRENT();
+#undef GIYOL_TINY_FLUSH_CURRENT
+
+  batch->count = 0;
+  batch->bytes = 0;
+}
+#endif
+
+static void giyol_flush_staging_batch(GiYOLCopyBatch *batch,
+                                      bool force_nt,
+                                      bool *used_nt_store) {
+  if (batch->count == 0)
+    return;
+
+#if GIYOL_TINY_STAGING
+  giyol_flush_tiny_staging_batch(batch, force_nt, used_nt_store);
+  return;
+#endif
+
+  qsort(batch->items, batch->count, sizeof(GiYOLCopyEntry),
+        giyol_copy_entry_compare);
+
+  size_t i = 0;
+  while (i < batch->count) {
+    size_t chunk_start = i;
+    uintptr_t chunk_dst = (uintptr_t) batch->items[i].dst;
+    uintptr_t expected = chunk_dst;
+    size_t chunk_bytes = 0;
+
+    while (i < batch->count) {
+      GiYOLCopyEntry *entry = &batch->items[i];
+      uintptr_t dst = (uintptr_t) entry->dst;
+      bool contiguous = dst == expected;
+      if (!contiguous)
+        break;
+      expected += entry->nbytes;
+      chunk_bytes += entry->nbytes;
+      i++;
+      if (chunk_bytes >= (size_t) GIYOL_BATCH_BYTES)
+        break;
+    }
+
+    bool use_nt = force_nt && chunk_bytes >= (size_t) GIYOL_BATCH_BYTES;
+    giyol_flush_staging_chunk(batch->items, chunk_start, i,
+                              (void *) chunk_dst, chunk_bytes, use_nt,
+                              used_nt_store);
+
+    if (i < batch->count &&
+        (uintptr_t) batch->items[i].dst != expected) {
+      size_t gap_start = i;
+      giy_copy_live_object(batch->items[i].dst, batch->items[i].src,
+                           batch->items[i].nbytes, used_nt_store);
+      giy_profile.giyol_small_flush_objects++;
+      giy_profile.giyol_small_flush_bytes += batch->items[i].nbytes;
+      giy_profile.giyol_staging_fallback_objects++;
+      giy_profile.giyol_staging_fallback_bytes += batch->items[i].nbytes;
+      i++;
+      (void) gap_start;
+    }
+  }
+
+  batch->count = 0;
+  batch->bytes = 0;
+}
+#endif
+
+static void giyol_flush_copy_batch(GiYOLCopyBatch *batch,
+                                  bool force_nt,
+                                  bool *used_nt_store) {
+  if (batch->count == 0)
+    return;
+
+#if GIYOL_STAGING_COPY
+  giyol_flush_staging_batch(batch, force_nt, used_nt_store);
+  return;
+#endif
+
+#if GIYOL_SORT_BATCH
+  qsort(batch->items, batch->count, sizeof(GiYOLCopyEntry),
+        giyol_copy_entry_compare);
+#endif
+
+  bool use_nt = force_nt && batch->bytes >= (size_t) GIYOL_BATCH_BYTES;
+  if (use_nt) {
+    giy_profile.giyol_batches++;
+    giy_profile.giyol_batch_objects += batch->count;
+    giy_profile.giyol_batch_bytes += batch->bytes;
+  } else {
+    giy_profile.giyol_small_flush_objects += batch->count;
+    giy_profile.giyol_small_flush_bytes += batch->bytes;
+  }
+
+  for (size_t i = 0; i < batch->count; i++) {
+    GiYOLCopyEntry *entry = &batch->items[i];
+    if (use_nt) {
+      giyol_stream_copy_live_object(entry->dst, entry->src, entry->nbytes,
+                                    used_nt_store);
+    } else {
+      giy_copy_live_object(entry->dst, entry->src, entry->nbytes,
+                           used_nt_store);
+    }
+  }
+
+  batch->count = 0;
+  batch->bytes = 0;
+}
+
+#if !GIYOL_STAGING_COPY
+static void giyol_enqueue_copy(GiYOLCopyBatch *batch,
+                              void *dst,
+                              const void *src,
+                              size_t nbytes,
+                              bool *used_nt_store) {
+  giyol_copy_batch_append(batch, dst, src, nbytes);
+
+  if (!GIYOL_STAGING_COPY && batch->bytes >= (size_t) GIYOL_BATCH_BYTES)
+    giyol_flush_copy_batch(batch, true, used_nt_store);
+}
+#endif
+#endif
+
 static void giy_traverse_stack_and_copy() {
 		bool used_nt_store = false;
+#if defined(USE_GIYOL)
+    bool giyol_use_batch =
+#if GIYOL_ADAPTIVE_BATCH
+      giyol_batch_next_traversal;
+#else
+      true;
+#endif
+    size_t giyol_traversal_bytes = 0;
+#if !GIYOL_STAGING_COPY
+    GiYOLCopyBatch copy_batch;
+    giyol_copy_batch_init(&copy_batch);
+#endif
+#endif
 		while (!gc_stack_empty()) {
 			uintptr_t src_payload = gc_stack_pop();
 			object_header *src_hdr = (object_header *) src_payload - 1;
@@ -1764,15 +2334,71 @@ static void giy_traverse_stack_and_copy() {
 
 			object_header *dst_hdr = ((object_header *) dst_payload) - 1;
 
+#if defined(USE_GIYOL)
+    giyol_traversal_bytes += (size_t) align_bytes;
+#if GIYOL_STAGING_COPY
+    if (!giyol_use_batch ||
+        (GIYOL_TINY_STAGING &&
+         (size_t) align_bytes > (size_t) GIYOL_TINY_MAX_OBJECT_BYTES)) {
+#if GIYOL_DIRECT_NONTINY_NT
+      giyol_direct_nt_copy_live_object((void *) dst_hdr,
+                                       (const void *) src_hdr,
+                                       (size_t) align_bytes,
+                                       &used_nt_store);
+#else
+      giy_copy_live_object((void *) dst_hdr,
+                           (const void *) src_hdr,
+                           (size_t) align_bytes,
+                           &used_nt_store);
+#endif
+    }
+#else
+    if (giyol_use_batch) {
+      // GiYOL keeps GiY traversal unchanged, but delays materialization until a
+      // contiguous old-space batch is large enough for streaming stores.
+      giyol_enqueue_copy(&copy_batch,
+                         (void *) dst_hdr,
+                         (const void *) src_hdr,
+                         (size_t) align_bytes,
+                         &used_nt_store);
+    } else {
+      // If recent survivor volume is too small to form a batch, preserve GiY's
+      // immediate materialization path and avoid cache-locality side effects.
+      giy_copy_live_object((void *) dst_hdr,
+                           (const void *) src_hdr,
+                           (size_t) align_bytes,
+                           &used_nt_store);
+    }
+#endif
+#else
     // Materialize in old generation with non-temporal stores when beneficial.
     giy_copy_live_object((void *) dst_hdr,
                          (const void *) src_hdr,
                          (size_t) align_bytes,
                          &used_nt_store);
+#endif
 #if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
     giy_record_materialized_jsobject_for_as_update(type, dst_payload);
 #endif
 		}
+#if defined(USE_GIYOL)
+#if GIYOL_STAGING_COPY
+  if (giyol_use_batch)
+    giyol_flush_copy_batch(&giyol_reserve_order_batch, true, &used_nt_store);
+#else
+  if (giyol_use_batch)
+    giyol_flush_copy_batch(&copy_batch,
+                           GIYOL_STAGING_COPY ? true : false,
+                           &used_nt_store);
+  giyol_copy_batch_destroy(&copy_batch);
+#endif
+#if GIYOL_ADAPTIVE_BATCH
+  giyol_batch_next_traversal =
+    giyol_traversal_bytes >= (size_t) GIYOL_BATCH_BYTES;
+#else
+  (void) giyol_traversal_bytes;
+#endif
+#endif
   giy_profile_current_cell_type = GIY_PROFILE_CELL_TYPES;
 #if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
   giy_apply_materialized_object_alloc_site_updates();
@@ -1798,6 +2424,53 @@ void giy_print_profile() {
            giy_profile.aux_edge_bytes / 1024.0,
            giy_profile.aux_ft_slot_bytes / 1024.0);
     printf("Small memcpy limit:  %zu bytes\n", GIY_NT_COPY_MIN_BYTES);
+#if defined(USE_GIYOL)
+    printf("GiYOL batch bytes:   %zu\n", (size_t) GIYOL_BATCH_BYTES);
+    printf("GiYOL NT batches:    %llu\n", giy_profile.giyol_batches);
+    printf("GiYOL batch objects: %llu\n", giy_profile.giyol_batch_objects);
+    printf("GiYOL batch bytes NT:%.2f MB\n",
+           giy_profile.giyol_batch_bytes / (1024.0 * 1024.0));
+    printf("GiYOL small objects: %llu\n",
+           giy_profile.giyol_small_flush_objects);
+    printf("GiYOL small bytes:   %.2f MB\n",
+           giy_profile.giyol_small_flush_bytes / (1024.0 * 1024.0));
+#if GIYOL_STAGING_COPY
+    printf("GiYOL staging batches:%llu\n", giy_profile.giyol_staging_batches);
+    printf("GiYOL staging objects:%llu\n", giy_profile.giyol_staging_objects);
+    printf("GiYOL staging bytes: %.2f MB\n",
+           giy_profile.giyol_staging_bytes / (1024.0 * 1024.0));
+    printf("GiYOL staging fallback objects:%llu\n",
+           giy_profile.giyol_staging_fallback_objects);
+    printf("GiYOL staging fallback bytes:%.2f MB\n",
+           giy_profile.giyol_staging_fallback_bytes / (1024.0 * 1024.0));
+#if GIYOL_TINY_STAGING
+    printf("GiYOL tiny staging bytes:%zu\n",
+           (size_t) GIYOL_TINY_STAGING_BYTES);
+    printf("GiYOL tiny flush bytes:%zu\n",
+           (size_t) GIYOL_TINY_FLUSH_BYTES);
+	    printf("GiYOL tiny max object:%zu\n",
+	           (size_t) GIYOL_TINY_MAX_OBJECT_BYTES);
+	    printf("GiYOL force tiny tail NT:%d\n", GIYOL_FORCE_TINY_TAIL_NT);
+	    printf("GiYOL direct non-tiny NT:%d\n", GIYOL_DIRECT_NONTINY_NT);
+	    printf("GiYOL tiny flushes:  %llu\n", giy_profile.giyol_tiny_flushes);
+	    printf("GiYOL tiny objects:  %llu\n", giy_profile.giyol_tiny_objects);
+	    printf("GiYOL tiny bytes:    %.2f MB\n",
+	           giy_profile.giyol_tiny_bytes / (1024.0 * 1024.0));
+	    printf("GiYOL tiny tail NT flushes:%llu\n",
+	           giy_profile.giyol_tiny_tail_nt_flushes);
+	    printf("GiYOL tiny tail NT bytes:%.2f MB\n",
+	           giy_profile.giyol_tiny_tail_nt_bytes / (1024.0 * 1024.0));
+	    printf("GiYOL tiny fallback objects:%llu\n",
+	           giy_profile.giyol_tiny_fallback_objects);
+	    printf("GiYOL tiny fallback bytes:%.2f MB\n",
+	           giy_profile.giyol_tiny_fallback_bytes / (1024.0 * 1024.0));
+	    printf("GiYOL direct NT objects:%llu\n",
+	           giy_profile.giyol_direct_nt_objects);
+	    printf("GiYOL direct NT bytes:%.2f MB\n",
+	           giy_profile.giyol_direct_nt_bytes / (1024.0 * 1024.0));
+#endif
+#endif
+#endif
 #if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
     printf("AS update observations: %llu\n",
            giy_profile.as_update_observations);
@@ -1877,6 +2550,53 @@ void giy_print_profile() {
   printf("NT copy objects:     %llu\n", giy_profile.nt_copy_objects);
   printf("NT copy bytes:       %.2f MB\n",
          giy_profile.nt_copy_bytes / (1024.0 * 1024.0));
+#if defined(USE_GIYOL)
+  printf("GiYOL batch bytes:   %zu\n", (size_t) GIYOL_BATCH_BYTES);
+  printf("GiYOL NT batches:    %llu\n", giy_profile.giyol_batches);
+  printf("GiYOL batch objects: %llu\n", giy_profile.giyol_batch_objects);
+  printf("GiYOL batch bytes NT:%.2f MB\n",
+         giy_profile.giyol_batch_bytes / (1024.0 * 1024.0));
+  printf("GiYOL small objects: %llu\n",
+         giy_profile.giyol_small_flush_objects);
+  printf("GiYOL small bytes:   %.2f MB\n",
+         giy_profile.giyol_small_flush_bytes / (1024.0 * 1024.0));
+#if GIYOL_STAGING_COPY
+  printf("GiYOL staging batches:%llu\n", giy_profile.giyol_staging_batches);
+  printf("GiYOL staging objects:%llu\n", giy_profile.giyol_staging_objects);
+  printf("GiYOL staging bytes: %.2f MB\n",
+         giy_profile.giyol_staging_bytes / (1024.0 * 1024.0));
+  printf("GiYOL staging fallback objects:%llu\n",
+         giy_profile.giyol_staging_fallback_objects);
+  printf("GiYOL staging fallback bytes:%.2f MB\n",
+         giy_profile.giyol_staging_fallback_bytes / (1024.0 * 1024.0));
+#if GIYOL_TINY_STAGING
+  printf("GiYOL tiny staging bytes:%zu\n",
+         (size_t) GIYOL_TINY_STAGING_BYTES);
+  printf("GiYOL tiny flush bytes:%zu\n",
+         (size_t) GIYOL_TINY_FLUSH_BYTES);
+	  printf("GiYOL tiny max object:%zu\n",
+	         (size_t) GIYOL_TINY_MAX_OBJECT_BYTES);
+	  printf("GiYOL force tiny tail NT:%d\n", GIYOL_FORCE_TINY_TAIL_NT);
+	  printf("GiYOL direct non-tiny NT:%d\n", GIYOL_DIRECT_NONTINY_NT);
+	  printf("GiYOL tiny flushes:  %llu\n", giy_profile.giyol_tiny_flushes);
+	  printf("GiYOL tiny objects:  %llu\n", giy_profile.giyol_tiny_objects);
+	  printf("GiYOL tiny bytes:    %.2f MB\n",
+	         giy_profile.giyol_tiny_bytes / (1024.0 * 1024.0));
+	  printf("GiYOL tiny tail NT flushes:%llu\n",
+	         giy_profile.giyol_tiny_tail_nt_flushes);
+	  printf("GiYOL tiny tail NT bytes:%.2f MB\n",
+	         giy_profile.giyol_tiny_tail_nt_bytes / (1024.0 * 1024.0));
+	  printf("GiYOL tiny fallback objects:%llu\n",
+	         giy_profile.giyol_tiny_fallback_objects);
+	  printf("GiYOL tiny fallback bytes:%.2f MB\n",
+	         giy_profile.giyol_tiny_fallback_bytes / (1024.0 * 1024.0));
+	  printf("GiYOL direct NT objects:%llu\n",
+	         giy_profile.giyol_direct_nt_objects);
+	  printf("GiYOL direct NT bytes:%.2f MB\n",
+	         giy_profile.giyol_direct_nt_bytes / (1024.0 * 1024.0));
+#endif
+#endif
+#endif
   printf("Old slot stores:     %llu\n", giy_profile.old_slot_stream_stores);
 
   printf("Function table slots recorded: %llu\n",
@@ -1954,9 +2674,12 @@ void giy_minor_collect(Context *ctx,
 												 long long *scan_roots_ns,
 												 long long *scan_rs_ns,
 											 long long *young_trace_ns) {
-		ensure_gc_stack_capacity();
+			ensure_gc_stack_capacity();
   giy_profile_begin_minor_gc();
-			gc_stack_reset();
+				gc_stack_reset();
+#if defined(USE_GIYOL) && GIYOL_STAGING_COPY
+  giyol_reserve_order_batch_begin();
+#endif
   giy_as_update_log_reset();
 #if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
   giy_as_object_update_log_reset();
