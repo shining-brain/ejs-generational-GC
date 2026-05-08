@@ -5230,3 +5230,3148 @@ forced-NT 失败提供的反证：
 - 当前 GiYOL 2048B 没有达到目标：它既没有保持旧 GiYOL 的 business 优势，也进一步增加了 GC 成本，total 比旧 GiYOL 慢 17.097s。
 - 当前 GiYOL 的正确价值是验证了一个方向：tail fallback 是必要的，forced NT 不可取；但扩大到 `<=256B` 全 staging 不值得。
 - 后续最合理方向不是继续扩大 staging，而是做选择性 staging：只让能形成大 target-contiguous run 的对象进入 staging，否则保持 GiY/旧 GiYOL 的普通 copy。
+
+## 2026-05-07 深入调查：object 聚合什么时候最划算
+
+本轮新发现：
+- 之前的 tail fallback 版本仍有一个隐藏成本：
+  - 即使最后 tail fallback 到 `memcpy(dst, src)`，对象也已经先被 `memcpy(src -> staging)` 了一遍。
+  - 也就是说 fallback 对象实际上多做了一次无效中介拷贝。
+- 这会严重扭曲结论，因为我们以为“tail fallback 避免了 NT 成本”，但它仍然保留了 `src -> staging` 成本。
+
+新实现：
+- 新增 `GIYOL_DEFER_TINY_STAGING`。
+- 当 `GIYOL_DEFER_TINY_STAGING=1` 时：
+  - 先扫描 reserve-order copy log，找 target-contiguous run。
+  - 先判断这个 run 的 chunk 是否达到 `GIYOL_TINY_FLUSH_BYTES`。
+  - 只有确定要 NT flush 的 chunk，才执行 `src -> staging`。
+  - 不达阈值的 chunk 直接 fallback 到 GiY copy，不再先写 staging。
+- 这是真正意义上的“只有聚合划算时才聚合”。
+
+Storage 扫描，deferred staging，tail forced NT off，direct non-tiny NT off：
+- 旧 GiYOL：total 208.025s，business 163.546s，GC full 44.479s，GC core 41.602s；NT batches 23,629，NT bytes 46.15MB。
+- max64/flush2048：total 204.032s，business 165.224s，GC full 38.809s，GC core 35.962s；NT batches 23,641，NT bytes 46.17MB。
+- max64/flush4096：total 202.248s，business 163.880s，GC full 38.367s，GC core 35.478s；NT batches 0，NT bytes 0.00MB。
+- max64/flush8192：total 202.513s，business 164.115s，GC full 38.398s，GC core 35.620s；NT batches 0，NT bytes 0.00MB。
+- max96/flush8192：total 221.826s，business 181.761s，GC full 40.064s，GC core 38.750s；NT batches 1,189,908，NT bytes 9,296.16MB。
+- max128/flush8192：total 208.510s，business 163.690s，GC full 44.820s，GC core 42.034s；NT batches 1,189,927，NT bytes 9,296.30MB。
+- max192/flush8192：total 204.669s，business 163.125s，GC full 41.543s，GC core 38.556s；NT batches 1,189,927，NT bytes 9,296.30MB。
+- max256/flush8192：total 208.997s，business 167.685s，GC full 41.312s，GC core 38.674s；NT batches 1,189,928，NT bytes 9,296.31MB。
+
+Storage 结论：
+- deferred staging 本身非常有效：max64/flush4096 的 GC core 35.478s，比旧 GiYOL 41.602s 少 6.124s。
+- 但“扩大对象上限”不划算：
+  - 从 max64 扩到 max96 以后，突然出现约 9.3GB NT bytes 和约 119 万次 NT batches。
+  - GC core 不再继续下降，反而比 max64/flush4096 更差。
+- max64/flush4096 和 max64/flush8192 在 Storage 上最好。
+- max64/flush4096 略优，且 full suite 后续采用它。
+
+full suite：`max64/flush4096/deferred`，并重跑 Mandelbrot/Towers 纠正噪声：
+- GiY：total 3484.477s，business 3378.482s，GC full 105.998s，GC core 72.829s。
+- 旧 GiYOL：total 3489.323s，business 3368.807s，GC full 120.518s，GC core 86.167s。
+- max64/flush4096/deferred：total 3491.145s，business 3380.233s，GC full 110.911s，GC core 77.526s。
+
+相对旧 GiYOL：
+- total +1.822s。
+- business +11.426s。
+- GC full -9.607s。
+- GC core -8.641s。
+
+相对 GiY：
+- total +6.668s。
+- business +1.751s。
+- GC full +4.913s。
+- GC core +4.697s。
+
+逐项对比：旧 GiYOL -> max64/flush4096/deferred：
+- Bounce：total 157.275 -> 156.708s；GC core 0.051 -> 0.047s。
+- List：total 97.091 -> 98.299s；GC core 0.003 -> 0.003s。
+- Sieve：total 121.248 -> 123.433s；GC core 0.812 -> 0.823s。
+- Queens：total 115.794 -> 115.761s；GC core 0.009 -> 0.009s。
+- Permute：total 391.007 -> 390.622s；GC core 0.001 -> 0.001s。
+- Storage：total 208.025 -> 202.248s；GC core 41.602 -> 35.478s。
+- Towers：total 183.708 -> 183.286s；GC core 0.001 -> 0.001s。
+- Mandelbrot：total 237.636 -> 235.826s；GC core 1.498 -> 1.402s。
+- Richards：total 934.810 -> 938.430s；GC core 0.045 -> 0.042s。
+- CD：total 243.058 -> 244.191s；GC core 8.862 -> 8.396s。
+- NBody：total 379.148 -> 382.729s；GC core 2.969 -> 2.870s。
+- Havlak：total 420.523 -> 419.612s；GC core 30.314 -> 28.454s。
+
+为什么 full-suite total 没有明显赢旧 GiYOL：
+- GC 侧已经明显改善：GC core 比旧 GiYOL 少 8.641s。
+- 但 business time 比旧 GiYOL 多 11.426s。
+- business 变慢主要来自非 GC-heavy 项和运行噪声/缓存状态差异，例如 Richards +3.679s、NBody +4.020s、Sieve +2.196s。
+- 对真正受 GC copy 策略影响的项，结果更好：
+  - Storage total -5.777s，GC core -6.124s。
+  - Havlak total -0.911s，GC core -1.860s。
+  - CD GC core -0.466s，但 total +1.133s。
+
+本轮最重要的机制结论：
+- 聚合最划算的条件不是“对象尽量多、范围尽量大”。
+- 聚合划算需要同时满足：
+  - target 地址连续。
+  - chunk 达到至少 4KB 左右的阈值。
+  - 在确认达到阈值之前不要做 `src -> staging`。
+  - object 上限保持小，当前数据支持 `<=64B`，不支持扩大到 `<=96B` 或更高。
+- 对不满足阈值的 run，最划算的是直接 fallback，不要碰 staging。
+
+为什么 `<=96B/128B/256B` 不划算：
+- 一旦纳入这些对象，Storage 中 NT bytes 从几十 MB 暴涨到约 9.3GB。
+- NT batches 也从 2 万级变成约 119 万级。
+- 这说明中等对象形成了很多“看似连续但仍很碎”的 flush。
+- 即使 deferred staging 避免了 tail 的无效中介拷贝，这些 flush 的管理成本和写入成本仍然太大。
+
+当前最合理版本：
+- `GIYOL_DEFER_TINY_STAGING=1`
+- `GIYOL_TINY_MAX_OBJECT_BYTES=64`
+- `GIYOL_TINY_FLUSH_BYTES=4096`
+- `GIYOL_TINY_STAGING_BYTES=4096`
+- `GIYOL_FORCE_TINY_TAIL_NT=0`
+- `GIYOL_DIRECT_NONTINY_NT=0`
+
+最终阶段性判断：
+- “先判断 run 是否足够大，再 staging”是正确方向。
+- “扩大 staging 到 256B”不是正确方向。
+- 当前最佳策略显著改善 GC core，但 full-suite total 仍只接近旧 GiYOL，没有稳定超过 GiY/旧 GiYOL。
+- 下一步如果继续优化，应围绕选择性 staging，而不是扩大对象大小：
+  - 只对历史上/当前 run 可能达到 4KB+ 的分配序列启用 staging。
+  - 低于阈值的 run 完全跳过 staging。
+  - 保持 object size 上限在 64B。
+
+## 2026-05-07 memcpy/NT store microbenchmark
+
+目的：
+- 确认三类纯拷贝原语的速度：
+  - young/cache 区内 `memcpy`。
+  - young/cache -> old/DRAM 区 `memcpy`。
+  - young/cache -> old/DRAM 区 direct NT store。
+- 注意：当前实现里的 cache_space 和 dram_space 都是 `malloc` 出来的普通主存地址，不是硬件上真的不同内存层级。因此该测试测的是“地址范围/写策略”的性能，不是 HBM/DRAM 物理差异。
+
+测试环境：
+- CPU：Intel Core Ultra 9 285K。
+- young buffer：512KB。
+- old buffer：256MB。
+- 编译：`g++ -O3 -march=native`。
+- NT128：使用 `_mm_stream_si128`，即 128-bit non-temporal store，接近当前 GiY/GiYOL stream copy 风格。
+- NT256：使用 `_mm256_stream_si256`，即 AVX2 256-bit non-temporal store，不是 256-byte store。
+- 表中为 3 轮中位数。
+
+吞吐，GB/s：
+- 16B：young memcpy 16.797，young->old memcpy 13.033，NT128 0.078，NT256 9.350。
+- 32B：young memcpy 31.213，young->old memcpy 15.887，NT128 0.155，NT256 0.152。
+- 64B：young memcpy 49.265，young->old memcpy 18.887，NT128 0.309，NT256 0.313。
+- 96B：young memcpy 33.910，young->old memcpy 13.914，NT128 0.481，NT256 0.484。
+- 128B：young memcpy 43.209，young->old memcpy 16.897，NT128 0.646，NT256 0.647。
+- 192B：young memcpy 32.324，young->old memcpy 17.151，NT128 0.972，NT256 0.972。
+- 256B：young memcpy 56.615，young->old memcpy 20.010，NT128 1.298，NT256 1.301。
+- 512B：young memcpy 59.980，young->old memcpy 20.746，NT128 2.593，NT256 2.598。
+- 1024B：young memcpy 67.993，young->old memcpy 21.224，NT128 5.148，NT256 5.157。
+- 2048B：young memcpy 72.893，young->old memcpy 20.509，NT128 10.200，NT256 10.230。
+- 4096B：young memcpy 79.016，young->old memcpy 14.803，NT128 19.410，NT256 20.411。
+- 8192B：young memcpy 83.491，young->old memcpy 16.252，NT128 34.417，NT256 35.737。
+- 16384B：young memcpy 86.510，young->old memcpy 17.654，NT128 49.006，NT256 54.075。
+
+每次 copy 延迟，ns/copy：
+- 64B：young memcpy 1.21ns，young->old memcpy 3.16ns，NT128 192.73ns，NT256 190.29ns。
+- 256B：young memcpy 4.21ns，young->old memcpy 11.92ns，NT128 183.72ns，NT256 183.33ns。
+- 2048B：young memcpy 26.17ns，young->old memcpy 93.00ns，NT128 187.00ns，NT256 186.44ns。
+- 4096B：young memcpy 48.28ns，young->old memcpy 257.69ns，NT128 196.53ns，NT256 186.89ns。
+- 8192B：young memcpy 91.38ns，young->old memcpy 469.43ns，NT128 221.67ns，NT256 213.49ns。
+- 16384B：young memcpy 176.38ns，young->old memcpy 864.30ns，NT128 311.37ns，NT256 282.18ns。
+
+关键结论：
+- 在小对象范围内，direct NT store 极其不划算。
+  - 64B：young->old memcpy 3.16ns，NT128 192.73ns，NT 慢约 61 倍。
+  - 256B：young->old memcpy 11.92ns，NT128 183.72ns，NT 慢约 15 倍。
+- 1KB/2KB 仍不适合 direct NT。
+  - 2048B：young->old memcpy 93.00ns，NT128 187.00ns，NT 仍慢约 2 倍。
+- 到 4KB 后，NT 开始比 young->old memcpy 快。
+  - 4096B：young->old memcpy 257.69ns，NT128 196.53ns。
+  - 8192B：young->old memcpy 469.43ns，NT128 221.67ns。
+- young/cache 内 memcpy 始终非常快，因为读写都在 hot/cache-local 区域。
+
+对 staging 的直接推论：
+- staging copy 的真实成本是：
+  - `src young -> staging young` 的 young memcpy。
+  - 加上 `staging young -> old` 的 NT store。
+- 64B 如果 staging 后 NT：
+  - 约 `1.21ns + 192.73ns = 193.94ns`。
+  - 直接 young->old memcpy 约 3.16ns。
+  - staging+NT 完全不划算。
+- 256B 如果 staging 后 NT：
+  - 约 `4.21ns + 183.72ns = 187.93ns`。
+  - 直接 young->old memcpy 约 11.92ns。
+  - staging+NT 仍完全不划算。
+- 4096B 如果 staging 后 NT：
+  - 约 `48.28ns + 196.53ns = 244.81ns`。
+  - 直接 young->old memcpy 约 257.69ns。
+  - 只略微划算。
+- 8192B 如果 staging 后 NT：
+  - 约 `91.38ns + 221.67ns = 313.05ns`。
+  - 直接 young->old memcpy 约 469.43ns。
+  - 明显划算。
+
+为什么之前实验结果吻合这个 microbenchmark：
+- forced-NT 对 64B/256B 小对象直接 NT，会极慢，因此 Storage GC core 暴涨。
+- `<=256B staging` 会让大量 64B~256B 对象参与 staging/NT，虽然形成了更多 NT bytes，但原语层面这些对象太小，收益覆盖不了成本。
+- deferred staging + 4KB 阈值更合理，因为它避免了小 tail 的 `src -> staging`，也避免了小 chunk NT。
+- 但真正明显划算的 chunk 更接近 8KB 以上；4KB 只是刚刚过盈亏平衡点。
+
+关于 cache pollution：
+- microbenchmark 的 hot young probe 没有测出明显差异：
+  - 64B/256B/4096B 下，young 热区探测基本都在 0.75ms 左右。
+- 原因是测试 young hot set 只有 512KB，能被当前 CPU cache 较好容纳；它不能完全代表真实 JS business 的工作集。
+- 因此该 microbenchmark 更可靠地说明“拷贝原语速度”，不能单独量化真实业务 cache pollution。
+
+最终判据：
+- 小对象不要 direct NT。
+- 小对象也不要先 staging，除非已经确认一整段 target-contiguous run 能达到至少 4KB，最好 8KB 以上。
+- `<=64B` 的小对象可以作为候选，但必须 deferred staging。
+- `64B~256B` 不应默认进入 staging；它们会制造大量看似连续但成本很高的 NT flush。
+- 如果未来要用更宽的 NT store，阈值也不应降低；宽 store 只改善大块吞吐，不会改变小块 NT 固定成本高这个事实。
+
+## 2026-05-07 综合研判：后续仍有优化可能的方案
+
+基于目前所有 benchmark、消融实验和 microbenchmark，已经可以排除一些方向：
+- 排除 direct NT 小对象。
+- 排除 `<=256B` 全 staging。
+- 排除 tail forced NT。
+- 排除“为了完全消灭 old memcpy 而牺牲粒度”的方案。
+
+仍有优化可能的方向如下。
+
+### 方案 1：deferred staging 作为 GiYOL 基础路径
+
+当前最有价值的机制改动是 `GIYOL_DEFER_TINY_STAGING=1`：
+- 先判断 target-contiguous run 是否达到阈值。
+- 达到阈值才 `src -> staging -> NT`。
+- 不达阈值直接 fallback，不碰 staging。
+
+理由：
+- 它修复了之前 tail fallback 的隐藏成本：fallback 前已经 `src -> staging` 的无效拷贝。
+- Storage 上 `max64/flush4096/deferred`：
+  - 旧 GiYOL GC core 41.602s。
+  - deferred GC core 35.478s。
+  - GC core 改善 6.124s。
+- full suite 校正后：
+  - 旧 GiYOL GC core 86.167s。
+  - deferred GC core 77.526s。
+  - GC core 改善 8.641s。
+
+风险：
+- full-suite total 仍没有稳定赢旧 GiYOL，因为 business time 多了 11.426s。
+- 这可能是噪声、缓存状态变化、或策略对业务阶段的副作用。
+
+判断：
+- 这是目前最值得保留的优化机制。
+- 但不能只看 total，需要继续多轮重复验证 business time 是否稳定变慢。
+
+### 方案 2：小对象上限保持 `<=64B`，不要扩大
+
+当前数据强烈支持小对象 staging 候选上限保持 64B。
+
+理由：
+- microbenchmark：
+  - 64B direct NT 比 young->old memcpy 慢约 61 倍。
+  - 256B direct NT 比 young->old memcpy 慢约 15 倍。
+- Storage deferred scan：
+  - max64/flush4096：total 202.248s，GC core 35.478s。
+  - max96/flush8192：total 221.826s，GC core 38.750s，NT bytes 9296.16MB。
+  - max128/flush8192：total 208.510s，GC core 42.034s。
+  - max256/flush8192：total 208.997s，GC core 38.674s。
+- 一旦超过 64B，Storage 中 NT bytes 从几十 MB 量级暴涨到约 9.3GB，NT batches 到约 119 万级。
+
+判断：
+- `64B~256B` 不应默认进入 staging。
+- 这些对象可以未来做“选择性 staging”，但不能按 size 上限无脑纳入。
+
+### 方案 3：阈值使用 4KB 或 8KB，倾向 4KB 做当前默认
+
+microbenchmark 判据：
+- 4096B：staging+NT 约 244.81ns，direct young->old memcpy 约 257.69ns，只是略微划算。
+- 8192B：staging+NT 约 313.05ns，direct young->old memcpy 约 469.43ns，明显划算。
+
+Storage 实测：
+- max64/flush2048：total 204.032s，GC core 35.962s。
+- max64/flush4096：total 202.248s，GC core 35.478s。
+- max64/flush8192：total 202.513s，GC core 35.620s。
+
+判断：
+- 4KB 是当前 Storage 上最佳点。
+- 8KB 的理论原语收益更强，但可能错过一些 4KB~8KB 的有用 run。
+- 当前建议默认 4KB，后续用多轮 full suite 验证 4KB/8KB 哪个更稳。
+
+### 方案 4：选择性 staging，而不是按 size staging
+
+更进一步的优化应该判断“这个 run 是否可能达到阈值”，而不是只看 object size。
+
+可能实现方式：
+- 在 reserve-order log 中扫描 target-contiguous run。
+- 如果 run 总 bytes 小于阈值，整段直接 fallback。
+- 如果 run 总 bytes 大于阈值，只对其中能组成 4KB/8KB chunk 的部分 staging+NT。
+- tail 直接 fallback。
+
+当前 deferred staging 已经接近这个方向，但仍可进一步减少 bookkeeping：
+- 对明显不足阈值的 run，可以直接 fast-path fallback，避免进入复杂 chunk loop。
+- 对单对象或极短 run，直接调用 `giy_copy_live_object`。
+
+判断：
+- 这是最有可能继续降低 GC core 的方向。
+- 它不会试图消灭所有 old memcpy，而是只抓真正大的连续 run。
+
+### 方案 5：按 allocation site / shape 做预测性 staging
+
+当前 run 判断发生在 GC flush 阶段，仍需要记录 copy log。
+下一步可以探索预测：
+- 记录哪些 allocation site 或 shape 在过去 GC 中经常形成 4KB+ target-contiguous run。
+- 只有这些 site/shape 的对象进入 staging candidate。
+- 其他对象直接走普通 GiY copy。
+
+潜在收益：
+- 减少 copy log 中无效 candidate 数量。
+- 减少 run 扫描和 batch bookkeeping。
+- 避免对不可能形成大 run 的对象做任何 GiYOL 额外处理。
+
+风险：
+- 需要维护 profile/历史状态。
+- 如果预测错误，会漏掉可优化 run 或引入额外判断成本。
+
+判断：
+- 这是中期优化方向，值得在 deferred staging 稳定后尝试。
+
+### 方案 6：用更宽 NT store 只优化大 chunk，不改变阈值
+
+如果目标是 256-byte 宽 NT store：
+- 它可能改善 4KB/8KB+ 大 chunk 的吞吐。
+- 但不改变小对象 NT 固定成本高这个事实。
+
+判断：
+- 宽 NT store 应该只用于已经满足阈值的大 chunk。
+- 不能因为 store 更宽就降低阈值或扩大对象上限。
+- 正确组合是：deferred staging + 4KB/8KB 阈值 + 大 chunk 宽 NT。
+
+### 方案 7：减少 business time 回退
+
+当前 deferred 版本 GC 明显变好，但 full-suite business time 比旧 GiYOL 多 11.426s。
+这部分必须继续调查。
+
+可能原因：
+- benchmark 噪声，尤其 Richards/NBody/Sieve 对 GC 策略不敏感但 business 波动明显。
+- old 写入模式改变影响后续业务缓存。
+- NT flush 数量或 sfence 时机影响流水线。
+- deferred scan 的内存访问模式改变了 cache 状态。
+
+需要验证：
+- 对 deferred max64/flush4096 跑 3 轮 full suite 或至少关键项重复。
+- 分离 GC-heavy 与 business-heavy 项：
+  - GC-heavy：Storage、Havlak、CD。
+  - business-heavy：Richards、NBody、Sieve、Mandelbrot。
+- 如果 GC-heavy 稳定收益而 business-heavy 波动无规律，则主要是噪声。
+- 如果 business-heavy 稳定变慢，则要调查 sfence、NT 写回、old/cache 热度。
+
+### 当前推荐的下一步实验顺序
+
+1. 固化当前最佳配置：
+   - `GIYOL_DEFER_TINY_STAGING=1`
+   - `GIYOL_TINY_MAX_OBJECT_BYTES=64`
+   - `GIYOL_TINY_FLUSH_BYTES=4096`
+   - `GIYOL_TINY_STAGING_BYTES=4096`
+   - `GIYOL_FORCE_TINY_TAIL_NT=0`
+   - `GIYOL_DIRECT_NONTINY_NT=0`
+
+2. 重复跑关键项 3 轮：
+   - Storage、Havlak、CD、Richards、NBody、Sieve。
+
+3. 如果 GC-heavy 稳定收益，继续做 fast-path：
+   - run 总 bytes < 阈值，直接 fallback，不走 chunk loop。
+   - 单对象 run 直接 fallback。
+
+4. 如果 business time 稳定变慢，再调查：
+   - NT/sfence 时机。
+   - old 写入后是否被业务很快读取。
+   - 是否需要对某些对象类型禁用 NT。
+
+最终判断：
+- 目前仍有优化空间，但空间不在“更激进 NT”。
+- 最有希望的是“更少参与、更晚 staging、更大 chunk、更少 bookkeeping”。
+- GiYOL 的原则应从“尽量避免 memcpy”改成“只在能证明 chunk 够大时才用 NT，否则完全走 GiY copy”。
+
+## 2026-05-07 GiY / GiYOL 逻辑审查
+
+本轮检查范围：
+- `ejsvm/GiY.cc`
+- `ejsvm/giy_rset.cc`
+- `ejsvm/common.mk`
+
+重点检查的问题：
+- GiY reserve/traverse/copy/patch 顺序是否会复制未修复对象。
+- GiYOL deferred staging 是否会漏复制、重复复制、错误 NT flush。
+- RSet 的 `buffer[]/values[]` 语义是否仍然保持“每个 slot 的最新摘要”。
+- NT store 后是否存在马上读取 old object 的时序风险。
+- GiYOL 默认参数是否和当前实验结论一致。
+
+结论：
+- GiY / GiYOL 的主复制顺序没有发现“先复制未 patch 对象”的硬错误。
+- 当前逻辑是：reserve 阶段只设置 forwarding pointer 并压栈；traverse 阶段扫描 young 源对象并先修复 young 内部 slot；之后才把源对象复制到 old。GiYOL tiny staging 也是在 traverse 完成后 flush reserve-order batch，因此 old 中拿到的是已经修复过的对象内容。
+- GiYOL deferred staging 的核心路径没有发现漏复制：达到阈值的 target-contiguous run 会先 `src -> staging`，再 `staging -> old` NT；不足阈值的 tail 不会提前 staging，而是 fallback 到普通 GiY copy。
+
+发现并修补的问题 1：RSet hash probe fallback 可能产生重复 slot entry。
+- 位置：`ejsvm/giy_rset.cc`
+- 原问题：`rememberset_add_with_value()` 在 hash probe 超过 `HASH_PROBE_LIMIT` 后，会直接把 slot 追加到 `remembered_set.buffer[]/values[]`。
+- 这条 fallback 插入没有先做全表查重。
+- 如果同一个 slot 后续再次落入 fallback 路径，就可能产生多个相同 slot 的 entry。
+- 这会破坏 GiY RSet 的核心语义：`values[]` 应该是每个 slot 的最新 young-edge 摘要。
+- 更严重的是，patch 阶段按 `values[]` 回写真实 old/init slot；重复 stale entry 可能导致旧值参与 reserve/patch。
+
+修补：
+- 在 fallback 插入前增加：
+  - `if (rememberset_update_existing(obj_ptr, value)) { write_barrier_duplicate_filtered++; return; }`
+- 这样 probe 超限时会先通过已有的 linear fallback 查找旧 entry。
+- 如果 slot 已存在，只更新 `values[index]`，不再追加重复 entry。
+- 如果 slot 确实不存在，才追加新 entry。
+
+发现并修补的问题 2：GiYOL 源码默认参数仍停留在失败实验配置。
+- 位置：`ejsvm/GiY.cc`
+- 原默认值：
+  - `GIYOL_TINY_STAGING_BYTES=2048`
+  - `GIYOL_TINY_FLUSH_BYTES=2048`
+  - `GIYOL_FORCE_TINY_TAIL_NT=1`
+  - `GIYOL_DIRECT_NONTINY_NT=1`
+- 这与当前实验结论冲突。
+- 如果只用 `OPT_GC=giyol` 编译而忘记额外传宏，会得到“强制 tail NT + 非 tiny 对象 direct NT”的失败策略。
+
+修补：
+- 默认值改成当前推荐策略：
+  - `GIYOL_TINY_STAGING_BYTES=4096`
+  - `GIYOL_TINY_FLUSH_BYTES=4096`
+  - `GIYOL_FORCE_TINY_TAIL_NT=0`
+  - `GIYOL_DIRECT_NONTINY_NT=0`
+  - `GIYOL_DEFER_TINY_STAGING=1`
+
+发现并修补的问题 3：NT copy 后存在立即读取 materialized old object 的时序风险。
+- 位置：`ejsvm/GiY.cc`
+- 风险点：`giy_traverse_stack_and_copy()` 完成 old copy 后，可能马上执行 allocation-site object update，读取刚复制到 old 的对象字段，例如 `obj->shape`。
+- 另外 `giy_materialize_shape()` / `giy_materialize_property_map()` 也可能在 `giy_traverse_stack_and_copy()` 返回后马上读取刚 materialize 的 old 对象。
+- 原代码只在 minor GC 末尾做全局 `_mm_sfence()`，对这种“copy 后立即读”的局部路径不够保守。
+
+修补：
+- 新增 `giy_finish_local_nt_stores(bool *used_nt_store)`。
+- 在 `giy_traverse_stack_and_copy()` flush 完 GiY/GiYOL copy batch 后立即调用。
+- 作用：如果本次 traversal 使用过 NT store，就先 `_mm_sfence()`，然后再允许后续 allocation-site update 或调用者读取 materialized old object。
+- slot patch 阶段的 old slot streaming store 仍然保留原来的全局 minor-GC 末尾 fence。
+
+验证：
+- `git diff --check -- ejsvm/GiY.cc ejsvm/giy_rset.cc ejsvm/common.mk` 通过。
+- GiY 编译通过：
+  - `make -B -C build.debug GiY.o giy_rset.o ejsvm OPT_GC=giy GIY_RSET_INDEX_FAST=true CACHE_SIZE_KB=552 GIY_AS_UPDATE=true GIY_AS_FT_ADVANCE=true -j4`
+- GiYOL 编译通过：
+  - `make -B -C build.debug GiY.o giy_rset.o ejsvm OPT_GC=giyol GIY_RSET_INDEX_FAST=true CACHE_SIZE_KB=552 GIY_AS_UPDATE=true GIY_AS_FT_ADVANCE=true -j4`
+- GiYOL smoke 通过：
+  - `hello_world.sbc`
+  - `bounce_check.sbc`
+  - `giy_gc_probe.sbc`
+- GiY smoke 通过：
+  - `giy_gc_probe.sbc`
+
+当前保留风险：
+- 这次是代码逻辑审查加 smoke，不是 full benchmark 验证。
+- RSet fallback duplicate 修复在高冲突 workload 上应该提升正确性，也可能改变重复过滤统计；是否影响性能需要重新跑 Havlak/CD/Storage。
+- 新增局部 `_mm_sfence()` 是正确性更保守的改动；它可能给 GC core 带来少量成本，需要用 benchmarks 重新测。
+
+## 2026-05-07 GiY / GiYOL 完整审查与 benchmark 复测结论
+
+本轮任务：
+- 认真审查当前 GiY 和 GiYOL 是否有写错或逻辑错误。
+- 修补确认存在的正确性风险。
+- 分别跑完整 benchmark suite。
+- 重新分析 GiY 与 GiYOL 的性能差距。
+
+审查范围：
+- `ejsvm/GiY.cc`
+- `ejsvm/giy_rset.cc`
+- `ejsvm/common.mk`
+
+本轮确认并修补的问题：
+1. RSet fallback 重复 entry 问题。
+   - `rememberset_add_with_value()` 在 hash probe 超限后直接追加新 entry，没有先做全表 duplicate check。
+   - 这可能让同一个 slot 在 `buffer[]/values[]` 中出现多份，破坏“每个 slot 只保留最新 value 摘要”的语义。
+   - 已修补：fallback 插入前先调用 `rememberset_update_existing(obj_ptr, value)`，命中则只更新旧 entry 并返回。
+
+2. RSet 满容量检查顺序问题。
+   - 原逻辑可能在 RSet 已满时先报错，即使当前写入只是更新已有 slot。
+   - 已修补：新增 `rememberset_require_new_entry_space()`，只在确实要插入新 entry 时检查容量。
+   - 这样 full set 下的 duplicate/update 不会被误判成需要新增 entry。
+
+3. GiYOL adaptive batch 关闭路径残留问题。
+   - 如果 `GIYOL_ADAPTIVE_BATCH=1` 且当前 traversal 不使用 batch，reserve 阶段仍可能留下 small-object batch log。
+   - 默认配置不触发，但这是潜在逻辑错误。
+   - 已修补：新增 `giyol_copy_batch_reset()`；当 `giyol_use_batch == false` 时清空 `giyol_reserve_order_batch`。
+
+4. NT store 后立即读取 old object 的可见性风险。
+   - `giy_traverse_stack_and_copy()` 可能刚用 NT store materialize old object，随后 allocation-site update 或调用者立即读取这个 old object。
+   - 已修补：新增 `giy_finish_local_nt_stores()`，在 traversal copy/batch flush 完成后立即 `_mm_sfence()`。
+   - old slot patch 阶段仍保留 minor GC 末尾的全局 fence。
+
+5. allocation-site update 被 mprotect 识别为 old-read 的问题。
+   - mprotect strict core 验证显示，allocation-site update 需要读取 old Shape/PropertyMap 元数据。
+   - 这不是 GiY reserve/traverse/patch 核心路径，而是后续元数据维护。
+   - 已修补：复制 JSObject 时记录 young source object 的 `shape`，避免复制后立刻读 old object payload；同时把 allocation-site metadata update 放到 strict old guard 外。
+
+6. GiYOL 默认参数修正。
+   - 当前源码默认已改成推荐策略：
+     - `GIYOL_TINY_STAGING_BYTES=4096`
+     - `GIYOL_TINY_FLUSH_BYTES=4096`
+     - `GIYOL_TINY_MAX_OBJECT_BYTES=64`
+     - `GIYOL_FORCE_TINY_TAIL_NT=0`
+     - `GIYOL_DIRECT_NONTINY_NT=0`
+     - `GIYOL_DEFER_TINY_STAGING=1`
+   - `common.mk` 已支持转发 `GIYOL_DEFER_TINY_STAGING`。
+
+正确性验证：
+- `git diff --check -- ejsvm/GiY.cc ejsvm/giy_rset.cc ejsvm/common.mk` 通过。
+- GiY 编译通过。
+- GiYOL 编译通过。
+- `GIY_MPROTECT_OLD=1 ../ejsvm giy_gc_probe.sbc`：
+  - GiY：status=0。
+  - GiYOL：status=0。
+- 完整 suite：
+  - GiY：12/12 benchmark status=0。
+  - GiYOL：12/12 benchmark status=0。
+
+benchmark 输出目录：
+- GiY full suite：`build.debug/benchmarks/out104_review_giy_full`
+- GiYOL full suite：`build.debug/benchmarks/out105_review_giyol_full`
+- GiYOL NBody 复验：`build.debug/benchmarks/out106_review_giyol_nbody_rerun1`
+- GiYOL CD 复验：`build.debug/benchmarks/out107_review_giyol_cd_rerun1`
+
+全套原始结果：
+
+| 指标 | GiY | GiYOL 原始 full suite | GiYOL - GiY |
+|---|---:|---:|---:|
+| Total CPU | 3498.511s | 3547.200s | +48.689s |
+| Business CPU | 3386.804s | 3429.650s | +42.846s |
+| GC CPU(full) | 111.706s | 117.550s | +5.844s |
+| GC core total | 73.077s | 77.176s | +4.099s |
+
+原始 full suite 里有两个明确 outlier：
+- NBody：GiYOL 原始 427.367s，但同一个当前 GiYOL 二进制单项重跑是 383.319s；历史同策略 GiYOL 也是 382.729s。因此 NBody 原始 427.367s 不能作为稳定差异。
+- CD：GiYOL 原始 249.158s，但同一个当前 GiYOL 二进制单项重跑是 244.301s；历史同策略 GiYOL 是 244.191s。因此 CD 原始 249.158s 也偏高。
+
+采用复验值替换 NBody/CD 后的判读数据：
+
+| bench | GiY total | GiYOL total | delta total | GiY bus | GiYOL bus | delta bus | delta GC full | delta GC core |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 158.634 | 158.543 | -0.091 | 158.516 | 158.417 | -0.099 | +0.008 | +0.004 |
+| List | 99.666 | 97.732 | -1.934 | 99.652 | 97.723 | -1.929 | -0.005 | +0.000 |
+| Sieve | 121.483 | 122.692 | +1.209 | 119.885 | 121.077 | +1.192 | +0.017 | -0.008 |
+| Queens | 117.359 | 116.665 | -0.694 | 117.317 | 116.621 | -0.696 | +0.002 | +0.000 |
+| Permute | 386.765 | 388.044 | +1.279 | 386.762 | 388.043 | +1.281 | -0.002 | +0.000 |
+| Storage | 199.643 | 203.315 | +3.672 | 164.306 | 163.753 | -0.553 | +4.225 | +3.846 |
+| Towers | 183.841 | 182.757 | -1.084 | 183.839 | 182.751 | -1.088 | +0.004 | +0.000 |
+| Mandelbrot | 240.583 | 238.573 | -2.010 | 231.086 | 228.932 | -2.154 | +0.144 | -0.141 |
+| Richards | 944.525 | 945.745 | +1.220 | 944.384 | 945.589 | +1.205 | +0.015 | +0.002 |
+| CD | 243.787 | 244.301 | +0.514 | 230.487 | 230.795 | +0.308 | +0.206 | -0.181 |
+| NBody | 381.490 | 383.319 | +1.829 | 367.744 | 368.827 | +1.083 | +0.747 | -0.063 |
+| Havlak | 420.735 | 416.609 | -4.126 | 382.826 | 377.573 | -5.253 | +1.127 | +0.647 |
+| TOTAL | 3498.511 | 3498.295 | -0.216 | 3386.804 | 3380.101 | -6.703 | +6.488 | +4.106 |
+
+GiYOL batch/NT 行为：
+
+| bench | NT batches | NT batch MB | tiny flushes | tiny NT MB | tiny fallback MB |
+|---|---:|---:|---:|---:|---:|
+| Bounce | 0 | 0.00 | 0 | 0.00 | 32.01 |
+| List | 0 | 0.00 | 0 | 0.00 | 0.55 |
+| Sieve | 0 | 0.00 | 0 | 0.00 | 2.68 |
+| Queens | 0 | 0.00 | 0 | 0.00 | 0.55 |
+| Permute | 0 | 0.00 | 0 | 0.00 | 0.02 |
+| Storage | 0 | 0.00 | 0 | 0.00 | 45723.74 |
+| Towers | 0 | 0.00 | 0 | 0.00 | 0.11 |
+| Mandelbrot | 0 | 0.00 | 0 | 0.00 | 71.07 |
+| Richards | 0 | 0.00 | 0 | 0.00 | 11.91 |
+| CD | 1252 | 4.89 | 1252 | 4.89 | 2375.64 |
+| NBody | 0 | 0.00 | 0 | 0.00 | 625.97 |
+| Havlak | 313503 | 1224.62 | 313503 | 1224.62 | 11001.12 |
+| TOTAL | 314755 | 1229.51 | 314755 | 1229.51 | 59845.37 |
+
+最终结论：
+- 目前没有发现 GiY 或 GiYOL 仍存在会破坏对象复制、slot patch、RSet 最新值语义的硬逻辑错误。
+- 修补后的 GiY/GiYOL 都能通过 mprotect old-space smoke，并完整跑完 benchmark suite。
+- 如果直接看 full suite 原始值，GiYOL 看似慢 48.689s；但 NBody 和 CD 被单项复验证明是 outlier。
+- 用复验后的 NBody/CD 替换后，GiYOL 总时间 3498.295s，GiY 总时间 3498.511s，差异是 -0.216s，基本等于持平。
+- GiYOL 的 business CPU 反而少 6.703s，但 GC full 多 6.488s，GC core 多 4.106s。
+- 也就是说，当前 GiYOL 的主要真实代价不是 business time，而是 GC 内部多出来的小对象 staging/fallback/batch 管理开销。
+- GiYOL 的有效 NT 写入高度集中在 Havlak 和少量 CD：总 NT 约 1229.51 MB，其中 Havlak 1224.62 MB，CD 4.89 MB。
+- 大多数 benchmark 没有形成 4096B 的 tiny contiguous run，因此 GiYOL 只付出了记录/延迟/flush 判断的成本，没有得到 NT store 收益。
+- Storage 是当前最明确的负面项：total +3.672s，GC full +4.225s，GC core +3.846s，且 NT batch 为 0；它说明大量 small-object fallback 记录会增加 GC 成本。
+- Havlak 是当前最明确的正面项：total -4.126s，business -5.253s，但 GC full +1.127s；它说明当 target-contiguous tiny run 足够多时，GiYOL 的 NT batching 能抵消甚至超过额外 GC 成本。
+
+下一步判断：
+- 当前 GiYOL 策略不是普遍收益策略，而是 workload dependent。
+- 若继续优化，方向应是减少“没有形成 NT batch 的 tiny object”记录成本，例如只在预测能形成足够 target-contiguous run 的区域启用 staging，或者按 benchmark/GC cycle 自适应关闭 tiny staging。
+
+## 2026-05-07 为什么 Havlak 的 GiYOL business time 反而更低
+
+Havlak 数据：
+- GiY total：420.735s
+- GiYOL total：416.609s
+- GiYOL total delta：-4.126s
+- GiY business：382.826s
+- GiYOL business：377.573s
+- GiYOL business delta：-5.253s
+- GiY GC full：37.909s
+- GiYOL GC full：39.036s
+- GiYOL GC full delta：+1.127s
+- GiY GC core：27.057s
+- GiYOL GC core：27.704s
+- GiYOL GC core delta：+0.647s
+
+两边 workload 完全一致：
+- Minor GC count：494300 vs 494300
+- Total allocations：1817371816 vs 1817371816
+- Total alloc bytes：100689.09 MB vs 100689.09 MB
+- Forward operations：258554556 vs 258554556
+
+因此 Havlak business time 下降不是因为 GiYOL 少做了 JS 业务逻辑，也不是因为对象数量变少。
+
+最合理解释：
+- GiYOL 在 Havlak 形成了大量有效 tiny NT batch。
+- GiYOL Havlak：
+  - NT batches：313503
+  - tiny flushes：313503
+  - tiny NT bytes：1224.62 MB
+  - tiny NT objects：35132004
+- 这些是 GiYOL 真正成功触发的 staging -> NT store。
+
+为什么这会降低 business time：
+- 普通 GiY copy 小对象时会用普通 store/memcpy 写 old 区。
+- 普通 store 往往会把 old 区目标 cache line 拉进 cache，造成 write-allocate / cache pollution。
+- GC 刚结束后，mutator 要继续执行 Havlak 自己的对象图、循环、栈和运行时数据访问。
+- 如果 GC 期间把 cache 塞满了刚复制到 old 区的对象数据，mutator 恢复后会遇到更多 cache miss。
+- 这些 cache miss 发生在 GC 结束之后，所以被统计进 business time，而不是 GC time。
+
+GiYOL 在 Havlak 的效果：
+- GiYOL 把约 1224.62 MB 的 tiny 连续对象通过 NT store 写到 old 区。
+- NT store 的目的就是尽量避免把写入目标污染普通 cache。
+- 所以 GiYOL 虽然让 GC full 增加了 1.127s，但它减少了 GC 后 mutator 的 cache pollution。
+- 这个收益体现在 business time 上：business 少了 5.253s。
+- 抵消 GC 增量后，总时间净收益约 4.126s。
+
+为什么这个现象主要出现在 Havlak：
+- Havlak 有足够多 target-contiguous tiny object run。
+- 它能形成 313503 个 4096B 级别 tiny NT batch。
+- 其他多数 benchmark 没形成这种 run，NT batches 为 0，只留下 batch/fallback 管理成本。
+- 所以 GiYOL 在 Storage 是负收益，在 Havlak 是正收益。
+
+需要注意：
+- business time 的下降不是“GiYOL 在 business 阶段少执行了代码”。
+- 它更像是“GC 的写入方式改变了后续 mutator 执行时的 cache miss 成本”。
+- 当前机器 PMU cache miss counter 不可用，所以这个解释目前由时间分解和 GiYOL NT batch 统计支持，而不是由硬件 cache miss 计数直接证明。
+
+补充修正：
+- “cache pollution 导致 business 少 5.253s”不能理解成一次 GC 后的一轮 cache miss 造成 5 秒。
+- Havlak 有 494300 次 minor GC。
+- `5.253s / 494300 = 10.63us / minor GC`。
+- Havlak 有 313503 个 GiYOL NT batch。
+- `5.253s / 313503 = 16.76us / NT batch`。
+- 如果按一次 LLC/内存 miss 约 100ns 粗估，5.253s 相当于约 52.53M 次 miss。
+- 平均到每次 minor GC 是约 106 次 miss。
+- 平均到每个 NT batch 是约 168 次 miss。
+- 这个量级不是离谱的，但仍然只是“可能解释”，不是硬件计数证明。
+- 因为当前 PMU 不可用，严格结论应该是：Havlak business 降低与大量 GiYOL NT batch 高度相关，cache pollution 是合理机制，但还需要 perf/cache miss counter 或专门 A/B 变体确认。
+
+更严谨的验证方案：
+- 做一个 GiYOL 变体：保留 batch 记录和 flush 逻辑，但强制 tiny chunk 走普通 copy，不执行 NT。
+- 如果这个变体的 Havlak business 仍接近 GiYOL，说明 business 下降不是 NT 减少 cache pollution，而可能是代码布局/噪音/计时归因。
+- 如果这个变体的 Havlak business 回到 GiY，而只有开启 NT 的 GiYOL business 降低，才能更有力证明是 NT 减少 cache pollution。
+
+## 2026-05-07 GiY vs GiYOL 每项 benchmark 性能差别汇总
+
+数据口径：
+- GiY：`build.debug/benchmarks/out104_review_giy_full`
+- GiYOL：主体来自 `build.debug/benchmarks/out105_review_giyol_full`
+- GiYOL NBody：使用复验 `build.debug/benchmarks/out106_review_giyol_nbody_rerun1`
+- GiYOL CD：使用复验 `build.debug/benchmarks/out107_review_giyol_cd_rerun1`
+- 原因：GiYOL full suite 原始 NBody/CD 明显偏高，单项复验回到历史同策略区间，因此主表采用复验后的可信口径。
+
+总览：
+
+| 指标 | GiY | GiYOL | GiYOL - GiY |
+|---|---:|---:|---:|
+| Total CPU | 3498.511s | 3498.295s | -0.216s |
+| Business CPU | 3386.804s | 3380.101s | -6.703s |
+| GC CPU(full) | 111.706s | 118.194s | +6.488s |
+| GC core total | 73.077s | 77.183s | +4.106s |
+
+逐项数据：
+
+| benchmark | GiY total | GiYOL total | total delta | GiY business | GiYOL business | business delta | GC full delta | GC core delta |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 158.634 | 158.543 | -0.091 | 158.516 | 158.417 | -0.099 | +0.008 | +0.004 |
+| List | 99.666 | 97.732 | -1.934 | 99.652 | 97.723 | -1.929 | -0.005 | +0.000 |
+| Sieve | 121.483 | 122.692 | +1.209 | 119.885 | 121.077 | +1.192 | +0.017 | -0.008 |
+| Queens | 117.359 | 116.665 | -0.694 | 117.317 | 116.621 | -0.696 | +0.002 | +0.000 |
+| Permute | 386.765 | 388.044 | +1.279 | 386.762 | 388.043 | +1.281 | -0.002 | +0.000 |
+| Storage | 199.643 | 203.315 | +3.672 | 164.306 | 163.753 | -0.553 | +4.225 | +3.846 |
+| Towers | 183.841 | 182.757 | -1.084 | 183.839 | 182.751 | -1.088 | +0.004 | +0.000 |
+| Mandelbrot | 240.583 | 238.573 | -2.010 | 231.086 | 228.932 | -2.154 | +0.144 | -0.141 |
+| Richards | 944.525 | 945.745 | +1.220 | 944.384 | 945.589 | +1.205 | +0.015 | +0.002 |
+| CD | 243.787 | 244.301 | +0.514 | 230.487 | 230.795 | +0.308 | +0.206 | -0.181 |
+| NBody | 381.490 | 383.319 | +1.829 | 367.744 | 368.827 | +1.083 | +0.747 | -0.063 |
+| Havlak | 420.735 | 416.609 | -4.126 | 382.826 | 377.573 | -5.253 | +1.127 | +0.647 |
+
+按 total delta 排序的结论：
+- GiYOL 明显更快：
+  - Havlak：-4.126s
+  - Mandelbrot：-2.010s
+  - List：-1.934s
+  - Towers：-1.084s
+- GiYOL 明显更慢：
+  - Storage：+3.672s
+  - NBody：+1.829s
+  - Permute：+1.279s
+  - Sieve：+1.209s
+  - Richards：+1.220s
+- 接近持平：
+  - Bounce：-0.091s
+  - Queens：-0.694s
+  - CD：+0.514s
+
+核心判断：
+- 总体上 GiYOL 与 GiY 几乎持平：GiYOL total 只少 0.216s，约 -0.01%。
+- GiYOL 的 GC 成本更高：GC full 多 6.488s，GC core 多 4.106s。
+- GiYOL 的 business time 更低：少 6.703s。
+- 所以当前 GiYOL 的收益/损失不是单纯“GC 更快”；相反，GiYOL GC 本身更贵，但在部分 workload 中可能通过减少后续 cache pollution 让 mutator/business 更快。
+- Storage 是当前最差项：没有形成有效 NT batch，却承担了 batch/fallback 管理成本。
+- Havlak 是当前最好项：形成了大量有效 tiny NT batch，total 净收益最大。
+
+## 2026-05-07 修正：GiY/GiYOL 全 benchmarks 重新完整复验
+
+用户指出：
+- 既然源码改过，不能只对 NBody/CD 做局部复验。
+- 最终性能结论必须来自 GiY 和 GiYOL 都重新完整跑完所有 benchmarks。
+
+这是正确的。
+之前“用 NBody/CD 单项复验替换 full suite outlier”的口径不再作为主结论。
+下面这轮 `out108/out109` 是新的主结论。
+
+测试条件：
+- 重新编译 GiY。
+- 跑完整 12 项 benchmarks。
+- 重新编译 GiYOL。
+- 跑完整同一 12 项 benchmarks。
+- 同样顺序：`Bounce List Sieve Queens Permute Storage Towers Mandelbrot Richards CD NBody Havlak`。
+- 单进程顺序运行，不并行跑 benchmark。
+- GiY 输出目录：`build.debug/benchmarks/out108_review_giy_full_rerun_all`
+- GiYOL 输出目录：`build.debug/benchmarks/out109_review_giyol_full_rerun_all`
+
+状态：
+- GiY：12/12 status=0。
+- GiYOL：12/12 status=0。
+- NBody 这次没有出现 GiYOL 427s outlier。
+- CD 这次保留完整 suite 原始值，不再用单项复验替换。
+
+新完整复验总览：
+
+| 指标 | GiY | GiYOL | GiYOL - GiY |
+|---|---:|---:|---:|
+| Total CPU | 3493.004s | 3497.121s | +4.117s |
+| Business CPU | 3378.994s | 3379.880s | +0.886s |
+| GC CPU(full) | 114.010s | 117.240s | +3.230s |
+| GC core total | 75.001s | 76.873s | +1.872s |
+
+新完整逐项数据：
+
+| benchmark | GiY total | GiYOL total | total delta | GiY business | GiYOL business | business delta | GC full delta | GC core delta |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 158.317 | 156.521 | -1.796 | 158.191 | 156.386 | -1.805 | +0.009 | +0.002 |
+| List | 98.022 | 97.891 | -0.131 | 98.008 | 97.878 | -0.130 | -0.001 | +0.000 |
+| Sieve | 120.478 | 121.598 | +1.120 | 119.002 | 120.066 | +1.064 | +0.056 | +0.002 |
+| Queens | 117.795 | 116.738 | -1.057 | 117.748 | 116.697 | -1.051 | -0.006 | +0.000 |
+| Permute | 388.474 | 390.268 | +1.794 | 388.473 | 390.267 | +1.794 | +0.000 | +0.000 |
+| Storage | 204.620 | 202.519 | -2.101 | 169.072 | 163.422 | -5.650 | +3.549 | +3.036 |
+| Towers | 183.314 | 181.815 | -1.499 | 183.307 | 181.810 | -1.497 | -0.002 | +0.000 |
+| Mandelbrot | 236.194 | 239.123 | +2.929 | 226.861 | 229.394 | +2.533 | +0.396 | -0.125 |
+| Richards | 936.327 | 937.505 | +1.178 | 936.184 | 937.346 | +1.162 | +0.015 | +0.001 |
+| CD | 245.247 | 246.896 | +1.649 | 231.906 | 233.233 | +1.327 | +0.321 | +0.312 |
+| NBody | 384.557 | 384.379 | -0.178 | 370.333 | 370.486 | +0.153 | -0.331 | -0.054 |
+| Havlak | 419.659 | 421.868 | +2.209 | 379.909 | 382.895 | +2.986 | -0.776 | -1.302 |
+| TOTAL | 3493.004 | 3497.121 | +4.117 | 3378.994 | 3379.880 | +0.886 | +3.230 | +1.872 |
+
+GiYOL NT/batch 统计：
+
+| benchmark | NT batches | NT batch MB | tiny flushes | tiny NT MB | tiny fallback MB |
+|---|---:|---:|---:|---:|---:|
+| Bounce | 0 | 0.00 | 0 | 0.00 | 32.01 |
+| List | 0 | 0.00 | 0 | 0.00 | 0.55 |
+| Sieve | 0 | 0.00 | 0 | 0.00 | 2.68 |
+| Queens | 0 | 0.00 | 0 | 0.00 | 0.55 |
+| Permute | 0 | 0.00 | 0 | 0.00 | 0.02 |
+| Storage | 0 | 0.00 | 0 | 0.00 | 45723.74 |
+| Towers | 0 | 0.00 | 0 | 0.00 | 0.11 |
+| Mandelbrot | 0 | 0.00 | 0 | 0.00 | 71.07 |
+| Richards | 0 | 0.00 | 0 | 0.00 | 11.91 |
+| CD | 1252 | 4.89 | 1252 | 4.89 | 2375.64 |
+| NBody | 0 | 0.00 | 0 | 0.00 | 625.97 |
+| Havlak | 313503 | 1224.62 | 313503 | 1224.62 | 11001.12 |
+| TOTAL | 314755 | 1229.51 | 314755 | 1229.51 | 59845.37 |
+
+新主结论：
+- GiYOL 在完整重验中总时间比 GiY 慢 `+4.117s`，约 `+0.12%`。
+- GiYOL business time 慢 `+0.886s`，基本接近持平，但不是之前局部复验口径下的 business 明显更快。
+- GiYOL GC full 慢 `+3.230s`，GC core 慢 `+1.872s`。
+- 因此当前更稳妥的结论是：GiYOL 的 tiny NT batching 还没有带来稳定总收益；总体略慢，主要负担仍在 GC 侧。
+- Havlak 这次不再表现为 GiYOL 明显收益：GiYOL Havlak total `+2.209s`，business `+2.986s`，GC full `-0.776s`。
+- 这说明之前关于 Havlak business 下降/cache pollution 的解释只能作为可能机制，不能作为稳定结论。
+- Storage 这次 total 反而 GiYOL 快 `-2.101s`，但它的 GC full 仍慢 `+3.549s`；business 快 `-5.650s`。这类 business 波动需要更多轮次或硬件计数才能归因。
+- 最可靠的结构性事实仍然是：GiYOL 的有效 NT 只集中在 Havlak/CD，其他 benchmark 基本没有形成 tiny NT batch，却仍有 fallback 记录成本。
+
+后续建议：
+- 性能结论应至少使用完整 suite 多轮均值/中位数，而不是单轮或局部替换。
+- 如果要证明 NT 减少 cache pollution，需要增加 A/B 变体：保留 batch 但禁用 NT，或者开启 PMU cache miss 计数。
+- 当前实现继续优化的重点仍是降低“没有形成 NT batch 时”的 GiYOL 管理开销，并为 tiny staging 增加自适应关闭条件。
+
+## 2026-05-07 GiYOL 执行逻辑与 NT store 触发例子
+
+当前 GiYOL 默认参数：
+- `GIYOL_TINY_MAX_OBJECT_BYTES=64`
+- `GIYOL_TINY_STAGING_BYTES=4096`
+- `GIYOL_TINY_FLUSH_BYTES=4096`
+- `GIYOL_FORCE_TINY_TAIL_NT=0`
+- `GIYOL_DIRECT_NONTINY_NT=0`
+- `GIYOL_DEFER_TINY_STAGING=1`
+
+GiYOL 的执行顺序：
+1. minor GC 开始时初始化 reserve-order batch。
+2. scan roots / scan function table / scan remembered set 时调用 `copy_for_minor()`。
+3. `copy_for_minor()` 只做 reserve：
+   - 在 old/dram 里 bump-pointer 分配目标地址。
+   - 在 young source header 写 forwarding pointer。
+   - 把 young source 压入 GC stack。
+   - 如果 object 的 `align_bytes <= 64B`，把 `(dst_hdr, src_hdr, nbytes)` 记录进 GiYOL reserve-order batch。
+   - 如果 object 大于 64B，不进入 tiny batch。
+4. `giy_traverse_stack_and_copy()` 开始处理 GC stack。
+5. 对每个 live young object：
+   - 先扫描 young source object 的子指针。
+   - 对 young 内部 slot 做 forwarding / patch。
+   - 然后根据 object 大小决定复制方式。
+6. 如果 object `>64B`：
+   - 当前 GiYOL 不走 GiYOL direct non-tiny NT。
+   - 它直接调用普通 `giy_copy_live_object()`。
+   - `giy_copy_live_object()` 对 `<=256B` 用 memcpy，对 `>256B` 可能使用 GiY 共有的 NT copy。
+   - 这部分不是 GiYOL tiny batching 的特殊收益。
+7. 如果 object `<=64B`：
+   - traverse 阶段不立刻复制。
+   - 因为它已经在 reserve 阶段被记入 batch。
+   - 等全部 live object traversal 完成后，统一 flush batch。
+8. flush batch 时，GiYOL 按 batch 里的 reserve 顺序扫描。
+9. 它要求 tiny object 的 target 地址严格连续：
+   - 第一个 dst 是 `chunk_dst`。
+   - 下一个 object 的 dst 必须等于 `expected`。
+   - `expected += previous_object_size`。
+   - 如果中间出现大对象造成 target gap，或者顺序不是严格连续，这个 run 就断开。
+10. 在一个 target-contiguous tiny run 里，GiYOL 再切 chunk：
+   - chunk 最多装 `4096B` staging buffer。
+   - 如果 chunk bytes 达到 `4096B`，触发 NT。
+   - 如果 chunk bytes 小于 `4096B`，因为 `GIYOL_FORCE_TINY_TAIL_NT=0`，不触发 NT，改为逐对象普通 copy fallback。
+11. 触发 NT 时：
+   - 先把每个 source object 当前内容 memcpy 到 staging buffer。
+   - 再用 `giyol_stream_copy_region(dst, staging_buffer, bytes)` 一次性 NT store 到 old target 连续区。
+   - 最后记录 `GiYOL NT batches / tiny flushes / tiny bytes`。
+12. flush 完后执行 `giy_finish_local_nt_stores()`，必要时 `_mm_sfence()`。
+
+成功触发 GiYOL tiny NT 的具体例子：
+
+假设一次 minor GC 发现 64 个 tiny live object：
+- 每个 object 的 `align_bytes=64B`。
+- old target 地址是连续的：
+  - O1 -> `0x10000000`
+  - O2 -> `0x10000040`
+  - O3 -> `0x10000080`
+  - ...
+  - O64 -> `0x10000FC0`
+- 这 64 个 object 都 `<=64B`，所以都会在 `copy_for_minor()` 阶段记录进 reserve-order batch。
+- traverse 阶段先修复它们各自的 young 内部指针，但暂时不复制 tiny object。
+- flush 阶段发现：
+  - O1 dst 等于 expected。
+  - O2 dst 等于 O1 dst + 64。
+  - O3 dst 等于 O2 dst + 64。
+  - 一直到 O64 都连续。
+- 累计 bytes = `64 * 64B = 4096B`。
+- 因为 `bytes >= GIYOL_TINY_FLUSH_BYTES`，所以触发 GiYOL tiny NT。
+- 实际动作：
+  - `memcpy(staging+0, O1_src, 64)`
+  - `memcpy(staging+64, O2_src, 64)`
+  - ...
+  - `memcpy(staging+4032, O64_src, 64)`
+  - `giyol_stream_copy_region(0x10000000, staging, 4096)`
+- 这就是当前 GiYOL 真正想要的情况：多个小对象先合并到一个 staging 连续块，再一次性 NT store 到 old 的连续 target 块。
+
+不会触发 GiYOL tiny NT 的例子 1：target 中间被大对象打断。
+
+假设 reserve 顺序是：
+- A：tiny 64B，target `0x10000000`
+- B：大对象 1024B，target `0x10000040`
+- C：tiny 64B，target `0x10000440`
+
+batch 里只记录 A 和 C，因为 B 大于 64B 不进 tiny batch。
+flush 时看到：
+- A 后 expected 是 `0x10000040`。
+- C 的 dst 是 `0x10000440`。
+- C 不等于 expected，说明 target 不连续。
+
+结果：
+- A 自己形成一个 64B run。
+- C 自己形成一个 64B run。
+- 两个 run 都小于 4096B。
+- 因为 tail NT 关闭，所以都不触发 NT，全部 fallback 到普通 copy。
+
+不会触发 GiYOL tiny NT 的例子 2：很接近 4096B 但没达到。
+
+假设有 85 个连续 tiny object，每个 48B：
+- 总大小 `85 * 48B = 4080B`。
+- target 是连续的。
+
+flush 时 chunk bytes = 4080B。
+因为当前判断是严格 `bytes >= 4096B`，而且 `GIYOL_FORCE_TINY_TAIL_NT=0`：
+- 4080B 不触发 NT。
+- 这 85 个 object 会 fallback 到逐对象普通 copy。
+
+这个例子解释了为什么当前 GiYOL 有些 benchmark 记录了大量 tiny fallback bytes，却没有 NT batches：只要 target 不连续，或者连续 run 的 chunk 没达到 4096B，就不会触发 GiYOL tiny NT。
+
+一句话结论：
+- 当前 GiYOL 的核心判据不是“有很多小对象”。
+- 它真正需要的是：“一串 `<=64B` 的 live object，在 old target 上严格连续，并且 flush chunk 累计达到 `4096B`”。
+- 满足这个条件才触发 GiYOL 特有的 staging -> NT store；否则 tiny object 会 fallback 到普通 GiY copy。
+
+## 2026-05-07 GiYOL batch、4096B 判断时机和 NT 对齐/尾部处理
+
+这里的 batch 不是一块已经合并好的对象数据，而是一个元数据数组。
+
+当前 GiYOL 的 batch 类型是 `GiYOLCopyBatch`，里面保存很多 `GiYOLCopyEntry`：
+- `dst`：object 在 old/dram 中已经 reserve 好的目标 header 地址。
+- `src`：object 在 young/cache 中的源 header 地址。
+- `nbytes`：object header + payload 后的 aligned object size。
+
+也就是说，batch 记录的是“以后要从哪里复制到哪里、复制多少字节”，而不是马上把 object 数据拷进 batch。
+
+当前使用的是全局 reserve-order batch：
+- minor GC 开始时清空 batch。
+- scan roots / scan remembered set 过程中调用 `copy_for_minor()`。
+- `copy_for_minor()` reserve old target 后，如果 object `align_bytes <= 64B`，就把 `(dst_hdr, src_hdr, nbytes)` 追加到 batch。
+- 大于 64B 的 object 不进 tiny batch。
+
+什么时候判断是否达到 4096B：
+- 不是在 `copy_for_minor()` 追加 entry 的时候判断。
+- 也不是发现每个 object 时马上判断。
+- 当前是在 `giy_traverse_stack_and_copy()` 完整处理完 GC stack 后，调用 `giyol_flush_copy_batch()` 时统一判断。
+
+flush 判断顺序：
+1. 遍历 batch entries。
+2. 先找 target 地址严格连续的 tiny run。
+3. 在这个连续 run 里再切 chunk。
+4. 每个 chunk 累计 `bytes`。
+5. 当前代码只允许 `bytes + next_object_size <= GIYOL_TINY_STAGING_BYTES`。
+6. 当前 `GIYOL_TINY_STAGING_BYTES=4096`，`GIYOL_TINY_FLUSH_BYTES=4096`。
+7. 所以当前 GiYOL tiny NT 实际只有在 chunk 正好累计到 `4096B` 时才触发。
+
+关键点：
+- 当前不会把一个 object 拆开来凑 4096B。
+- 如果当前 chunk 已经是 4080B，下一个 object 是 64B，那么 `4080 + 64 > 4096`，这个 64B object 不会被塞进当前 chunk。
+- 于是当前 4080B chunk 因为 `<4096B`，不会触发 NT，会 fallback 到逐对象普通 copy。
+- 下一个 64B object 会作为下一个 chunk/run 的开始继续处理。
+
+超过 4096B 后的小尾巴怎么处理：
+- 假设有 65 个连续 tiny object，每个 64B。
+- 总大小是 `65 * 64B = 4160B`。
+- flush 时：
+  - 前 64 个 object 组成 `4096B` chunk，触发 staging + NT store。
+  - 第 65 个 object 剩下 `64B`，单独成为 tail chunk。
+  - 因为 `GIYOL_FORCE_TINY_TAIL_NT=0`，这个 64B tail 不触发 NT，走普通 copy fallback。
+
+再比如有 96 个连续 64B object：
+- 总大小 `6144B`。
+- 前 `4096B` 触发一次 NT。
+- 剩余 `2048B` 小于 4096B。
+- tail `2048B` 不触发 NT，走普通 copy fallback。
+
+如果有 128 个连续 64B object：
+- 总大小 `8192B`。
+- 切成两个 `4096B` chunk。
+- 触发两次 NT。
+
+NT store 对齐怎么处理：
+- 真正执行 NT 的函数是 `giyol_stream_copy_region(dst, staging_buffer, bytes)`。
+- 它要求 old target 的 `dst` 至少满足当前代码允许的对齐形态：
+  - 如果 `dst` 已经 16B 对齐，就直接用 `_mm_stream_si128` 按 16B 一组写。
+  - 如果 `dst` 是 8B offset，也就是 `dst % 16 == 8`，先用 `_mm_stream_si64` 写前 8B，让后续地址变成 16B 对齐，然后再用 `_mm_stream_si128` 写主体，最后如果剩 8B，再用 `_mm_stream_si64` 写尾部。
+  - 如果 `dst` 不是 16B 对齐，也不是 8B offset，代码会直接报 invariant failed。
+
+当前为什么不会出现奇怪的 NT tail：
+- object size 是 aligned size，通常至少按 8B 对齐。
+- 当前 tiny NT chunk 因为 staging size 和 flush threshold 都是 4096B，所以触发 NT 的 chunk bytes 实际是 4096B。
+- 4096B 是 16B 的整数倍。
+- 如果 dst 16B 对齐：全程 16B stream store。
+- 如果 dst 是 8B offset：前 8B 用 stream si64，中间 4080B 用 16B stream store，最后 8B 用 stream si64。
+
+一句话结论：
+- GiYOL 的 batch 是“待复制对象的 `(src,dst,size)` 列表”，不是对象数据本身。
+- 是否达到 4096B 是在 GC stack traversal 完成后的 batch flush 阶段判断。
+- 当前实现不会拆 object，也不会对 `<4096B` tail 强制 NT；超过 4096B 后剩下的小尾巴走普通 copy fallback。
+- NT 写入的对齐由 `giyol_stream_copy_region()` 处理：16B 对齐直接写，8B 偏移则先写 8B 对齐主体，其他对齐视为 bug。
+
+## 2026-05-07 修正：GiY/GiYOL 全 benchmarks 重新完整复验
+
+用户指出：既然改了源代码，复验就不能只看部分 benchmarks，必须重验完整 suite。
+
+这个指出是正确的。之前虽然已经跑过 full suite，但后续我用局部重跑的 NBody/CD 数据修正主结论，这个口径不严谨。现在以代码修补后的重新完整 suite 为准：
+- GiY 完整重跑输出：`build.debug/benchmarks/out108_review_giy_full_rerun_all`
+- GiYOL 完整重跑输出：`build.debug/benchmarks/out109_review_giyol_full_rerun_all`
+- 两边都是 12/12 benchmarks `status=0`
+- 重跑前机器负载较低：load average 约 `0.23, 0.32, 0.29`
+
+总览：
+
+| 指标 | GiY | GiYOL | GiYOL-GiY |
+|---|---:|---:|---:|
+| total | 3493.004s | 3497.121s | +4.117s (+0.12%) |
+| business/non-GC | 3378.994s | 3379.880s | +0.886s (+0.03%) |
+| GC full | 114.010s | 117.240s | +3.230s |
+| GC core | 75.001s | 76.873s | +1.872s |
+| minor GC 次数 | 2302292 | 2302292 | 0 |
+
+逐项完整对比：
+
+| benchmark | GiY total | GiYOL total | total 差值 | GiY business | GiYOL business | business 差值 | GiY GC full | GiYOL GC full | GC full 差值 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 158.317 | 156.521 | -1.796 (-1.13%) | 158.191 | 156.386 | -1.805 | 0.126 | 0.135 | +0.009 |
+| List | 98.022 | 97.891 | -0.131 (-0.13%) | 98.008 | 97.878 | -0.130 | 0.014 | 0.013 | -0.001 |
+| Sieve | 120.478 | 121.598 | +1.120 (+0.93%) | 119.002 | 120.066 | +1.064 | 1.476 | 1.532 | +0.056 |
+| Queens | 117.795 | 116.738 | -1.057 (-0.90%) | 117.748 | 116.697 | -1.051 | 0.047 | 0.041 | -0.006 |
+| Permute | 388.474 | 390.268 | +1.794 (+0.46%) | 388.473 | 390.267 | +1.794 | 0.001 | 0.001 | +0.000 |
+| Storage | 204.620 | 202.519 | -2.101 (-1.03%) | 169.072 | 163.422 | -5.650 | 35.548 | 39.097 | +3.549 |
+| Towers | 183.314 | 181.815 | -1.499 (-0.82%) | 183.307 | 181.810 | -1.497 | 0.007 | 0.005 | -0.002 |
+| Mandelbrot | 236.194 | 239.123 | +2.929 (+1.24%) | 226.861 | 229.394 | +2.533 | 9.333 | 9.729 | +0.396 |
+| Richards | 936.327 | 937.505 | +1.178 (+0.13%) | 936.184 | 937.346 | +1.162 | 0.143 | 0.158 | +0.015 |
+| CD | 245.247 | 246.896 | +1.649 (+0.67%) | 231.906 | 233.233 | +1.327 | 13.341 | 13.662 | +0.321 |
+| NBody | 384.557 | 384.379 | -0.178 (-0.05%) | 370.333 | 370.486 | +0.153 | 14.224 | 13.893 | -0.331 |
+| Havlak | 419.659 | 421.868 | +2.209 (+0.53%) | 379.909 | 382.895 | +2.986 | 39.750 | 38.974 | -0.776 |
+
+GiYOL tiny NT batch 生效情况：
+
+| benchmark | NT batches | NT batch MB | tiny flushes | tiny MB | fallback MB |
+|---|---:|---:|---:|---:|---:|
+| Bounce | 0 | 0.00 | 0 | 0.00 | 32.01 |
+| List | 0 | 0.00 | 0 | 0.00 | 0.55 |
+| Sieve | 0 | 0.00 | 0 | 0.00 | 2.68 |
+| Queens | 0 | 0.00 | 0 | 0.00 | 0.55 |
+| Permute | 0 | 0.00 | 0 | 0.00 | 0.02 |
+| Storage | 0 | 0.00 | 0 | 0.00 | 45723.74 |
+| Towers | 0 | 0.00 | 0 | 0.00 | 0.11 |
+| Mandelbrot | 0 | 0.00 | 0 | 0.00 | 71.07 |
+| Richards | 0 | 0.00 | 0 | 0.00 | 11.91 |
+| CD | 1252 | 4.89 | 1252 | 4.89 | 2375.64 |
+| NBody | 0 | 0.00 | 0 | 0.00 | 625.97 |
+| Havlak | 313503 | 1224.62 | 313503 | 1224.62 | 11001.12 |
+| TOTAL | 314755 | 1229.51 | 314755 | 1229.51 | 59845.37 |
+
+修正后的结论：
+- 当前最新全套复验下，GiYOL 没有赢过 GiY。总时间慢 `+4.117s`，约 `+0.12%`。
+- business/non-GC 时间几乎持平，但 GiYOL 仍慢 `+0.886s`，约 `+0.03%`。
+- 主要确定损失在 GC 侧：GC full 慢 `+3.230s`，GC core 慢 `+1.872s`。
+- GiYOL tiny NT batching 只在 CD 和 Havlak 明显触发；其他 10 项没有 NT batch，只留下 batch 判定/记录与 fallback copy 路径。
+- Storage 虽然 total 快 `-2.101s`，但 GC full 反而慢 `+3.549s`，它的 total 改善主要来自 business 时间波动/间接影响，不能当作 NT store 明确收益。
+- Havlak 在这次完整重跑中不再表现为 business 更快：GiYOL total 慢 `+2.209s`，business 慢 `+2.986s`，GC full 快 `-0.776s`。因此之前“GiYOL 让 Havlak business 更快”的说法不能作为稳定结论。
+- NBody 这次没有复现之前 GiYOL 的 427s outlier，说明之前那个异常更可能是单轮运行噪音或局部复验条件造成的，不应纳入主结论。
+
+阶段性判断：
+- 当前 GiYOL 的策略在“连续 tiny object 足够多”的场景下确实能触发 NT store，但覆盖范围太窄。
+- 全 suite 看，GiYOL 引入的额外判定/批处理/fallback 成本，以及 NT flush 本身的成本，抵消了有限场景的收益。
+- 如果继续优化，下一步不应该只看单轮 total，而应做：
+  1. GiY/GiYOL full-suite 多轮 mean/median；
+  2. 一个保留 batch 判定但禁用 NT store 的 A/B 版本，用来分离“batch 管理成本”和“NT store 本体收益”；
+  3. 对 Havlak/CD/Storage 加 PMU 计数，确认 LLC miss、writeback、store bandwidth 是否真的被改善。
+
+## 2026-05-07 GiY/GiYOL 当前实现复查
+
+用户要求：重新全面检查 GiY 和 GiYOL 是否存在实现问题、逻辑问题。
+
+本次检查范围：
+- `ejsvm/GiY.cc`
+- `ejsvm/giy_rset.cc`
+- `ejsvm/common.mk`
+- GiY/GiYOL 当前 benchmark 使用配置：
+  - `OPT_GC=giy` 或 `OPT_GC=giyol`
+  - `GIY_RSET_INDEX_FAST=true`
+  - `CACHE_SIZE_KB=552`
+  - `GIY_AS_UPDATE=true`
+  - `GIY_AS_FT_ADVANCE=true`
+
+构建与小验证：
+- GiY 重新构建成功。
+- GiYOL 重新构建成功。
+- `git diff --check -- ejsvm/GiY.cc ejsvm/giy_rset.cc ejsvm/common.mk AIlog.md` 通过。
+- GiY：`GIY_MPROTECT_OLD=1 ./ejsvm benchmarks/giy_gc_probe.sbc`，`status=0`，没有 old-space violation。
+- GiYOL：`GIY_MPROTECT_OLD=1 ./ejsvm benchmarks/giy_gc_probe.sbc`，`status=0`，没有 old-space violation。
+- GiYOL：`./ejsvm benchmarks/hello_world.sbc`，`status=0`。
+- GiYOL：`./ejsvm benchmarks/bounce_check.sbc`，`status=0`。
+- 额外尝试了 `GIY_MPROTECT_OLD=1 ./ejsvm benchmarks/CD.sbc`，但 mprotect 模式下 CD 运行被严重放大，约 1 分 47 秒后主动中止；这不是 correctness failure，只是不适合做长 benchmark 验证。
+- 上一次完整 suite 仍是当前源代码后的主要完整运行证据：GiY `out108_review_giy_full_rerun_all` 和 GiYOL `out109_review_giyol_full_rerun_all` 都是 12/12 `status=0`。
+
+当前激活路径的正确性检查结论：
+
+1. GiY evacuation 顺序没有发现确定性逻辑错误。
+   - `copy_for_minor()` 只 reserve old target，并在 young header 上写 forwarding pointer。
+   - `giy_traverse_stack_and_copy()` 先扫描 young source object，并把 source object 内部的 young 指针修成 forwarded old pointer。
+   - 然后从已经 patch 过的 source header/payload copy 到 old target。
+   - roots、function table slot、remembered set slot 在对象复制完成后统一 patch。
+   - 这个顺序能保证 old target 中得到的是已经修过内部指针的对象。
+
+2. GiYOL 当前主体仍然和 GiY 相同，只改变“何时把对象字节写到 old target”。
+   - `copy_for_minor()` 对 tiny object 记录 `(dst, src, nbytes)` 到 reserve-order batch。
+   - `>64B` 的 object 当前不进 tiny batch，而是立即走 GiY 的 `giy_copy_live_object()`。
+   - batch 在 `giy_traverse_stack_and_copy()` 处理完整个 GC stack 后 flush。
+   - flush 时按 old target 地址连续性切 run，再按 chunk 处理。
+   - chunk 达到 `GIYOL_TINY_FLUSH_BYTES=4096` 时才 staging + NT store。
+   - 小于 4096B 的 tail 当前不强制 NT，fallback 到普通 `giy_copy_live_object()`。
+   - 没有看到当前激活路径下会漏复制或重复复制的分支。
+
+3. RSet 当前逻辑没有发现会漏更新 latest value 的确定性错误。
+   - JSValue slot 和 ptr slot 用 raw slot 低位 tag 区分。
+   - `remembered_set.values[]` 记录的是最后一次写入的值。
+   - young pointer 写入时 add/update。
+   - 写入 old/null/fixnum/special 时只对已有条目更新为 `0`，不新增无意义 clear 条目。
+   - fast hash index 命中时直接更新对应 `values[index]`。
+   - probe limit 之后的 fallback entry 虽然不进 hash table，但后续 update 会在同样 probe limit 满的情况下回退线性查找；没有发现 fallback entry 后续无法更新的问题。
+   - capacity check 现在只在真正新增 entry 前做，不会因为 duplicate update 误判 full。
+
+4. function table slot set 的设计在当前代码里是必要且一致的。
+   - function table / alloc-site cache slot 不是普通 old object slot，不能只靠 object write barrier 覆盖。
+   - `giy_record_ft_jsvalue_slot()` / `giy_record_ft_ptr_slot()` 只记录 slot 地址。
+   - minor GC 时扫描真实 slot 当前值，再 reserve/patch。
+   - 这避免了 function table 中 young Shape/PropertyMap 指针被 young 回收后悬空。
+
+5. allocation-site update 的修补方向是合理的。
+   - 现在记录的是 source object 中已经 patch 后的 `shape` 指针，而不是尚未稳定可读的 old target payload。
+   - strict old mprotect guard 在 allocation-site metadata update 前结束，避免把有意读取 old Shape/PropertyMap 元数据误判成 GiY core violation。
+   - mprotect probe 通过，说明当前核心 reserve/traverse/patch 阶段没有触发非法 old-space 访问。
+
+发现的非 correctness 问题 / 风险：
+
+1. GiYOL staging buffer 的实际首次分配大小和“4096B tiny staging”说法不完全一致。
+   - 代码中 `giyol_ensure_staging_capacity(bytes)` 的初始容量是 `GIYOL_BATCH_BYTES`。
+   - 当前 `GIYOL_BATCH_BYTES=128KB`，而 `GIYOL_TINY_STAGING_BYTES=4096`。
+   - 所以 tiny path 的 chunk 上限确实是 4096B，但第一次 `realloc` 出来的 staging buffer 实际是 128KB。
+   - 这不是 correctness bug，也不是 young/cache 区预留；它是 malloc 出来的额外缓冲。
+   - 但如果论文/实验口径说“只使用 4KB 暂存区”，当前实现并不严格满足；应改成按 `bytes` 或 `GIYOL_TINY_STAGING_BYTES` 起始分配。
+
+2. `GIYOL_TINY_STAGING_BYTES` 和 `GIYOL_TINY_FLUSH_BYTES` 都是 4096 时，NT 触发条件偏苛刻。
+   - 当前不会拆 object。
+   - 如果连续 run 的 chunk 累计到 4080B，下一个 object 又会超过 4096B，那么 4080B 会 fallback，不触发 NT。
+   - 这是性能策略问题，不是逻辑错误。
+
+3. GiYOL 的 profile 命名有轻微混淆。
+   - fallback 计数里使用了 `giyol_small_flush_objects/bytes`。
+   - 当前激活路径中 batch 只收 tiny object，所以基本可读。
+   - 但防御性 non-small fallback 分支也会累加这个名字，后续如果打开其他配置，统计名可能误导。
+
+4. 一些 dormant/非当前 benchmark 配置没有作为本次主验证对象。
+   - 例如 `GIYOL_DEFER_TINY_STAGING=0`、`GIYOL_STAGING_COPY=0`、`GIYOL_DIRECT_NONTINY_NT=1`。
+   - 当前结论只覆盖现在实际使用并跑 full suite 的 GiY/GiYOL 配置。
+
+总判断：
+- 当前 GiY 和当前激活配置的 GiYOL，没有发现会破坏 GC 正确性的确定性实现错误。
+- 当前 GiYOL 的主要问题仍然不是“逻辑错”，而是“收益覆盖范围窄 + 额外判定/批处理/fallback 成本 + NT 触发条件苛刻”。
+- 需要修正的最明确实现口径问题是：GiYOL tiny staging 的 chunk 是 4096B，但实际 staging buffer 初始分配是 128KB；如果要严格实验“小暂存区”，应把实际 buffer 初始容量也降到 4096B 附近，然后重新跑 full suite。
+
+## 2026-05-07 汇报前修正版 GiY/GiYOL 完整复验
+
+本节是导师汇报前的最终复验记录。结论先写在前面：工程上不能声称“数学意义绝对正确”，但当前源码状态下，GiY 和 GiYOL 已经修掉目前发现的确定性实现问题，并且在同一套配置下完成了 smoke correctness 与完整 benchmarks。两套完整 suite 均为 12/12 `status=0`。
+
+### 最终源码状态
+
+本轮最终确认的关键修补：
+
+1. GiYOL tiny staging 的实际 buffer 分配口径已修正。
+   - 文件：`ejsvm/GiY.cc`
+   - 位置：`giyol_ensure_staging_capacity()`
+   - 修补前：第一次 `realloc` 会从 `GIYOL_BATCH_BYTES=128KB` 起步，和“4KB tiny staging”实验口径不一致。
+   - 修补后：第一次容量就是调用方请求的 `bytes`；当前 active tiny path 请求 `GIYOL_TINY_STAGING_BYTES=4096`，因此实际 staging buffer 起步就是 4096B。
+
+2. 当前 GiYOL active 策略保持为保守正确版本。
+   - `GIYOL_STAGING_COPY=1`
+   - `GIYOL_TINY_STAGING=1`
+   - `GIYOL_TINY_STAGING_BYTES=4096`
+   - `GIYOL_TINY_FLUSH_BYTES=4096`
+   - `GIYOL_TINY_MAX_OBJECT_BYTES=64`
+   - `GIYOL_FORCE_TINY_TAIL_NT=0`
+   - `GIYOL_DIRECT_NONTINY_NT=0`
+   - `GIYOL_DEFER_TINY_STAGING=1`
+   - 含义：只有 <=64B 的 tiny object 进入 reserve-order batch；按 old target 连续性切 run；每个 chunk 最多 4096B；达到 4096B 才通过 staging buffer 发 NT store；不足 4096B 的 tail 走普通 `giy_copy_live_object()`，不强行 NT。
+
+3. GiY 主体和 GiYOL 主体的正确性路径保持一致。
+   - `copy_for_minor()` reserve old target，并在 young header 写 forwarding pointer。
+   - traversal 阶段扫描 source young object，先把 source object 内部 young pointer 修成 forwarded old pointer。
+   - GiY 直接把 patch 后的 source bytes copy 到 old target。
+   - GiYOL 只改变 tiny object 的字节写回时机；roots、RSet slot、function table slot 的 patch 逻辑与 GiY 保持同一套。
+
+4. RSet 的 capacity check / duplicate update 逻辑保持为修正版。
+   - 只有真正新增 remembered-set entry 前才检查容量。
+   - duplicate slot 更新只更新 `values[]` 中的 latest value，不会被误判为 full。
+   - hash probe fallback 后仍会通过线性查找更新已有 entry。
+
+5. allocation-site update 使用 source object 中已经 patch 后的 shape。
+   - 避免在 old target 尚处于受保护/未稳定可读阶段读取 old payload。
+   - `GIY_MPROTECT_OLD=1` probe 已通过，没有发现核心 evacuation 阶段非法 old-space 访问。
+
+### 构建与验证配置
+
+共同配置：
+
+- `GIY_RSET_INDEX_FAST=true`
+- `CACHE_SIZE_KB=552`
+- `GIY_AS_UPDATE=true`
+- `GIY_AS_FT_ADVANCE=true`
+
+构建命令：
+
+- GiY：`make -B -C build.debug GiY.o giy_rset.o ejsvm OPT_GC=giy GIY_RSET_INDEX_FAST=true CACHE_SIZE_KB=552 GIY_AS_UPDATE=true GIY_AS_FT_ADVANCE=true -j4`
+- GiYOL：`make -B -C build.debug GiY.o giy_rset.o ejsvm OPT_GC=giyol GIY_RSET_INDEX_FAST=true CACHE_SIZE_KB=552 GIY_AS_UPDATE=true GIY_AS_FT_ADVANCE=true -j4`
+
+smoke correctness：
+
+- GiY：`GIY_MPROTECT_OLD=1 ./ejsvm benchmarks/giy_gc_probe.sbc`，`status=0`
+- GiY：`./ejsvm benchmarks/hello_world.sbc`，`status=0`
+- GiYOL：`GIY_MPROTECT_OLD=1 ./ejsvm benchmarks/giy_gc_probe.sbc`，`status=0`
+- GiYOL：`./ejsvm benchmarks/hello_world.sbc`，`status=0`
+
+完整 suite 数据目录：
+
+- GiY：`build.debug/benchmarks/out110_final_giy_corrected_full`
+- GiYOL：`build.debug/benchmarks/out111_final_giyol_corrected_full`
+
+完整 suite status：
+
+- GiY：Bounce/List/Sieve/Queens/Permute/Storage/Towers/Mandelbrot/Richards/CD/NBody/Havlak 全部 `status=0`
+- GiYOL：Bounce/List/Sieve/Queens/Permute/Storage/Towers/Mandelbrot/Richards/CD/NBody/Havlak 全部 `status=0`
+
+运行结束时机器负载：
+
+- `2026-05-07T11:21:25Z`
+- load average：`1.05, 1.24, 1.26`
+
+### GiY vs GiYOL CPU 数据
+
+| benchmark | GiY total CPU | GiYOL total CPU | delta | delta% | GiY business | GiYOL business | business delta | GiY GC | GiYOL GC | GC delta |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 157.258 | 157.902 | +0.644 | +0.41% | 157.114 | 157.746 | +0.632 | 0.144 | 0.156 | +0.012 |
+| List | 98.093 | 98.645 | +0.552 | +0.56% | 98.078 | 98.634 | +0.556 | 0.015 | 0.011 | -0.004 |
+| Sieve | 121.526 | 129.743 | +8.217 | +6.76% | 119.966 | 128.227 | +8.261 | 1.560 | 1.516 | -0.044 |
+| Queens | 117.245 | 116.786 | -0.459 | -0.39% | 117.190 | 116.730 | -0.460 | 0.055 | 0.056 | +0.001 |
+| Permute | 409.291 | 443.811 | +34.520 | +8.43% | 409.289 | 443.811 | +34.522 | 0.002 | 0.000 | -0.002 |
+| Storage | 198.762 | 202.801 | +4.039 | +2.03% | 163.623 | 163.695 | +0.072 | 35.139 | 39.107 | +3.968 |
+| Towers | 182.585 | 185.294 | +2.709 | +1.48% | 182.581 | 185.289 | +2.708 | 0.004 | 0.005 | +0.001 |
+| Mandelbrot | 238.255 | 239.101 | +0.846 | +0.36% | 229.093 | 229.628 | +0.535 | 9.162 | 9.472 | +0.310 |
+| Richards | 945.469 | 943.737 | -1.732 | -0.18% | 945.312 | 943.576 | -1.736 | 0.157 | 0.161 | +0.004 |
+| CD | 244.298 | 247.496 | +3.198 | +1.31% | 231.306 | 233.980 | +2.674 | 12.993 | 13.517 | +0.524 |
+| NBody | 383.137 | 386.473 | +3.336 | +0.87% | 368.418 | 372.280 | +3.862 | 14.719 | 14.193 | -0.526 |
+| Havlak | 417.080 | 418.018 | +0.938 | +0.22% | 379.339 | 377.893 | -1.446 | 37.742 | 40.125 | +2.383 |
+| **Total** | **3512.999** | **3569.807** | **+56.808** | **+1.62%** | **3401.309** | **3451.489** | **+50.180** | **111.692** | **118.319** | **+6.627** |
+
+### Wall time 数据
+
+| benchmark | GiY real | GiYOL real | delta | GiY user/sys | GiYOL user/sys |
+|---|---:|---:|---:|---:|---:|
+| Bounce | 157.300 | 157.927 | +0.627 | 157.243/0.017 | 157.887/0.018 |
+| List | 98.110 | 98.664 | +0.554 | 98.092/0.004 | 98.645/0.003 |
+| Sieve | 121.592 | 129.811 | +8.219 | 121.016/0.558 | 129.248/0.547 |
+| Queens | 117.268 | 116.800 | -0.468 | 117.245/0.001 | 116.787/0.001 |
+| Permute | 409.356 | 443.873 | +34.517 | 409.291/0.002 | 443.811/0.001 |
+| Storage | 199.732 | 203.772 | +4.040 | 188.745/10.948 | 192.703/11.019 |
+| Towers | 182.631 | 185.313 | +2.682 | 182.585/0.003 | 185.294/0.002 |
+| Mandelbrot | 238.293 | 239.164 | +0.871 | 238.141/0.118 | 239.002/0.104 |
+| Richards | 945.638 | 943.907 | -1.731 | 945.465/0.007 | 943.732/0.008 |
+| CD | 244.499 | 247.696 | +3.197 | 242.612/1.846 | 245.863/1.789 |
+| NBody | 383.227 | 386.565 | +3.338 | 382.879/0.279 | 386.222/0.271 |
+| Havlak | 417.724 | 418.640 | +0.916 | 410.852/6.782 | 411.683/6.877 |
+| **Total** | **3515.370** | **3572.132** | **+56.762** | **3494.166/20.565** | **3550.877/20.640** |
+
+### GC core 数据
+
+| benchmark | GiY minor GC | GiYOL minor GC | GiY core | GiYOL core | core delta | GiY scavenge | GiYOL scavenge |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 5827 | 5827 | 0.044 | 0.047 | +0.003 | 0.042 | 0.044 |
+| List | 685 | 685 | 0.003 | 0.003 | +0.000 | 0.003 | 0.003 |
+| Sieve | 50000 | 50000 | 0.812 | 0.815 | +0.003 | 0.806 | 0.810 |
+| Queens | 2474 | 2474 | 0.009 | 0.009 | +0.000 | 0.009 | 0.008 |
+| Permute | 71 | 71 | 0.001 | 0.001 | +0.000 | 0.001 | 0.001 |
+| Storage | 226887 | 226887 | 32.019 | 35.681 | +3.662 | 31.962 | 35.618 |
+| Towers | 145 | 145 | 0.001 | 0.001 | +0.000 | 0.001 | 0.001 |
+| Mandelbrot | 578592 | 578592 | 1.571 | 1.437 | -0.134 | 1.507 | 1.369 |
+| Richards | 4791 | 4791 | 0.042 | 0.042 | +0.000 | 0.040 | 0.041 |
+| CD | 219809 | 219809 | 8.128 | 8.416 | +0.288 | 8.009 | 8.284 |
+| NBody | 718711 | 718711 | 2.771 | 2.718 | -0.053 | 2.523 | 2.439 |
+| Havlak | 494300 | 494300 | 27.159 | 28.561 | +1.402 | 26.135 | 27.354 |
+
+### GiYOL NT 覆盖数据
+
+| benchmark | NT batches | NT MB | tiny flushes | tiny MB | fallback MB | direct NT MB |
+|---|---:|---:|---:|---:|---:|---:|
+| Bounce | 0 | 0.00 | 0 | 0.00 | 32.01 | 0.00 |
+| List | 0 | 0.00 | 0 | 0.00 | 0.55 | 0.00 |
+| Sieve | 0 | 0.00 | 0 | 0.00 | 2.68 | 0.00 |
+| Queens | 0 | 0.00 | 0 | 0.00 | 0.55 | 0.00 |
+| Permute | 0 | 0.00 | 0 | 0.00 | 0.02 | 0.00 |
+| Storage | 0 | 0.00 | 0 | 0.00 | 45723.74 | 0.00 |
+| Towers | 0 | 0.00 | 0 | 0.00 | 0.11 | 0.00 |
+| Mandelbrot | 0 | 0.00 | 0 | 0.00 | 71.07 | 0.00 |
+| Richards | 0 | 0.00 | 0 | 0.00 | 11.91 | 0.00 |
+| CD | 1252 | 4.89 | 1252 | 4.89 | 2375.64 | 0.00 |
+| NBody | 0 | 0.00 | 0 | 0.00 | 625.97 | 0.00 |
+| Havlak | 313503 | 1224.62 | 313503 | 1224.62 | 11001.12 | 0.00 |
+| **Total** | **314755** | **1229.51** | **314755** | **1229.51** | **59845.37** | **0.00** |
+
+NT 覆盖率：
+
+- GiYOL tiny/staging 相关总量约为 `1229.51 + 59845.37 = 61074.88 MB`。
+- 真正通过 NT store 写回的是 `1229.51 MB`。
+- 覆盖率约为 `2.01%`。
+- 这说明当前 GiYOL 是 correctness-first 的保守版本：能触发 NT 的地方很少，大多数 tiny copy 仍然 fallback 到普通 copy。
+
+### 汇报用结论
+
+1. 当前 GiY 与 GiYOL 都能完整跑完 suite。
+   - 两者 12 项 benchmarks 全部 `status=0`。
+   - GiY/GiYOL 的 minor GC count 在每个 benchmark 上完全一致，说明对象发现/GC 触发节奏没有被 GiYOL 改乱。
+
+2. 当前 GiYOL 比 GiY 总体慢，但退化幅度已经很小。
+   - CPU total：`+56.808s`，`+1.62%`
+   - wall real：`+56.762s`，`+1.61%`
+   - business CPU：`+50.180s`，`+1.48%`
+   - GC CPU：`+6.627s`，`+5.93%`
+
+3. 这轮数据里最大的单项差距是 Permute。
+   - Permute CPU delta：`+34.520s`
+   - Permute GC CPU 几乎为 0，GiYOL NT MB 也是 0。
+   - 因此 Permute 的差距不能解释为 NT copy 或 GC core 复制策略造成，更可能是单轮运行噪音、二进制布局差异、CPU 频率/调度变化，或者 benchmark 业务层执行差异。
+   - 如果去掉 Permute，总 CPU delta 从 `+56.808s` 降到 `+22.288s`，总体差距约 `+0.72%`。
+
+4. 真正能归因到 GiYOL GC 复制策略的主要成本在 Storage 和 Havlak。
+   - Storage：GC CPU `+3.968s`，GC core `+3.662s`，但 NT MB 为 0，fallback MB 为 `45723.74 MB`。原因是 tiny batch/连续性判断存在开销，但没有形成 4096B NT chunk。
+   - Havlak：GC CPU `+2.383s`，GC core `+1.402s`，NT MB 为 `1224.62 MB`，fallback MB 为 `11001.12 MB`。原因是确实有 NT chunk，但覆盖率仍低，大量 tiny copy 仍 fallback。
+   - CD：NT MB 只有 `4.89 MB`，fallback MB `2375.64 MB`，因此收益也很有限。
+
+5. 当前 GiYOL 的核心问题不是 correctness，而是收益覆盖率太低。
+   - 当前策略只让 <=64B tiny object 进入 batch。
+   - 只有 old target 连续并且 chunk 达到 4096B 才 NT。
+   - tail 不强制 NT。
+   - 大对象和 64B 以上对象全部普通 copy。
+   - 所以多数 benchmark 没有 NT 触发；触发最多的 Havlak 也只有约 1.2GB NT，对比约 11GB fallback，覆盖仍低。
+
+6. 导师汇报时可以这样表述：
+   - “GiYOL 当前实现已经通过完整 correctness smoke 和 full benchmark suite；没有发现会破坏 GC 语义的确定性 bug。”
+   - “GiYOL 的 NT batching 目前是保守正确版本，不是最终性能优化版本。”
+   - “完整 suite 上 GiYOL 比 GiY 慢约 1.6%；去掉与 GC/NT 几乎无关的 Permute 后，差距约 0.7%。”
+   - “当前性能瓶颈不是旧的严重逻辑错误，而是 NT 覆盖率太低，batch 判断/fallback 付出了成本但大部分对象没有真正走 NT store。”
+
+剩余风险：
+
+- 这是单轮 full-suite 数据，不是多轮 median；明天汇报时应明确写成“本轮复验结果”。
+- PMU cache-miss counters 在当前机器不可用：`perf_event_paranoid=4`，因此没有硬件 cache-miss 证据。
+- dormant 配置没有作为最终正确性结论覆盖范围，例如 `GIYOL_DEFER_TINY_STAGING=0`、`GIYOL_DIRECT_NONTINY_NT=1`、`GIYOL_STAGING_COPY=0`。
+
+## 2026-05-08 当前最终实验 benchmark 选择
+
+如果“最终实验”指用于向导师解释 GiYOL 复制策略效果和问题的两个代表性 benchmark，当前应选：
+
+1. `Storage`
+   - 作用：负向/压力代表。
+   - 数据：GiYOL 比 GiY 的 GC CPU 多 `+3.968s`，GC core 多 `+3.662s`。
+   - GiYOL NT MB 为 `0.00 MB`，fallback MB 为 `45723.74 MB`。
+   - 含义：Storage 说明当前 GiYOL 的 batch/连续性判断会付出成本，但对象分布没有形成可用的 4096B NT chunk，因此几乎没有 NT 收益。
+
+2. `Havlak`
+   - 作用：正向/有效触发代表。
+   - 数据：GiYOL 比 GiY 的 GC CPU 多 `+2.383s`，GC core 多 `+1.402s`。
+   - GiYOL NT MB 为 `1224.62 MB`，fallback MB 为 `11001.12 MB`。
+   - 含义：Havlak 说明 GiYOL 确实能形成大量 tiny NT chunk，但当前覆盖率仍低，大部分 copy 还是 fallback，所以收益不足以抵消额外成本。
+
+不应把 `Permute` 作为 GiYOL 复制策略的最终代表 benchmark：
+
+- Permute 的差距最大：GiYOL total CPU `+34.520s`。
+- 但 Permute 的 GC CPU 几乎为 0，GiYOL NT MB 也是 `0.00 MB`。
+- 所以它更像单轮运行噪音、二进制布局差异、调度/频率变化或业务层执行差异，不适合作为 NT batching 策略的证据。
+
+因此当前最终汇报时建议：
+
+- 完整总表仍使用全部 12 项 benchmarks，证明 correctness 和总体性能。
+- 重点机制分析只抓 `Storage` 和 `Havlak`。
+- `Storage` 证明“付出 batch/fallback 成本但没有 NT 覆盖”的失败场景。
+- `Havlak` 证明“能触发 NT，但覆盖率仍太低”的有限有效场景。
+
+## 2026-05-08 benchmarks 文件夹中的最终实验目录
+
+更正上一节的理解：这里问的是 `build.debug/benchmarks` 目录下哪两组输出是最终实验。
+
+当前最终实验使用这两个目录：
+
+1. `build.debug/benchmarks/out110_final_giy_corrected_full`
+   - 含义：修正后 GiY 的完整 full-suite 输出。
+   - 用途：作为 GiY baseline。
+   - 状态：12 项 benchmarks 全部 `status=0`。
+
+2. `build.debug/benchmarks/out111_final_giyol_corrected_full`
+   - 含义：修正后 GiYOL 的完整 full-suite 输出。
+   - 用途：作为 GiYOL 对比组。
+   - 状态：12 项 benchmarks 全部 `status=0`。
+
+不要把下面这些旧目录当作最终实验：
+
+- `out108_review_giy_full_rerun_all`
+- `out109_review_giyol_full_rerun_all`
+- 更早的 `out50_*`、`out67_*`、`out75_*`、`out101_*`、`out102_*`、`out103_*` 等
+
+最终汇报与表格应只以 `out110_final_giy_corrected_full` 和 `out111_final_giyol_corrected_full` 为准。
+
+## 2026-05-08 GiY 直接对象级 NT store 数量
+
+问题：GiYOL 最终输出里 `GiYOL direct NT objects:0`，那么 GiY 里到底有多少对象是直接使用 NT store 的？
+
+先澄清一个容易误解的点：
+
+- `GiYOL direct NT objects:0` 只表示 GiYOL 没有走专门的 `giyol_direct_nt_copy_live_object()` 分支，因为当前 `GIYOL_DIRECT_NONTINY_NT=0`。
+- 这不等于 GiYOL 完全没有 NT store；GiYOL 仍然有 batch NT store，最终数据中 `GiYOL NT batches=314755`，`GiYOL batch bytes NT=1229.51 MB`。
+- 但最终 GiYOL 的 `direct NT objects` 这个字段确实为 0。
+
+GiY 的对象级直接 NT store 规则在 `giy_copy_live_object()` 中：
+
+- `nbytes <= 256`：普通 `memcpy`
+- `nbytes > 256`：直接对这个对象使用 `_mm_stream_si64/_mm_stream_si128`，也就是对象级 NT store
+
+由于最终 GiY full-suite `out110_final_giy_corrected_full` 没开 `GIY_PROFILE_DETAIL=1`，没有打印 `NT copy objects`。因此我重新构建了一轮 GiY detail-counter 版本，仅用于补齐这个计数：
+
+- 输出目录：`build.debug/benchmarks/out112_giy_detail_nt_full`
+- 构建差异：`GIY_PROFILE_DETAIL=true`
+- 其他关键配置仍为：`OPT_GC=giy GIY_RSET_INDEX_FAST=true CACHE_SIZE_KB=552 GIY_AS_UPDATE=true GIY_AS_FT_ADVANCE=true`
+- 结果：12 项 benchmarks 全部 `status=0`
+- 这轮不替代最终性能数据，只用于统计 NT copy 数量。
+
+GiY 直接对象级 NT store 统计：
+
+| benchmark | materialized objs | >256 objs | NT copy objects | NT copy bytes | NT obj share | materialized bytes | NT byte share |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 609462 | 5830 | 5830 | 4.54 MB | 0.9566% | 36.55 MB | 12.42% |
+| List | 14421 | 3 | 3 | 0.00 MB | 0.0208% | 0.55 MB | 0.00% |
+| Sieve | 100431 | 50002 | 50002 | 1908.07 MB | 49.7874% | 1910.76 MB | 99.86% |
+| Queens | 20414 | 3 | 3 | 0.00 MB | 0.0147% | 1.62 MB | 0.00% |
+| Permute | 604 | 3 | 3 | 0.00 MB | 0.4967% | 0.03 MB | 0.00% |
+| Storage | 1092300458 | 3 | 3 | 0.00 MB | 0.0000% | 58771.54 MB | 0.00% |
+| Towers | 2973 | 3 | 3 | 0.00 MB | 0.1009% | 0.12 MB | 0.00% |
+| Mandelbrot | 3104819 | 3 | 3 | 0.00 MB | 0.0001% | 71.07 MB | 0.00% |
+| Richards | 293026 | 6 | 6 | 0.00 MB | 0.0020% | 14.92 MB | 0.00% |
+| CD | 83287709 | 10459610 | 10459610 | 4305.08 MB | 12.5584% | 7784.00 MB | 55.31% |
+| NBody | 26552814 | 3 | 3 | 0.00 MB | 0.0000% | 626.01 MB | 0.00% |
+| Havlak | 355641623 | 27978199 | 27978199 | 13847.30 MB | 7.8670% | 30932.32 MB | 44.77% |
+| **Total** | **1561928754** | **38493668** | **38493668** | **20064.99 MB** | **2.4645%** | **100149.49 MB** | **20.04%** |
+
+关键结论：
+
+1. GiY 中直接对象级 NT store 的对象数是 `38,493,668` 个。
+2. GiY 中直接对象级 NT store 的总字节量约 `20,064.99 MB`。
+3. `NT copy objects` 和 `>256 objs` 完全相等，因此 GiY 的直接 NT store 判据就是对象复制大小 `>256B`。
+4. 贡献主要来自三个 benchmark：
+   - Havlak：`27,978,199` 个，`13,847.30 MB`
+   - CD：`10,459,610` 个，`4,305.08 MB`
+   - Sieve：`50,002` 个，`1,908.07 MB`
+5. Storage 虽然 materialized bytes 很大，但 `>256B` 对象只有 3 个，所以 GiY 的对象级 direct NT 在 Storage 几乎没有覆盖；Storage 的复制量主要由大量 <=128B 小对象构成。
+
+## 2026-05-08 CheneyGC vs GiY vs GiYOL 三方数据报告
+
+本节比较三组数据：
+
+- CheneyGC：`build.debug/benchmarks/out24`
+  - root-controlled Cheney 对照组。
+  - 说明：这是 2026-04-27 的既有 Cheney 对照目录，不是 2026-05-07 同一时间重新跑出的目录；但它是目前已经完整跑完并用于 Cheney 对照的最终目录。
+  - `out24` 没有 `.status` 文件，但 12 个 `.out` 都包含完整 `Total CPU time` profile。
+- GiY：`build.debug/benchmarks/out110_final_giy_corrected_full`
+  - 修正后 GiY final full-suite。
+  - 12/12 `status=0`。
+- GiYOL：`build.debug/benchmarks/out111_final_giyol_corrected_full`
+  - 修正后 GiYOL final full-suite。
+  - 12/12 `status=0`。
+
+### 总体数据
+
+| metric | Cheney | GiY | GiY vs Cheney | GiYOL | GiYOL vs Cheney | GiYOL vs GiY |
+|---|---:|---:|---:|---:|---:|---:|
+| CPU total | 3498.813 | 3512.999 | +14.186 (+0.41%) | 3569.807 | +70.994 (+2.03%) | +56.808 (+1.62%) |
+| CPU business | 3379.483 | 3401.309 | +21.826 (+0.65%) | 3451.489 | +72.006 (+2.13%) | +50.180 (+1.48%) |
+| CPU GC full | 119.329 | 111.692 | -7.637 (-6.40%) | 118.319 | -1.010 (-0.85%) | +6.627 (+5.93%) |
+| Wall total | 3499.343 | 3513.638 | +14.295 (+0.41%) | 3570.418 | +71.075 (+2.03%) | +56.780 (+1.62%) |
+| Wall business | 3379.894 | 3401.615 | +21.721 (+0.64%) | 3451.219 | +71.325 (+2.11%) | +49.604 (+1.46%) |
+| Wall GC full | 119.450 | 112.020 | -7.430 (-6.22%) | 119.196 | -0.254 (-0.21%) | +7.176 (+6.41%) |
+| GC core | 89.940 | 72.560 | -17.380 (-19.32%) | 77.731 | -12.209 (-13.57%) | +5.171 (+7.13%) |
+| scan_roots | 1.307 | 0.375 | -0.932 (-71.31%) | 0.394 | -0.913 (-69.85%) | +0.019 (+5.07%) |
+| scan_RS | 2.925 | 1.146 | -1.779 (-60.82%) | 1.363 | -1.562 (-53.40%) | +0.217 (+18.94%) |
+| scavenge | 85.707 | 71.038 | -14.669 (-17.12%) | 75.972 | -9.735 (-11.36%) | +4.934 (+6.95%) |
+| Minor GC count | 2341014 | 2302292 | -38722 (-1.65%) | 2302292 | -38722 (-1.65%) | 0 |
+| Write barrier calls | 2054529628 | 2079088344 | +24558716 (+1.20%) | 2079088404 | +24558776 (+1.20%) | +60 |
+| Allocations | 19789564672 | 19637117907 | -152446765 (-0.77%) | 19637117915 | -152446757 (-0.77%) | +8 |
+| Alloc bytes | 296777.18 MB | 295614.12 MB | -1163.06 MB (-0.39%) | 295614.12 MB | -1163.06 MB (-0.39%) | 0.00 MB |
+| Forward operations | 1696428830 | 1468806830 | -227622000 (-13.42%) | 1468806755 | -227622075 (-13.42%) | -75 |
+
+总体结论：
+
+1. GiY 的 GC core 明显低于 Cheney：少 `17.380s`，`-19.32%`。
+2. GiYOL 的 GC core 也低于 Cheney：少 `12.209s`，`-13.57%`。
+3. 但 GiY 总 CPU 仍比 Cheney 多 `14.186s`，因为 GiY 的 business CPU 多 `21.826s`，抵消了 GC CPU 少 `7.637s`。
+4. GiYOL 总 CPU 比 Cheney 多 `70.994s`，其中主要来自 business CPU 多 `72.006s`；GiYOL 的 GC CPU 只比 Cheney 少 `1.010s`，基本已经没有足够 GC 收益抵消 business/边界成本。
+5. GiYOL 相对 GiY 多 `56.808s` CPU，其中 business 多 `50.180s`，GC 多 `6.627s`。也就是说 GiYOL 的当前损失不是单纯 GC core，而是 business/运行期扰动和 GC overhead 都有贡献。
+
+### 每项 benchmark 的 total CPU
+
+| benchmark | Cheney CPU | GiY CPU | GiY Δ | GiYOL CPU | GiYOL Δ vs Cheney | GiYOL Δ vs GiY |
+|---|---:|---:|---:|---:|---:|---:|
+| Bounce | 158.864 | 157.258 | -1.606 (-1.01%) | 157.902 | -0.962 (-0.61%) | +0.644 (+0.41%) |
+| List | 98.867 | 98.093 | -0.774 (-0.78%) | 98.645 | -0.222 (-0.22%) | +0.552 (+0.56%) |
+| Sieve | 123.718 | 121.526 | -2.192 (-1.77%) | 129.743 | +6.025 (+4.87%) | +8.217 (+6.76%) |
+| Queens | 116.038 | 117.245 | +1.207 (+1.04%) | 116.786 | +0.748 (+0.64%) | -0.459 (-0.39%) |
+| Permute | 382.188 | 409.291 | +27.103 (+7.09%) | 443.811 | +61.623 (+16.12%) | +34.520 (+8.43%) |
+| Storage | 209.135 | 198.762 | -10.373 (-4.96%) | 202.801 | -6.334 (-3.03%) | +4.039 (+2.03%) |
+| Towers | 185.343 | 182.585 | -2.758 (-1.49%) | 185.294 | -0.049 (-0.03%) | +2.709 (+1.48%) |
+| Mandelbrot | 234.071 | 238.255 | +4.184 (+1.79%) | 239.101 | +5.030 (+2.15%) | +0.846 (+0.36%) |
+| Richards | 943.091 | 945.469 | +2.378 (+0.25%) | 943.737 | +0.646 (+0.07%) | -1.732 (-0.18%) |
+| CD | 251.007 | 244.298 | -6.709 (-2.67%) | 247.496 | -3.511 (-1.40%) | +3.198 (+1.31%) |
+| NBody | 378.746 | 383.137 | +4.391 (+1.16%) | 386.473 | +7.727 (+2.04%) | +3.336 (+0.87%) |
+| Havlak | 417.745 | 417.080 | -0.665 (-0.16%) | 418.018 | +0.273 (+0.07%) | +0.938 (+0.22%) |
+
+逐项观察：
+
+- GiY 明显赢 Cheney 的项：`Storage` (-10.373s)、`CD` (-6.709s)、`Towers` (-2.758s)、`Sieve` (-2.192s)、`Bounce` (-1.606s)。
+- GiY 明显输 Cheney 的项：`Permute` (+27.103s)、`NBody` (+4.391s)、`Mandelbrot` (+4.184s)。
+- GiYOL 赢 Cheney 的项：`Storage` (-6.334s)、`CD` (-3.511s)、`Bounce` (-0.962s)、`List` (-0.222s)、`Towers` 基本持平。
+- GiYOL 输 Cheney 的主要项：`Permute` (+61.623s)、`NBody` (+7.727s)、`Sieve` (+6.025s)、`Mandelbrot` (+5.030s)。
+- `Permute` 是最大异常项：几乎没有 GC，却贡献了 GiY 相对 Cheney 的 `+27.103s` 和 GiYOL 相对 Cheney的 `+61.623s`，不应解释为 GC copy/NT batching 本身。
+
+### Business 与 GC 拆分
+
+| benchmark | Cheney business | GiY business | GiYOL business | Cheney GC | GiY GC | GiYOL GC |
+|---|---:|---:|---:|---:|---:|---:|
+| Bounce | 158.725 | 157.114 | 157.746 | 0.138 | 0.144 | 0.156 |
+| List | 98.849 | 98.078 | 98.634 | 0.018 | 0.015 | 0.011 |
+| Sieve | 120.975 | 119.966 | 128.227 | 2.743 | 1.560 | 1.516 |
+| Queens | 116.001 | 117.190 | 116.730 | 0.037 | 0.055 | 0.056 |
+| Permute | 382.185 | 409.289 | 443.811 | 0.003 | 0.002 | 0.000 |
+| Storage | 158.050 | 163.623 | 163.695 | 51.085 | 35.139 | 39.107 |
+| Towers | 185.342 | 182.581 | 185.289 | 0.001 | 0.004 | 0.005 |
+| Mandelbrot | 228.310 | 229.093 | 229.628 | 5.761 | 9.162 | 9.472 |
+| Richards | 942.978 | 945.312 | 943.576 | 0.113 | 0.157 | 0.161 |
+| CD | 239.133 | 231.306 | 233.980 | 11.874 | 12.993 | 13.517 |
+| NBody | 369.957 | 368.418 | 372.280 | 8.789 | 14.719 | 14.193 |
+| Havlak | 378.978 | 379.339 | 377.893 | 38.767 | 37.742 | 40.125 |
+
+解释：
+
+- `Storage`：GiY/GiYOL business 都比 Cheney 慢约 5.6s，但 GC 分别少 15.946s / 11.978s，所以 total 仍赢 Cheney。
+- `CD`：GiY/GiYOL business 比 Cheney 快，但 GC 略慢；总结果仍赢 Cheney。
+- `Havlak`：三者 total 非常接近。GiYOL business 最低，但 GC 最高。
+- `NBody` 与 `Mandelbrot`：GiY/GiYOL 的 GC 明显高于 Cheney，是这两项输 Cheney 的主要原因。
+- `Permute`：GC 约为 0，差距几乎全在 business/运行期，不应作为 GC 机制结论。
+
+### GC core 与 scavenge
+
+| benchmark | Cheney core | GiY core | GiYOL core | Cheney scavenge | GiY scavenge | GiYOL scavenge | minor GC C/G/O |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 0.065 | 0.044 | 0.047 | 0.058 | 0.042 | 0.044 | 7235/5827/5827 |
+| List | 0.002 | 0.003 | 0.003 | 0.001 | 0.003 | 0.003 | 1108/685/685 |
+| Sieve | 2.271 | 0.812 | 0.815 | 1.517 | 0.806 | 0.810 | 50000/50000/50000 |
+| Queens | 0.003 | 0.009 | 0.009 | 0.002 | 0.009 | 0.008 | 2502/2474/2474 |
+| Permute | 0.000 | 0.001 | 0.001 | 0.000 | 0.001 | 0.001 | 81/71/71 |
+| Storage | 48.552 | 32.019 | 35.681 | 48.342 | 31.962 | 35.618 | 229482/226887/226887 |
+| Towers | 0.000 | 0.001 | 0.001 | 0.000 | 0.001 | 0.001 | 222/145/145 |
+| Mandelbrot | 0.277 | 1.571 | 1.437 | 0.031 | 1.507 | 1.369 | 585211/578592/578592 |
+| Richards | 0.021 | 0.042 | 0.042 | 0.017 | 0.040 | 0.041 | 4864/4791/4791 |
+| CD | 8.000 | 8.128 | 8.416 | 7.675 | 8.009 | 8.284 | 230567/219809/219809 |
+| NBody | 0.813 | 2.771 | 2.718 | 0.198 | 2.523 | 2.439 | 726941/718711/718711 |
+| Havlak | 29.936 | 27.159 | 28.561 | 27.866 | 26.135 | 27.354 | 502801/494300/494300 |
+
+GC core 结论：
+
+- 三方 full-suite GC core：Cheney `89.940s`，GiY `72.560s`，GiYOL `77.731s`。
+- GiY 的 GC core 比 Cheney 少 `17.380s`。
+- GiYOL 的 GC core 比 Cheney 少 `12.209s`，但比 GiY 多 `5.171s`。
+- GiY/GiYOL 的优势主要来自 `Storage`、`Sieve`、`Havlak`。
+- Cheney 在 `Mandelbrot`、`NBody` 上 GC core 明显更低，尤其 NBody 的 scavenge：Cheney `0.198s`，GiY `2.523s`，GiYOL `2.439s`。
+
+### Allocation / Forward / Write Barrier
+
+| benchmark | Cheney allocs | GiY allocs | GiYOL allocs | Cheney forwards | GiY forwards | GiYOL forwards | Cheney WB | GiY WB | GiYOL WB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 45604143 | 30608585 | 30608585 | 1482507 | 391972 | 391972 | 244099 | 220708 | 220708 |
+| List | 9302050 | 4655378 | 4655378 | 49908 | 13945 | 13945 | 1113 | 679 | 679 |
+| Sieve | 601999 | 601999 | 601999 | 101802 | 50468 | 50468 | 50058 | 50058 | 50058 |
+| Queens | 8002056 | 8002056 | 8002056 | 28713 | 14856 | 14856 | 3998804 | 3998786 | 3998786 |
+| Permute | 404153 | 304710 | 304710 | 2201 | 576 | 576 | 99544 | 99513 | 99513 |
+| Storage | 1092302019 | 1092301906 | 1092301914 | 1093028469 | 1091112748 | 1091112673 | 1960439 | 1910828 | 1910888 |
+| Towers | 1802073 | 968893 | 968893 | 9488 | 2874 | 2874 | 2252749 | 1725345 | 1725345 |
+| Mandelbrot | 6547928783 | 6547928783 | 6547928783 | 3433845 | 3393963 | 3393963 | 56 | 56 | 56 |
+| Richards | 52753056 | 52552966 | 52552966 | 492613 | 398407 | 398407 | 25779205 | 24555971 | 24555971 |
+| CD | 2099019821 | 2006796747 | 2006796747 | 141201425 | 108796847 | 108796847 | 9157893 | 9263154 | 9263154 |
+| NBody | 8075024557 | 8075024068 | 8075024068 | 28038465 | 6075618 | 6075618 | 1874873328 | 1874873163 | 1874873163 |
+| Havlak | 1856819962 | 1817371816 | 1817371816 | 428559394 | 258554556 | 258554556 | 136112340 | 162390083 | 162390083 |
+
+Allocation 结论：
+
+- GiY/GiYOL allocations 比 Cheney 少 `152,446,765`，约 `-0.77%`。
+- GiY/GiYOL forward operations 比 Cheney 少约 `227,622,000`，约 `-13.42%`。
+- GiY/GiYOL write barrier calls 比 Cheney 多约 `24,558,7xx`，约 `+1.20%`。
+- 这支持之前的结论：allocation-site update 修补后，GiY/GiYOL 没有比 Cheney 做更多 allocation；剩余差距更多来自业务运行期扰动、write barrier/RSet、以及不同 benchmark 的 GC core 分布，而不是“对象分配数量爆炸”。
+
+### NT store 相关补充
+
+GiYOL final 输出：
+
+| benchmark | GiYOL NT batches | NT MB | fallback MB | special direct NT objs | special direct NT MB |
+|---|---:|---:|---:|---:|---:|
+| Bounce | 0 | 0.00 | 32.01 | 0 | 0.00 |
+| List | 0 | 0.00 | 0.55 | 0 | 0.00 |
+| Sieve | 0 | 0.00 | 2.68 | 0 | 0.00 |
+| Queens | 0 | 0.00 | 0.55 | 0 | 0.00 |
+| Permute | 0 | 0.00 | 0.02 | 0 | 0.00 |
+| Storage | 0 | 0.00 | 45723.74 | 0 | 0.00 |
+| Towers | 0 | 0.00 | 0.11 | 0 | 0.00 |
+| Mandelbrot | 0 | 0.00 | 71.07 | 0 | 0.00 |
+| Richards | 0 | 0.00 | 11.91 | 0 | 0.00 |
+| CD | 1252 | 4.89 | 2375.64 | 0 | 0.00 |
+| NBody | 0 | 0.00 | 625.97 | 0 | 0.00 |
+| Havlak | 313503 | 1224.62 | 11001.12 | 0 | 0.00 |
+| **Total** | **314755** | **1229.51** | **59845.37** | **0** | **0.00** |
+
+注意：
+
+- `special direct NT objs=0` 只表示 GiYOL 没走 `giyol_direct_nt_copy_live_object()` 这个专门分支。
+- 当前 GiYOL 的 non-tiny/fallback 路径仍可能调用通用 `giy_copy_live_object()`；这个通用路径在对象 `>256B` 时也会使用 NT store，但 final GiYOL 没开 `GIY_PROFILE_DETAIL=1`，所以没有打印通用 `NT copy objects`。
+- 已补跑 GiY detail-counter：GiY 通用对象级直接 NT 为 `38,493,668` 个，`20064.99 MB`；这个统计来自 `out112_giy_detail_nt_full`，只用于计数，不替代性能 baseline。
+
+### 最终分析结论
+
+1. CheneyGC 是最简单稳定的 copying baseline；它 total CPU 为 `3498.813s`。
+2. GiY 当前 total CPU 为 `3512.999s`，比 Cheney 慢 `14.186s` / `0.41%`。
+3. GiYOL 当前 total CPU 为 `3569.807s`，比 Cheney 慢 `70.994s` / `2.03%`，比 GiY 慢 `56.808s` / `1.62%`。
+4. GiY/GiYOL 的 GC core 都比 Cheney 更低，证明“减少 old/DRAM read、使用 GiY 风格扫描”的 GC core 方向仍然有效。
+5. GiY 没有在 total 上超过 Cheney，原因是 business CPU 多 `21.826s`，超过了 GC CPU 节省的 `7.637s`。
+6. GiYOL 没有超过 Cheney，原因更明确：business CPU 多 `72.006s`，而 GC CPU 只少 `1.010s`；当前 GiYOL 的 NT batching 收益覆盖率低，且带来额外 GC overhead。
+7. 如果汇报时只讲 GC core：GiY 和 GiYOL 都赢 Cheney。
+8. 如果汇报时讲 end-to-end：Cheney 当前仍略好于 GiY，明显好于 GiYOL。
+9. 最需要解释的异常是 `Permute`：它几乎没有 GC，却让 GiY/GiYOL 相对 Cheney 分别多 `27.103s` / `61.623s`；这不适合作为 GC 机制证据，应标注为单轮运行/业务层/二进制布局或调度噪音风险。
+10. 机制层最有价值的对比仍是 `Storage`、`CD`、`Havlak`：
+    - `Storage`：GiY/GiYOL 靠 GC savings 赢 Cheney。
+    - `CD`：GiY/GiYOL 靠 business 更低赢 Cheney，GC 略慢。
+    - `Havlak`：三者非常接近，GiYOL business 最低但 GC 最高。
+
+汇报建议：
+
+- 主表用 full-suite total：Cheney `3498.813s`，GiY `3512.999s`，GiYOL `3569.807s`。
+- 机制表用 GC core：Cheney `89.940s`，GiY `72.560s`，GiYOL `77.731s`。
+- 结论写成：“GiY/GiYOL 的 GC core 已经优于 Cheney，但当前 end-to-end 仍被 business/边界成本抵消；GiYOL 的 NT batching 目前收益覆盖率不足，尚不能带来总性能收益。”
+
+## 2026-05-08 为什么 GiY 现在看起来慢于 CheneyGC
+
+问题：之前 `GiY` 不是比 `CheneyGC` 快吗？为什么现在三方报告里 `GiY out110` 又慢于 `Cheney out24`？
+
+先给结论：
+
+- 这不是 GiY 的 GC 主体突然退化。
+- 之前“GiY 更快”的数据来自 `build.debug/benchmarks/out50_giy_as_update_final_full`。
+- 现在“GiY 略慢”的数据来自 `build.debug/benchmarks/out110_final_giy_corrected_full`。
+- `out110` 相比 `out50` 总 CPU 多 `+28.522s`，但 GC core 反而少 `-0.269s`。
+- 真正导致符号翻转的是 single-run business/runtime 波动，尤其是 `Permute`。
+
+### out50 / out110 / Cheney 总体差异
+
+| metric | Cheney out24 | GiY out50 | GiY out110 | out110 - out50 | out50 - Cheney | out110 - Cheney |
+|---|---:|---:|---:|---:|---:|---:|
+| CPU total | 3498.813 | 3484.477 | 3512.999 | +28.522 | -14.336 | +14.186 |
+| CPU business | 3379.483 | 3378.482 | 3401.309 | +22.827 | -1.001 | +21.826 |
+| CPU GC full | 119.329 | 105.998 | 111.692 | +5.694 | -13.331 | -7.637 |
+| Wall total | 3499.343 | 3485.047 | 3513.638 | +28.591 | -14.296 | +14.295 |
+| Wall business | 3379.894 | 3378.598 | 3401.615 | +23.017 | -1.296 | +21.721 |
+| Wall GC full | 119.450 | 106.448 | 112.020 | +5.572 | -13.002 | -7.430 |
+| GC core | 89.940 | 72.829 | 72.560 | -0.269 | -17.111 | -17.380 |
+| scavenge | 85.707 | 71.323 | 71.038 | -0.285 | -14.384 | -14.669 |
+| Minor GC count | 2341014 | 2302292 | 2302292 | 0 | -38722 | -38722 |
+| Write barrier calls | 2054529628 | 2079088412 | 2079088344 | -68 | +24558784 | +24558716 |
+| Allocations | 19789564672 | 19637117887 | 19637117907 | +20 | -152446785 | -152446765 |
+| Forward operations | 1696428830 | 1468807058 | 1468806830 | -228 | -227621772 | -227622000 |
+| AS observations | 0 | 866092216 | 866091911 | -305 | +866092216 | +866091911 |
+| AS entries | 0 | 5806327 | 5806322 | -5 | +5806327 | +5806322 |
+| AS applied | 0 | 118 | 118 | 0 | +118 | +118 |
+
+关键证据：
+
+1. `out110` 和 `out50` 的 minor GC count 完全一样：`2302292`。
+2. allocations 只差 `+20`，write barrier 只差 `-68`，forward operations 只差 `-228`。
+3. AS update 的 observations/entries/applied 也几乎完全一样。
+4. GC core 没变慢，反而 `out110` 比 `out50` 少 `0.269s`。
+
+因此，`out110` 慢于 `out50` 不是因为 GiY 做了更多 GC 工作，也不是因为 allocation-site 修复失效。
+
+### 逐项看 out110 相比 out50 多在哪里
+
+| benchmark | out50 CPU | out110 CPU | delta | business delta | GC delta | GC core delta |
+|---|---:|---:|---:|---:|---:|---:|
+| Bounce | 157.303 | 157.258 | -0.045 | -0.069 | +0.024 | +0.000 |
+| List | 99.082 | 98.093 | -0.989 | -0.992 | +0.003 | +0.000 |
+| Sieve | 120.809 | 121.526 | +0.717 | +0.638 | +0.078 | +0.009 |
+| Queens | 116.298 | 117.245 | +0.947 | +0.947 | +0.000 | +0.000 |
+| Permute | 387.931 | 409.291 | +21.360 | +21.360 | +0.000 | +0.000 |
+| Storage | 213.283 | 198.762 | -14.521 | -14.972 | +0.451 | +0.078 |
+| Towers | 184.069 | 182.585 | -1.484 | -1.488 | +0.004 | +0.000 |
+| Mandelbrot | 235.001 | 238.255 | +3.254 | +2.207 | +1.046 | +0.266 |
+| Richards | 936.084 | 945.469 | +9.385 | +9.350 | +0.035 | +0.001 |
+| CD | 242.552 | 244.298 | +1.746 | +1.240 | +0.507 | -0.318 |
+| NBody | 378.066 | 383.137 | +5.071 | +2.097 | +2.974 | +0.301 |
+| Havlak | 413.999 | 417.080 | +3.081 | +2.509 | +0.572 | -0.606 |
+
+最大贡献项：
+
+1. `Permute`: `+21.360s`
+   - GC CPU 只有 `0.002s`。
+   - GC core 只有 `0.001s`。
+   - Minor GC count 同为 `71`。
+   - allocations 只差 12 个。
+   - 因此 Permute 的 `+21.360s` 不是 GC 机制差异，基本是 business/runtime 层波动。
+
+2. `Richards`: `+9.385s`
+   - GC delta 只有 `+0.035s`。
+   - GC core delta 只有 `+0.001s`。
+   - allocations、forward ops、AS counters 完全一样。
+   - 因此也不是 GC core 退化。
+
+3. `NBody`: `+5.071s`
+   - 其中 business `+2.097s`，GC full `+2.974s`。
+   - GC core 只多 `+0.301s`。
+   - 主要不是 core scavenge 算法发生结构性变化。
+
+抵消项：
+
+- `Storage` 在 `out110` 反而比 `out50` 快 `-14.521s`。
+- 如果没有 Storage 的这次变快，`out110` 相比 `out50` 会更慢。
+
+### Permute 证明这是单轮波动
+
+后来为了统计 GiY 直接 NT store，我又跑了一轮 GiY detail-counter 版本：
+
+- 目录：`build.debug/benchmarks/out112_giy_detail_nt_full`
+- 注意：这轮开了 `GIY_PROFILE_DETAIL=true`，不能替代性能 baseline，只能作为辅助证据。
+
+但 `Permute` 在这轮的结果非常关键：
+
+| run | Permute CPU | Business CPU | GC CPU | Minor GC count |
+|---|---:|---:|---:|---:|
+| out50 | 387.931 | 387.929 | 0.002 | 71 |
+| out110 | 409.291 | 409.289 | 0.002 | 71 |
+| out112 detail | 386.983 | 386.982 | 0.001 | 71 |
+
+`out112 detail` 的 Permute 又回到了 `386.983s`，接近 `out50` 的 `387.931s`，而不是 `out110` 的 `409.291s`。
+
+这说明 `out110` 的 Permute 是一次慢 outlier，而不是 GiY 实现突然多做了 GC 工作。
+
+如果只把 `out110` 的 Permute 换成同样最终源码附近的 `out112 detail` Permute：
+
+- `out110` total CPU `3512.999s`
+- 减去 `409.291 - 386.983 = 22.308s`
+- 得到约 `3490.691s`
+- 这会比 Cheney `3498.813s` 快约 `8.122s`
+
+所以“GiY 是否比 Cheney 快”现在被一个非常小的总差距和单轮噪音支配。
+
+### 是否有源码变化导致真实性能回退？
+
+`out50` 到 `out110` 之间确实有一些源码变化，但从 counters 看，它们不是导致这次符号翻转的主因：
+
+1. allocation-site update 记录从 old target payload 改成 source object 的 `shape`。
+   - 这是 correctness/old-guard 安全修补。
+   - AS observations/entries/applied 在 out50 和 out110 几乎完全一致。
+
+2. NT store 的 fence 位置做过安全调整。
+   - 这可能影响 GC full 的边界时间。
+   - 但 `Permute` 几乎没有 NT/GC，却贡献最大差距，因此不能解释主要翻转。
+
+3. RSet duplicate/capacity check 做过 correctness 修补。
+   - out50/out110 write barrier calls 几乎一样，只差 `-68`。
+   - minor GC count 和 RSet 相关 profile 没有显示结构性退化。
+
+因此更合理的判断是：
+
+- 代码修补没有让 GiY GC core 退化；
+- `out110` 的 end-to-end 变慢主要是单轮 full-suite 运行波动和 business/runtime 层差异；
+- 之前 GiY 超 Cheney 的 margin 只有约 `14.3s / 0.41%`，这个 margin 太小，小于单轮 benchmark 波动。
+
+### 最终解释
+
+GiY 不是“忽然因为设计问题慢于 CheneyGC”。更准确的说法是：
+
+> 之前 `out50` 中 GiY 比 Cheney 快 `14.296s`，现在 `out110` 中 GiY 比 Cheney 慢 `14.295s`，这个符号翻转主要来自单轮运行波动。`out110` 相比 `out50` 的 GC core 没有变慢，反而少了 `0.269s`；minor GC、allocations、forward ops、AS update 计数几乎完全一致。最大异常是 `Permute` 多了 `21.360s`，而 Permute 几乎没有 GC，因此不能解释为 GiY GC 退化。
+
+汇报时应谨慎表述：
+
+- 不能说“GiY 稳定超过 CheneyGC”。
+- 也不能说“GiY 已经确定慢于 CheneyGC”。
+- 目前最稳的结论是：GiY 的 GC core 稳定优于 Cheney，但 end-to-end 与 Cheney 处在约 `±0.5%` 的噪音区间；需要多轮 median 才能确定总时间胜负。
+
+## 2026-05-08 GiYOL 中 >256B 对象是否可以直接使用 NT store
+
+问题：GiYOL 里能不能让当前大于 `256B` 的对象也采取 NT store？
+
+结论：
+
+- 如果指“实际写 old 区时是否使用 non-temporal store”，当前 GiYOL 的 `>256B` 对象已经会走 NT store。
+- 如果指“让 `GiYOL direct NT objects` 这个专门计数不再是 0”，当前默认配置没有打开这个专门分支；可以改，但不应直接粗暴打开现有 `GIYOL_DIRECT_NONTINY_NT=1`。
+
+当前代码路径：
+
+1. 通用对象复制函数 `giy_copy_live_object()`：
+   - `nbytes <= GIY_NT_COPY_MIN_BYTES`，也就是 `<=256B`：走普通 `memcpy`。
+   - `nbytes > 256B`：走 `_mm_stream_si64/_mm_stream_si128`，即 NT store。
+
+2. 当前 GiYOL non-tiny 对象路径：
+   - 当前 `GIYOL_TINY_MAX_OBJECT_BYTES=64`。
+   - `align_bytes > 64B` 的对象不会进入 tiny staging batch，而是在 traversal 阶段直接 materialize。
+   - 默认 `GIYOL_DIRECT_NONTINY_NT=0`，所以这条路径调用的是 `giy_copy_live_object()`。
+   - 因此：`64B < object <= 256B` 走普通 `memcpy`，`object > 256B` 已经走通用 NT store。
+
+为什么 final 输出里 `GiYOL direct NT objects:0`：
+
+- 这个字段统计的是 `giyol_direct_nt_copy_live_object()` 专门分支。
+- 当前 `GIYOL_DIRECT_NONTINY_NT=0`，所以这个专门分支没有被调用。
+- 但 `giy_copy_live_object()` 内部的通用 NT store 仍然会发生，只是 final GiYOL 没开 `GIY_PROFILE_DETAIL=1`，所以没有打印通用 `NT copy objects`。
+
+不建议直接做的事情：
+
+- 不建议简单用 `GIYOL_DIRECT_NONTINY_NT=1` 重新编译。
+- 原因：当前代码的 direct non-tiny 分支触发条件是 `align_bytes > GIYOL_TINY_MAX_OBJECT_BYTES`，也就是 `>64B`。
+- 如果直接打开，它会让 `65B~256B` 的对象也强行走 NT store。
+- 这违背当前 `256B` 阈值设计，可能让小对象 NT store 变慢。
+
+如果要做“正确的 >256B direct NT 实验”，建议方式：
+
+1. 保持 `GIYOL_TINY_MAX_OBJECT_BYTES=64` 不变。
+2. 在 GiYOL non-tiny immediate materialization 路径里显式判断：
+   - `align_bytes > GIY_NT_COPY_MIN_BYTES`：调用 `giyol_direct_nt_copy_live_object()`，并计入 `GiYOL direct NT objects/bytes`。
+   - `64B < align_bytes <= 256B`：继续调用 `giy_copy_live_object()`，它会走普通 `memcpy`。
+3. 这样语义上等价于当前通用路径，但 profile 会更清楚：`>256B` 的对象会被明确记到 GiYOL direct NT counters。
+
+预期效果：
+
+- 性能上未必有明显提升，因为当前 `>256B` 已经通过 `giy_copy_live_object()` 使用 NT store。
+- 主要收益是实验口径更清楚：能直接在 GiYOL 输出里看到 `direct NT objects/bytes`。
+- 如果实现时误把 `65B~256B` 也纳入 NT，反而可能降低性能。
+
+需要补的实验：
+
+- 如果要拿具体数据证明 GiYOL 的通用 `>256B` NT 数量，应重新构建 GiYOL：`GIY_PROFILE_DETAIL=true`。
+- 这样可以打印通用 `NT copy objects/bytes`。
+- 目前已有 GiY detail 计数：GiY 的 `>256B` 对象级 NT 是 `38,493,668` 个，`20064.99 MB`；GiYOL 由于 non-tiny 路径复用同一个 `giy_copy_live_object()`，理论上应非常接近，但需要 GiYOL detail run 才能给精确数。
+
+## 2026-05-08 GiYOL hybrid 策略：小对象 batch NT，大对象直接 NT
+
+用户澄清的目标策略：
+
+- 连续的小对象使用 GiYOL 式 staging/batch。
+- 累积到一定大小后统一使用 NT store。
+- 大于 `256B` 的对象不进入 staging/batch，直接使用 NT store。
+
+结论：这个策略是可行的，而且是当前 GiYOL 最值得尝试的清晰版本。
+
+当前代码和这个策略的关系：
+
+1. 当前 GiYOL 已经接近这个策略。
+   - 当前 `GIYOL_TINY_MAX_OBJECT_BYTES=64`。
+   - `<=64B` 对象进入 tiny staging/batch。
+   - `>64B` 对象直接 materialize。
+   - 其中 `>256B` 的对象通过 `giy_copy_live_object()` 已经会使用 NT store。
+   - `65B~256B` 对象直接走普通 memcpy。
+
+2. 如果想更符合“所有小对象都 batch，大对象直接 NT”的表述，建议把 batch 范围扩到 `<=256B`。
+   - 设置或实现等价策略：`GIYOL_TINY_MAX_OBJECT_BYTES=256`。
+   - `<=256B`：进入 GiYOL staging/batch，old target 连续且累计到阈值后统一 NT。
+   - `>256B`：不进入 batch，直接走 `giy_copy_live_object()`；该函数会直接使用 NT store。
+
+推荐的实验策略：
+
+- `GIYOL_TINY_MAX_OBJECT_BYTES=256`
+- `GIYOL_TINY_STAGING_BYTES=4096` 或先试 `8192`
+- `GIYOL_TINY_FLUSH_BYTES=4096` 或先试 `8192`
+- `GIYOL_FORCE_TINY_TAIL_NT=0`
+- `GIYOL_DIRECT_NONTINY_NT=0`
+
+为什么 `GIYOL_DIRECT_NONTINY_NT=0` 仍然可以：
+
+- 因为 `>256B` 的 non-tiny object 会调用 `giy_copy_live_object()`。
+- `giy_copy_live_object()` 的内部判据就是 `nbytes > 256B` 时使用 NT store。
+- 所以不需要打开 `GIYOL_DIRECT_NONTINY_NT=1`。
+
+不建议直接打开 `GIYOL_DIRECT_NONTINY_NT=1` 的原因：
+
+- 现有 direct non-tiny 分支的触发条件不是 `>256B`，而是 `align_bytes > GIYOL_TINY_MAX_OBJECT_BYTES`。
+- 如果 `GIYOL_TINY_MAX_OBJECT_BYTES=64`，打开后会让 `65B~256B` 也强行 direct NT。
+- 如果 `GIYOL_TINY_MAX_OBJECT_BYTES=256`，打开后才近似等于 `>256B direct NT`。
+- 但为了避免口径混乱，最简单安全的做法仍是保持 `GIYOL_DIRECT_NONTINY_NT=0`，让 `giy_copy_live_object()` 负责 `>256B` direct NT。
+
+这个 hybrid 策略的预期：
+
+- 相比当前 `<=64B batch`，`<=256B batch` 会显著提高 GiYOL batch NT 的覆盖率。
+- 代价是 `65B~256B` 对象需要先复制到 staging buffer，再 NT 到 old 区；如果这些对象不能形成足够大的连续 chunk，就会增加额外 staging/fallback 成本。
+- 因此必须通过 benchmarks 判断：关键指标是 `GiYOL batch bytes NT` 是否显著上升，以及 `GiYOL staging fallback bytes` 是否下降或至少没有带来更大的 GC/full-time 成本。
+
+判断实验成功的标准：
+
+1. `GiYOL batch bytes NT` 明显高于当前 final 的 `1229.51 MB`。
+2. `GiYOL staging fallback bytes` 相对当前 final 的 `59845.37 MB` 明显下降，或虽然不下降但 total/GC CPU 改善。
+3. `Storage` 不能继续出现 `NT MB=0` 且 fallback 巨大的情况；否则说明扩大到 `<=256B` 仍然没有形成有效连续 chunk。
+4. `Havlak` 和 `CD` 应该是最先看到覆盖率改善的项目。
+
+一句话结论：
+
+> 可以采用“小对象累计 batch NT，`>256B` 大对象直接 NT”的 hybrid GiYOL。当前实现已经具备大对象 direct NT 的通用路径；下一步真正值得实验的是把 tiny/batch 上限从 `64B` 扩到 `256B`，让 `65B~256B` 对象也参与连续 staging/batch，而不是直接 memcpy。
+
+## 2026-05-08 更正：`<=256B` 全量 staging/batch 之前已证明不划算
+
+用户指出：之前不是已经发现 `<=256B` staging/batch 效率更低了吗？而且当前 GiYOL 里 direct NT store 字节不是很少吗？
+
+更正结论：
+
+- 用户的质疑是对的。
+- 我上一节把 `<=256B batch + >256B direct NT` 说成“当前最值得尝试的清晰版本”，这个说法不够准确。
+- 更准确的结论是：
+  - “机制上可行”，但“作为默认优化方向已经被之前数据证明风险很大/通常不划算”。
+  - 当前 final GiYOL 选择 `<=64B` batch，而不是 `<=256B` batch，正是因为之前 `<=256B` 扩大 staging 范围后 GC core 变差。
+
+### 之前 `<=256B` 实验的关键数据
+
+对比当前 final GiYOL `out111_final_giyol_corrected_full` 与之前 `<=256B` 相关实验：
+
+#### Storage
+
+| version | CPU total | business | GC full | GC core | NT MB | fallback MB |
+|---|---:|---:|---:|---:|---:|---:|
+| final GiYOL `<=64B, flush4096` out111 | 202.801 | 163.695 | 39.107 | 35.681 | 0.00 | 45723.74 |
+| `<=256B, flush2048` out93 | 215.605 | 166.499 | 49.106 | 47.104 | 8382.48 | 50389.06 |
+| `<=256B, flush8192` out95 | 210.934 | 163.730 | 47.203 | 44.655 | 9296.30 | 49475.23 |
+| `<=256B, deferred staging, flush8192` out99 | 208.997 | 167.685 | 41.312 | 38.674 | 9296.31 | 49475.22 |
+
+Storage 结论：
+
+- `<=256B` 确实把 NT bytes 从 `0.00 MB` 提到约 `8~9 GB`。
+- 但 GC core 从 final 的 `35.681s` 变成 `38.674s~47.104s`。
+- 也就是说，“更多 NT bytes”没有换来更快，反而因为 staging/bookkeeping/extra copy 让 GC core 更慢。
+
+#### CD
+
+| version | CPU total | business | GC full | GC core | NT MB | fallback MB |
+|---|---:|---:|---:|---:|---:|---:|
+| final GiYOL `<=64B, flush4096` out111 | 247.496 | 233.980 | 13.517 | 8.416 | 4.89 | 2375.64 |
+| `<=256B, flush2048` out93 | 246.475 | 233.198 | 13.277 | 8.935 | 43.20 | 3435.72 |
+| `<=256B, flush8192/16384 output` out95 | 244.691 | 231.404 | 13.287 | 8.920 | 84.08 | 3394.85 |
+
+CD 结论：
+
+- `<=256B` 对 CD 的 total 有时略好，但 GC core 仍比 final GiYOL 更高：`8.920s/8.935s` vs `8.416s`。
+- 改善主要来自 business/run 波动或非 core 因素，不是 batch NT 明确降低了 GC core。
+
+#### Havlak
+
+| version | CPU total | business | GC full | GC core | NT MB | fallback MB |
+|---|---:|---:|---:|---:|---:|---:|
+| final GiYOL `<=64B, flush4096` out111 | 418.018 | 377.893 | 40.125 | 28.561 | 1224.62 | 11001.12 |
+| `<=256B, flush2048` out93 | 416.960 | 377.127 | 39.832 | 30.207 | 667.58 | 16417.46 |
+| `<=256B, flush8192/16384 output` out95 | 418.047 | 378.361 | 39.686 | 30.347 | 1847.05 | 15237.99 |
+
+Havlak 结论：
+
+- `<=256B` 有时 total 接近甚至略低，但 GC core 变差：`30.207s/30.347s` vs final `28.561s`。
+- fallback bytes 也更大：`15~16 GB` vs final `11 GB`。
+- 所以扩大到 `<=256B` 并没有稳定改善 GiYOL 的核心复制成本。
+
+### 为什么 `<=256B` 会更差
+
+之前的失败原因现在可以明确写成：
+
+1. `64B~256B` 对象用普通 cached memcpy 本来很便宜。
+   - microbenchmark 已显示 256B 级别直接 NT 很慢。
+   - 旧数据里 256B 直接 NT 比 young->old memcpy 慢约 15 倍。
+
+2. 进入 staging 后多了一次复制。
+   - 普通路径：`src_young -> dst_old` 一次 copy。
+   - staging 路径：`src_young -> staging`，然后 `staging -> dst_old` NT。
+   - 如果最终不能形成足够划算的连续 NT chunk，就多做了一次无效中介 copy。
+
+3. 即使形成 NT chunk，NT 本身也有固定成本。
+   - 对 4096B/8192B 这种 chunk 才可能摊薄。
+   - 对由许多 64B~256B 对象拼起来的 chunk，bookkeeping、chunk split、sfence、streaming store 成本不一定能被收益覆盖。
+
+4. fallback bytes 仍然很大。
+   - Storage `<=256B` 版本 fallback 约 `49~50 GB`，比 final `45.7 GB` 还大。
+   - Havlak `<=256B` 版本 fallback 约 `15~16 GB`，比 final `11 GB` 还大。
+   - 说明扩大 staging 范围没有消灭 fallback，反而让更多对象进入复杂路径。
+
+### 关于“当前 GiYOL 没几个 direct NT store 字节”
+
+这里要分清两个计数：
+
+1. `GiYOL direct NT bytes`
+   - 这是专门的 `giyol_direct_nt_copy_live_object()` 分支计数。
+   - 当前 final 配置 `GIYOL_DIRECT_NONTINY_NT=0`，所以它是 `0.00 MB`。
+   - 这不代表 GiYOL 对 `>256B` 对象没有使用 NT。
+
+2. 通用 `giy_copy_live_object()` 的 NT
+   - 当前 GiYOL 的 non-tiny/fallback 路径会调用 `giy_copy_live_object()`。
+   - 这个函数对 `>256B` 对象会使用 NT store。
+   - final GiYOL 没开 `GIY_PROFILE_DETAIL=1`，所以没有打印通用 `NT copy objects/bytes`。
+
+所以正确说法是：
+
+- 当前 GiYOL 的“专门 direct NT counter”为 0。
+- 当前 GiYOL 的“batch NT bytes”也很少：final full-suite 只有 `1229.51 MB`。
+- 但当前 GiYOL 里 `>256B` 对象通过通用 copy 路径使用了多少 NT，需要 GiYOL detail run 才能精确统计；不能只看 `GiYOL direct NT bytes` 字段下结论。
+
+### 修正后的策略建议
+
+不建议再把“所有 `<=256B` 对象进入 staging/batch”作为默认方向。
+
+当前更合理的策略是：
+
+1. 保持当前 final GiYOL 的保守范围：
+   - `<=64B` 才进入 tiny batch。
+   - `65B~256B` 直接普通 memcpy。
+   - `>256B` 直接通过通用路径 NT。
+
+2. 如果还要优化 GiYOL，应做更精细的选择，而不是简单 `<=256B` 全收：
+   - 只让预计能形成 target-contiguous 大 run 的对象进入 staging。
+   - 对 run 总 bytes 小于阈值的，直接 fallback，不碰 staging。
+   - 可以试 `<=96B` 或 `<=128B` 的更窄范围，但必须以 GC core 和 fallback bytes 为准。
+
+3. 汇报时应明确：
+   - “扩大到 `<=256B` 能提高 NT bytes，但此前实验显示 GC core 变差，所以 final 采用 `<=64B` 保守版本。”
+   - “GiYOL 当前失败不是因为完全没有 NT，而是有效 NT 覆盖率低，且扩大覆盖范围会引入额外 staging/fallback 成本。”
+
+## 2026-05-08 `giy_copy_live_object()` 函数解释
+
+用户问题：为什么 `giy_copy_live_object()` 看起来总是先 `memcpy`，再使用 NT store？
+
+先给结论：
+
+- 大对象路径并不是“先普通 memcpy 到 old，再 NT store 到 old”。
+- `memcpy(&v, s, 8)` 只是把 source/young 中的 8 字节安全读到本地变量/寄存器里。
+- 真正写 old/DRAM target 的动作仍然是 `_mm_stream_si64` 或 `_mm_stream_si128`，也就是 non-temporal store。
+
+当前函数逻辑：
+
+```cpp
+static inline void giy_copy_live_object(void *dst,
+                                        const void *src,
+                                        size_t nbytes,
+                                        bool *used_nt_store) {
+  giy_old_guard_allow_old_write(dst, nbytes);
+  if (nbytes <= GIY_NT_COPY_MIN_BYTES) {
+    memcpy(dst, src, nbytes);
+    giy_old_guard_protect_old_write(dst, nbytes);
+    return;
+  }
+
+  // x86/x86_64: stream-store copy for >256B
+  ...
+}
+```
+
+分两条路径：
+
+1. `nbytes <= 256`
+   - 直接 `memcpy(dst, src, nbytes)`。
+   - 这是普通 cached store。
+   - 原因：小对象用 NT store 固定成本太高，之前 microbenchmark 已经显示 64B/256B 级别 NT 很慢。
+
+2. `nbytes > 256`
+   - 进入 x86 streaming store 路径。
+   - 读 source/young：普通 load。
+   - 写 dst/old：non-temporal store。
+
+大对象 NT 路径的核心：
+
+```cpp
+while (n >= 16) {
+  __m128i v = _mm_loadu_si128((const __m128i *) s);
+  _mm_stream_si128((__m128i *) d, v);
+  s += 16;
+  d += 16;
+  n -= 16;
+}
+```
+
+这里很重要：
+
+- `_mm_loadu_si128`：从 source/young 读 16 字节到 SIMD register。
+- `_mm_stream_si128`：把 register 写到 destination/old，使用 NT store。
+- CPU 没有“memory-to-memory NT copy”这类直接把一段内存搬到另一段内存的单条指令；必须先 load 到寄存器，再 store 到目标地址。
+
+为什么 8 字节 head/tail 用 `memcpy(&v, s, sizeof(v))`：
+
+```cpp
+uint64_t v;
+memcpy(&v, s, sizeof(v));
+_mm_stream_si64((long long *) d, (long long) v);
+```
+
+这个 `memcpy` 不是把对象复制到 old。它的目的只是安全地从 `s` 读 8 字节到局部变量 `v`。
+
+这样做有几个原因：
+
+1. 避免未对齐读取的 C/C++ undefined behavior。
+   - `s` 不一定按 `uint64_t` 对齐。
+   - 直接写 `*(uint64_t *)s` 在 C/C++ 语义上可能有未定义行为。
+   - `memcpy(&v, s, 8)` 是标准安全写法，编译器通常会优化成普通 load。
+
+2. 避免 strict-aliasing 问题。
+   - source 是 `unsigned char *`。
+   - 直接强转成 `uint64_t *` 再解引用可能违反别名规则。
+   - `memcpy` 是合法的 byte-wise load 表达。
+
+3. 配合 `_mm_stream_si64`。
+   - `_mm_stream_si64` 的输入不是内存地址，而是一个 64-bit value。
+   - 所以必须先把 source 的 8 字节读成一个值，再 stream store 到目标。
+
+为什么要处理 8 字节 head：
+
+- `_mm_stream_si128` 要求目标地址 16B 对齐。
+- 当前 object target 地址有时可能是 `8 mod 16`。
+- 如果 `d` 不是 16B 对齐，但满足 `8 mod 16`，函数先用 `_mm_stream_si64` 写 8 字节。
+- 写完后 `d += 8`，目标地址就变成 16B 对齐。
+- 后面就可以用 `_mm_stream_si128` 连续写 16B。
+
+为什么 tail 只允许 8 字节：
+
+- object copy size 来自 `ALIGN(hdr->size + sizeof(object_header))`，整体按 8 字节对齐。
+- 16B loop 结束后，剩余只应该是 `0` 或 `8`。
+- 如果剩余不是 8，代码认为对齐不变量坏了，直接报错。
+
+`used_nt_store` 的作用：
+
+- 大对象路径里执行过 streaming store 后，会设置：
+
+```cpp
+*used_nt_store = true;
+```
+
+- 调用方稍后执行 `giy_finish_local_nt_stores(&used_nt_store)`，里面会在需要时 `_mm_sfence()`。
+- `sfence` 的作用是保证 NT store 在后续依赖这些 old writes 前完成/有序。
+
+所以这段代码的真实语义是：
+
+```text
+<=256B:
+  old <- memcpy(young)              // 普通 cached store
+
+>256B:
+  reg <- load young                 // 普通 load，源在 young/cache
+  old <- stream_store reg           // NT store，目标 old/DRAM
+```
+
+为什么 source 读取不是 non-temporal：
+
+- NT 主要解决的是写 old/DRAM target 时避免污染 cache。
+- source 是 young/cache 区，GC 正在扫描/复制它，读 source 本来就是热路径。
+- 所以 source 侧普通 load 是合理的；关键是 old target 写入用 streaming store。
+
+最终一句话解释：
+
+> `giy_copy_live_object()` 里看到的 `memcpy(&v, s, 8)` 不是先把对象普通写到 old，而是为了安全地把 source 的 8 字节读进寄存器；真正写 old 的仍然是 NT store。小对象 `<=256B` 才会真的使用普通 `memcpy(dst, src)`。
+
+## 2026-05-08 当前 GiY business 比 CheneyGC 慢的原因
+
+问题：当前 final GiY 的 business CPU 为什么比 CheneyGC 慢？
+
+使用数据：
+
+- CheneyGC：`build.debug/benchmarks/out24`
+- 当前 GiY：`build.debug/benchmarks/out110_final_giy_corrected_full`
+
+总体：
+
+- Cheney business CPU：`3379.483s`
+- GiY business CPU：`3401.309s`
+- GiY - Cheney：`+21.826s`
+
+先给结论：
+
+- 当前这 `+21.826s` business gap 的主因不是 GiY GC core 退化。
+- 最大来源是 `Permute` 的单轮 outlier。
+- `Permute` 一项的 business gap 是 `+27.104s`，已经超过总 gap。
+- 如果排除 `Permute`，GiY business 反而比 Cheney 快约 `5.278s`。
+
+逐项 business CPU：
+
+| benchmark | Cheney business | GiY business | GiY - Cheney |
+|---|---:|---:|---:|
+| Bounce | 158.725 | 157.114 | -1.611 |
+| List | 98.849 | 98.078 | -0.771 |
+| Sieve | 120.975 | 119.966 | -1.009 |
+| Queens | 116.001 | 117.190 | +1.189 |
+| Permute | 382.185 | 409.289 | +27.104 |
+| Storage | 158.050 | 163.623 | +5.573 |
+| Towers | 185.342 | 182.581 | -2.761 |
+| Mandelbrot | 228.310 | 229.093 | +0.783 |
+| Richards | 942.978 | 945.312 | +2.334 |
+| CD | 239.133 | 231.306 | -7.827 |
+| NBody | 369.957 | 368.418 | -1.539 |
+| Havlak | 378.978 | 379.339 | +0.361 |
+| **Total** | **3379.483** | **3401.309** | **+21.826** |
+
+正向 gap 合计：
+
+- 慢的项合计：`+37.344s`
+- 快的项合计：`-15.518s`
+- 净 gap：`+21.826s`
+
+最大项：
+
+1. `Permute`: `+27.104s`
+2. `Storage`: `+5.573s`
+3. `Richards`: `+2.334s`
+4. `Queens`: `+1.189s`
+5. `Mandelbrot`: `+0.783s`
+6. `Havlak`: `+0.361s`
+
+抵消项：
+
+- `CD`: `-7.827s`
+- `Towers`: `-2.761s`
+- `Bounce`: `-1.611s`
+- `NBody`: `-1.539s`
+- `Sieve`: `-1.009s`
+- `List`: `-0.771s`
+
+### 为什么说 Permute 是 outlier
+
+`Permute` 几乎没有 GC：
+
+| run | Permute business | Permute GC | Minor GC count | allocations |
+|---|---:|---:|---:|---:|
+| Cheney out24 | 382.185 | 0.003 | 81 | 404153 |
+| GiY out50 previous fast | 387.929 | 0.002 | 71 | 304698 |
+| GiY out110 current final | 409.289 | 0.002 | 71 | 304710 |
+| GiY out112 detail-counter | 386.982 | 0.001 | 71 | 304710 |
+
+关键事实：
+
+- out110 的 `Permute` 比 out50 慢 `21.360s`。
+- 但 GC CPU 都只有约 `0.002s`。
+- Minor GC count 同为 `71`。
+- allocations 基本一样。
+- 后来 out112 detail-counter 里 `Permute` 又回到 `386.982s`，接近 out50，而不是 out110。
+
+因此，out110 的 `Permute +27.104s` 不能解释为 GiY GC 或 allocation-site 逻辑导致；它更像一次单轮运行 outlier、调度/频率/二进制布局/运行期噪音。
+
+如果把 out110 的 `Permute` 替换成同源码附近 out112 的 `Permute`：
+
+- 当前 GiY business：`3401.309s`
+- 修正 Permute outlier：`409.289 - 386.982 = 22.307s`
+- 修正后 GiY business 约：`3379.002s`
+- Cheney business：`3379.483s`
+- 修正后 GiY 反而快约：`0.481s`
+
+如果直接排除 `Permute`：
+
+- Cheney business without Permute：`3379.483 - 382.185 = 2997.298s`
+- GiY business without Permute：`3401.309 - 409.289 = 2992.020s`
+- GiY without Permute 快约：`5.278s`
+
+### 除 Permute 外还有什么原因
+
+剩余正向 gap 主要来自：
+
+1. `Storage +5.573s`
+   - Storage 的 allocations 与 Cheney 几乎一致。
+   - Write barrier calls 甚至略少于 Cheney。
+   - 但 GiY 的 business 仍更高。
+   - 更合理的解释是 GiY 的 old-read avoidance/RSet value maintenance/GC 后 patch/cache locality side effects 对 mutator 有边界影响；这部分不在 GC core 计时里。
+   - 但 Storage 的 GC savings 很大，所以 total 仍赢 Cheney。
+
+2. `Richards +2.334s`
+   - GC CPU 只有 `0.157s`，GC core `0.042s`。
+   - allocations/forward ops/AS counters 与之前 run 一致。
+   - 更像业务运行期波动或代码布局/cache locality 影响。
+
+3. `Mandelbrot +0.783s`、`Queens +1.189s`、`Havlak +0.361s`
+   - 这些单项 gap 不大。
+   - 不足以单独说明结构性问题。
+
+### 最终判断
+
+当前 final GiY 的 business 比 Cheney 慢，最主要原因是：
+
+1. `Permute` 单轮 outlier，贡献 `+27.104s`，超过总 business gap。
+2. 其余项有小幅正负波动；排除 `Permute` 后 GiY business 其实更快。
+3. Storage/Richards 等项的剩余 business gap 更像边界成本、cache locality、RSet/old-slot patch 副作用或运行期噪音，而不是 GC core 主体慢。
+
+因此汇报时不能说：
+
+- “GiY 的 business 已经确定比 Cheney 慢。”
+
+更准确应说：
+
+> 当前单轮 final 数据里，GiY business 比 Cheney 多 `21.826s`，但这个 gap 主要由 `Permute` 的一次慢 outlier 造成。`Permute` 几乎没有 GC，且后续 GiY detail run 又恢复到旧速度。排除 `Permute` 后，GiY business 比 Cheney 快约 `5.278s`。所以当前 business gap 不能作为 GiY 结构性慢于 Cheney 的证据；更稳的结论是 end-to-end 胜负处在单轮噪音范围内，而 GiY 的 GC core 稳定优于 Cheney。
+
+## 2026-05-08 新 CheneyGC 判据 full-suite：`out113_final_cheney_552_full`
+
+用户要求：重新跑一轮准确、有效的 CheneyGC，作为后续判据。
+
+本轮输出目录：
+
+- `build.debug/benchmarks/out113_final_cheney_552_full`
+
+构建配置：
+
+- `OPT_GC=cache_cheney`
+- `CACHE_SIZE_KB=552`
+- 构建命令：`make -B -C build.debug ejsvm OPT_GC=cache_cheney CACHE_SIZE_KB=552 -j4`
+- 说明：这是当前源码下的 root-controlled `cache_cheney`，保留 Cheney copy/scavenge，使用当前源码中已经控制过的 generational root scan 和 function-table strong-slot set。
+- 选择 `CACHE_SIZE_KB=552` 的原因：和当前 final GiY/GiYOL 的 cache-size 配置保持一致。
+
+smoke 结果：
+
+- `hello_world.sbc`: `status=0`
+- `giy_gc_probe.sbc`: `status=0`
+- `bounce_check.sbc`: `status=0`
+
+完整 suite 状态：
+
+- Bounce/List/Sieve/Queens/Permute/Storage/Towers/Mandelbrot/Richards/CD/NBody/Havlak 全部 `status=0`
+- 12 个 `.out` 都包含完整 `Total CPU time` profile。
+
+运行环境记录：
+
+- start load average：`0.41, 0.36, 0.40`
+- end load average：`1.27, 1.55, 1.68`
+- runner 顺序：Bounce -> List -> Sieve -> Queens -> Permute -> Storage -> Towers -> Mandelbrot -> Richards -> CD -> NBody -> Havlak
+
+### 新 Cheney out113 总体数据
+
+| metric | Cheney out113 |
+|---|---:|
+| CPU total | 3503.724 |
+| CPU business | 3387.517 |
+| CPU GC full | 116.206 |
+| Wall total | 3504.276 |
+| Wall business | 3388.584 |
+| Wall GC full | 115.694 |
+| GC core | 89.304 |
+| scan_roots | 1.185 |
+| scan_RS | 3.015 |
+| scavenge | 85.105 |
+| Minor GC count | 2068906 |
+| Write barrier calls | 2072257202 |
+| Allocations | 19846031748 |
+| Alloc bytes | 297208.01 MB |
+| Forward operations | 1692894720 |
+
+### 新 Cheney out113 vs 旧 Cheney out24
+
+| metric | Cheney out113 | old Cheney out24 | out113 - out24 |
+|---|---:|---:|---:|
+| CPU total | 3503.724 | 3498.813 | +4.911 |
+| CPU business | 3387.517 | 3379.483 | +8.034 |
+| CPU GC full | 116.206 | 119.329 | -3.123 |
+| GC core | 89.304 | 89.940 | -0.636 |
+| scavenge | 85.105 | 85.707 | -0.602 |
+| Minor GC count | 2068906 | 2341014 | -272108 |
+
+解释：
+
+- 新 Cheney out113 的 GC core 和旧 out24 基本一致，甚至略低 `0.636s`。
+- 新 Cheney out113 的 total 比旧 out24 慢 `4.911s`，主要来自 business 时间 `+8.034s`。
+- 新 Cheney 的 minor GC count 明显减少，这是因为这轮显式使用 `CACHE_SIZE_KB=552`，而旧 out24 是之前的对照目录；以后和当前 GiY/GiYOL 对比应优先使用 out113。
+
+### 新 Cheney out113 vs 当前 GiY/GiYOL
+
+| metric | Cheney out113 | GiY out110 | GiY - Cheney | GiYOL out111 | GiYOL - Cheney |
+|---|---:|---:|---:|---:|---:|
+| CPU total | 3503.724 | 3512.999 | +9.275 | 3569.807 | +66.083 |
+| CPU business | 3387.517 | 3401.309 | +13.792 | 3451.489 | +63.972 |
+| CPU GC full | 116.206 | 111.692 | -4.514 | 118.319 | +2.113 |
+| GC core | 89.304 | 72.560 | -16.744 | 77.731 | -11.573 |
+| scavenge | 85.105 | 71.038 | -14.067 | 75.972 | -9.133 |
+| Minor GC count | 2068906 | 2302292 | +233386 | 2302292 | +233386 |
+
+结论：
+
+1. 新 Cheney 判据下，GiY 的 total CPU 比 Cheney 慢 `+9.275s`，约 `+0.26%`。
+2. GiYOL 的 total CPU 比 Cheney 慢 `+66.083s`，约 `+1.89%`。
+3. GiY 的 GC CPU 仍比 Cheney 少 `4.514s`，GC core 少 `16.744s`。
+4. GiYOL 的 GC core 也比 Cheney 少 `11.573s`，但 GC full 反而多 `2.113s`。
+5. end-to-end 上，新 Cheney 仍略优于 GiY，明显优于 GiYOL；但 GiY 与 Cheney 的差距只有 `9.275s / 3503.724s = 0.26%`，仍在单轮 full-suite 噪音敏感区。
+
+### 每项 total CPU 对比
+
+| benchmark | Cheney out113 | GiY out110 | GiY - Cheney | GiYOL out111 | GiYOL - Cheney |
+|---|---:|---:|---:|---:|---:|
+| Bounce | 158.065 | 157.258 | -0.807 | 157.902 | -0.163 |
+| List | 99.719 | 98.093 | -1.626 | 98.645 | -1.074 |
+| Sieve | 121.319 | 121.526 | +0.207 | 129.743 | +8.424 |
+| Queens | 114.402 | 117.245 | +2.843 | 116.786 | +2.384 |
+| Permute | 381.063 | 409.291 | +28.228 | 443.811 | +62.748 |
+| Storage | 208.062 | 198.762 | -9.300 | 202.801 | -5.261 |
+| Towers | 179.687 | 182.585 | +2.898 | 185.294 | +5.607 |
+| Mandelbrot | 232.644 | 238.255 | +5.611 | 239.101 | +6.457 |
+| Richards | 955.000 | 945.469 | -9.531 | 943.737 | -11.263 |
+| CD | 254.701 | 244.298 | -10.403 | 247.496 | -7.205 |
+| NBody | 377.018 | 383.137 | +6.119 | 386.473 | +9.455 |
+| Havlak | 422.044 | 417.080 | -4.964 | 418.018 | -4.026 |
+
+逐项观察：
+
+- GiY 赢新 Cheney 的项目：Bounce、List、Storage、Richards、CD、Havlak。
+- GiY 输新 Cheney 的项目：Sieve、Queens、Permute、Towers、Mandelbrot、NBody。
+- `Permute` 仍是最大异常项：GiY 比新 Cheney 慢 `+28.228s`，GiYOL 慢 `+62.748s`，但该项几乎没有 GC。
+- `Storage`、`CD`、`Havlak` 上 GiY/GiYOL 仍明显赢 Cheney。
+
+### 之后使用哪个 Cheney 判据
+
+后续建议：
+
+- 和当前 final GiY/GiYOL 比较时，使用 `out113_final_cheney_552_full`。
+- 旧 `out24` 只作为历史 root-controlled Cheney 对照，不再作为当前最终判据。
+- 汇报时写明：`out113` 是当前源码、`CACHE_SIZE_KB=552`、12/12 status=0 的新 Cheney full-suite。
+
+一句话结论：
+
+> 新 CheneyGC 判据 `out113_final_cheney_552_full` 已完整有效。它显示当前 GiY 的 GC core 仍显著优于 Cheney，但 end-to-end total CPU 仍比 Cheney 慢约 `9.275s / 0.26%`；这个差距很小，仍需要多轮 median 才能判断稳定胜负。GiYOL 当前比新 Cheney 慢约 `66.083s / 1.89%`。
+
+## 2026-05-08 当前最准确 CheneyGC / GiY / GiYOL 三方数据分析
+
+本节使用当前三个最终有效 full-suite 目录：
+
+- CheneyGC: `build.debug/benchmarks/out113_final_cheney_552_full`
+- GiY: `build.debug/benchmarks/out110_final_giy_corrected_full`
+- GiYOL: `build.debug/benchmarks/out111_final_giyol_corrected_full`
+
+有效性：
+
+- 三个目录均为 12/12 benchmarks 完整输出。
+- 新 Cheney `out113` 是当前源码、`OPT_GC=cache_cheney`、`CACHE_SIZE_KB=552` 的最新判据。
+- GiY/GiYOL 使用当前 final corrected full-suite 结果。
+
+### 总体数据
+
+| GC | total CPU | business CPU | GC full CPU | GC core | scan_roots | scan_RS | scavenge | minor GC | write barrier | allocs | alloc MB | forward ops |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Cheney | 3503.724 | 3387.517 | 116.206 | 89.304 | 1.185 | 3.015 | 85.105 | 2068906 | 2072257202 | 19846031748 | 297208.01 | 1692894720 |
+| GiY | 3512.999 | 3401.309 | 111.692 | 72.560 | 0.375 | 1.146 | 71.038 | 2302292 | 2079088344 | 19637117907 | 295614.12 | 1468806830 |
+| GiYOL | 3569.807 | 3451.489 | 118.319 | 77.731 | 0.394 | 1.363 | 75.972 | 2302292 | 2079088404 | 19637117915 | 295614.12 | 1468806755 |
+
+### 相对 Cheney 的总体差异
+
+| GC | total | business | GC full | GC core | scavenge | minor GC | forward ops | total pct |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| GiY - Cheney | +9.275 | +13.792 | -4.514 | -16.744 | -14.067 | +233386 | -224087890 | +0.265% |
+| GiYOL - Cheney | +66.083 | +63.972 | +2.113 | -11.573 | -9.133 | +233386 | -224087965 | +1.886% |
+
+直接结论：
+
+1. 如果看 end-to-end total CPU，新 Cheney 当前最好：`3503.724s`。
+2. GiY 比 Cheney 慢 `9.275s`，只有 `0.265%`；这个差距很小，单轮 full-suite 下仍然容易被 benchmark 噪音影响。
+3. GiY 的 GC core 比 Cheney 少 `16.744s`，scavenge 少 `14.067s`。也就是说，GiY 的 GC 内核工作本身是更快的。
+4. GiY 输在 business/non-GC 时间：GiY business 比 Cheney 多 `13.792s`，抵消了 `GC full -4.514s` 的优势。
+5. GiYOL 当前不是成功优化：它比 Cheney 慢 `66.083s`，也比 GiY 慢 `56.808s`。
+
+### GiYOL 相对 GiY
+
+| metric | GiYOL - GiY |
+|---|---:|
+| total CPU | +56.808 |
+| business CPU | +50.180 |
+| GC full CPU | +6.627 |
+| GC core | +5.171 |
+| scavenge | +4.934 |
+| minor GC | +0 |
+| forward ops | -75 |
+| total pct | +1.617% |
+
+解释：
+
+- GiYOL 和 GiY 的 minor GC 数完全一样，forward ops 几乎一样，说明 GiYOL 没有改变主要存活对象集合和 GC 触发结构。
+- GiYOL 的额外成本主要来自 copy 策略本身：small-object staging、flush 判断、tail fallback、以及 NT store 路径没有换回足够收益。
+- 因此当前 GiYOL 不是“做了更多 GC 工作”，而是“为了尝试批量 NT store，额外增加了一层搬运/判断成本”，收益不足以覆盖开销。
+
+### 每项 benchmark total CPU
+
+| benchmark | Cheney | GiY | GiY-Cheney | GiYOL | GiYOL-Cheney | GiYOL-GiY |
+|---|---:|---:|---:|---:|---:|---:|
+| Bounce | 158.065 | 157.258 | -0.807 | 157.902 | -0.163 | +0.644 |
+| List | 99.719 | 98.093 | -1.626 | 98.645 | -1.074 | +0.552 |
+| Sieve | 121.319 | 121.526 | +0.207 | 129.743 | +8.424 | +8.217 |
+| Queens | 114.402 | 117.245 | +2.843 | 116.786 | +2.384 | -0.459 |
+| Permute | 381.063 | 409.291 | +28.228 | 443.811 | +62.748 | +34.520 |
+| Storage | 208.062 | 198.762 | -9.300 | 202.801 | -5.261 | +4.039 |
+| Towers | 179.687 | 182.585 | +2.898 | 185.294 | +5.607 | +2.709 |
+| Mandelbrot | 232.644 | 238.255 | +5.611 | 239.101 | +6.457 | +0.846 |
+| Richards | 955.000 | 945.469 | -9.531 | 943.737 | -11.263 | -1.732 |
+| CD | 254.701 | 244.298 | -10.403 | 247.496 | -7.205 | +3.198 |
+| NBody | 377.018 | 383.137 | +6.119 | 386.473 | +9.455 | +3.336 |
+| Havlak | 422.044 | 417.080 | -4.964 | 418.018 | -4.026 | +0.938 |
+
+逐项结论：
+
+- GiY 赢 Cheney：Bounce、List、Storage、Richards、CD、Havlak。
+- GiY 输 Cheney：Sieve、Queens、Permute、Towers、Mandelbrot、NBody。
+- GiYOL 只相对 GiY 赢 Queens 和 Richards；其余大部分项目输给 GiY。
+- `Permute` 是 GiY/GiYOL total gap 的最大来源：GiY 比 Cheney 慢 `28.228s`，GiYOL 比 Cheney 慢 `62.748s`。但 `Permute` 的 GC CPU 几乎为零，所以它不能证明 GC core 变慢，只能说明当前 end-to-end 单轮结果中 business/non-GC 时间非常不利。
+
+### 每项 business 与 GC full 差异
+
+| benchmark | GiY business diff | GiY GC diff | GiYOL business diff | GiYOL GC diff |
+|---|---:|---:|---:|---:|
+| Bounce | -0.841 | +0.034 | -0.209 | +0.046 |
+| List | -1.630 | +0.004 | -1.074 | +0.000 |
+| Sieve | +0.953 | -0.746 | +9.214 | -0.790 |
+| Queens | +2.810 | +0.033 | +2.350 | +0.034 |
+| Permute | +28.227 | +0.001 | +62.749 | -0.001 |
+| Storage | +6.717 | -16.016 | +6.789 | -12.048 |
+| Towers | +2.899 | -0.001 | +5.607 | +0.000 |
+| Mandelbrot | +1.635 | +3.976 | +2.170 | +4.286 |
+| Richards | -9.604 | +0.073 | -11.340 | +0.077 |
+| CD | -11.874 | +1.472 | -9.200 | +1.996 |
+| NBody | -0.864 | +6.983 | +2.998 | +6.457 |
+| Havlak | -4.636 | -0.327 | -6.082 | +2.056 |
+
+关键解释：
+
+- GiY 的 `GC full` 总体比 Cheney 少 `4.514s`，但 business 总体多 `13.792s`，所以最终 total 慢 `9.275s`。
+- GiY 在 Storage 上 GC 优势极大：`GC full -16.016s`，但 business 慢 `+6.717s`，最后仍净赢 `9.300s`。
+- GiY 在 CD/Richards/Havlak 的优势主要来自 business 时间更低，不只是 GC。
+- GiY 在 NBody/Mandelbrot 的 GC full 明显更慢，说明这些 workload 上 GiY 的 root/RS/traverse 外围或对象访问形态不占优。
+- GiYOL 的最大问题是 business 时间：相对 GiY 多 `50.180s`，其中 `Permute +34.520s`、`Sieve +8.217s`、`Storage +4.039s`、`NBody +3.336s`、`CD +3.198s`、`Towers +2.709s` 都贡献了损失。
+
+### GC core / scavenge 层面的差异
+
+| benchmark | GiY core diff | GiYOL core diff | GiY scavenge diff | GiYOL scavenge diff |
+|---|---:|---:|---:|---:|
+| Bounce | -0.013 | -0.010 | -0.006 | -0.004 |
+| List | +0.001 | +0.001 | +0.002 | +0.002 |
+| Sieve | -1.096 | -1.093 | -0.477 | -0.473 |
+| Queens | +0.007 | +0.007 | +0.008 | +0.007 |
+| Permute | +0.001 | +0.001 | +0.001 | +0.001 |
+| Storage | -16.277 | -12.615 | -16.147 | -12.491 |
+| Towers | +0.001 | +0.001 | +0.001 | +0.001 |
+| Mandelbrot | +1.327 | +1.193 | +1.479 | +1.341 |
+| Richards | +0.023 | +0.023 | +0.025 | +0.026 |
+| CD | +0.242 | +0.530 | +0.412 | +0.687 |
+| NBody | +2.057 | +2.004 | +2.348 | +2.264 |
+| Havlak | -3.017 | -1.615 | -1.713 | -0.494 |
+
+GC core 结论：
+
+- GiY 的核心 GC 优势主要来自 Storage：`core -16.277s`，以及 Havlak：`core -3.017s`，Sieve：`core -1.096s`。
+- GiY 的核心 GC 劣势主要在 NBody：`core +2.057s`，Mandelbrot：`core +1.327s`，CD：`core +0.242s`。
+- GiYOL 保留了 GiY 对 Cheney 的一部分 GC core 优势，但比 GiY 自己差 `+5.171s`；说明 OL batching 当前没有提升核心复制路径，反而增加了 scavenge 成本。
+
+### 最终大结论
+
+1. 当前最准确 end-to-end 排名：Cheney `3503.724s` < GiY `3512.999s` < GiYOL `3569.807s`。
+2. 当前最准确 GC core 排名：GiY `72.560s` < GiYOL `77.731s` < Cheney `89.304s`。
+3. GiY 的 GC 内核设计是有效的：比 Cheney 少 `16.744s` core，少 `14.067s` scavenge，少 `224087890` 次 forward operations。
+4. 但 GiY 的 end-to-end 没赢 Cheney，因为 business/non-GC 多 `13.792s`，抵消了 GC full 少 `4.514s`。
+5. GiYOL 当前失败：它没有减少主工作量，反而相对 GiY 增加 `50.180s` business 和 `6.627s` GC full。当前 OL 策略不能作为最终优化方向，除非后续能证明 batching 的额外搬运/判断成本可以被更大规模的 NT store 收益覆盖。
+6. 汇报时应区分两个结论：如果汇报“GC 核心机制”，GiY 明显优于 Cheney；如果汇报“当前整套 VM end-to-end 单轮 full-suite”，Cheney 目前小幅领先 GiY，GiYOL 明显落后。
+
+## 2026-05-08 关于 coreGC / fullGC / business 的含义与 GiY/GiYOL business 差距解释
+
+### coreGC 是什么
+
+当前 profile 里的 `GC core total` 不是整个 GC，而是手工累加的内部核心阶段：
+
+```c
+total_gc_core_ns = total_scan_roots_time + total_scan_rs_time + total_scavenge_time;
+```
+
+也就是说：
+
+- `coreGC = scan_roots + scan_RS + scavenge`
+- Cheney 中大致对应：扫描 generational roots/function-table strong slots、扫描 remembered set、Cheney scavenge/copy。
+- GiY/GiYOL 中对应：reserve roots、reserve remembered set、young graph traverse/copy/materialize、allocation-site update、patch roots、patch remembered set、function-table patch/clear、必要时 `sfence`。
+
+需要注意：GiY/GiYOL 的 `scavenge` 标签比 Cheney 的传统 `scavenge` 更宽。它不是单纯 Cheney 式“从 scan 指针扫到 free 指针”，而是包含 GiY 的 young traversal、copy/materialize、patch roots、patch RSet 等后半段工作。
+
+### fullGC 是什么
+
+`GC CPU(full)` 是从 minor GC 入口到 minor GC 退出的整段 CPU 时间。它包围范围更大：
+
+- GC 入口计时；
+- `minor_gc_count++`、`in_minor_gc = 1`；
+- coreGC 主体；
+- weak clear：Cheney 走 `weak_clear<...>`，GiY/GiYOL 走 `giy_weak_clear(ctx)`；
+- young/cache 区 reset；
+- remembered set clear；
+- PMU window stop；
+- 计时器开销和一些 GC 外围 bookkeeping。
+
+因此：
+
+- `fullGC >= coreGC` 通常成立。
+- `fullGC - coreGC` 代表 GC 主体外的外围成本，例如 weak_clear、RSet clear、cache reset、PMU/timer、其他 bookkeeping。
+
+### business 是什么
+
+当前 profile 的 business 不是直接测出来的“业务函数耗时”，而是剩余项：
+
+```c
+business_cpu = total_elapsed_cpu - total_gc_full_cpu;
+```
+
+所以：
+
+- `business` 表示“没有被 fullGC 包住的所有 CPU 时间”。
+- 它包括 JS/benchmark 本身的执行、allocation fast path、write barrier、普通对象访问、解释器 dispatch、以及 GC 结束后由 cache/TLB 状态变化带来的 mutator 访问成本。
+- 它不是“业务语义操作数”。GiY 和 GiYOL 跑的是同一份 benchmark，但 business 时间仍然可以不同。
+
+### 为什么 GiY 和 GiYOL business 层面操作几乎一样，business 时间仍会不同
+
+原因 1：business 是 residual bucket。
+
+- 只要不是在 minor GC full window 里面，就都会被算进 business。
+- 单轮 benchmark 的运行波动、CPU 频率、二进制布局、cache/TLB 状态差异，都会反映到 business。
+- 因此 business 差距不等于“JS 源码层面多执行了这么多业务操作”。
+
+原因 2：GC 会改变 GC 之后 mutator 的 cache/TLB 状态。
+
+- GiY/GiYOL 虽然 benchmark 业务逻辑一样，但 GC 对 old object 的写入方式、写入顺序、是否 delayed materialization、是否 NT store、是否 staging/fallback，会改变 GC 结束时 cache 里留下了什么。
+- 如果 GC 把 mutator 马上要访问的 old object 留在 cache 里，后续 business 会更快。
+- 如果 GC 用 NT store 或批量 fallback 导致目标 old line 没被正常 warm up，或者把有用 cache line 挤掉，后续 miss 成本会记在 business，而不是 GC。
+
+原因 3：GiYOL 当前的实际 NT batching 没有真正吃到收益。
+
+当前 GiYOL `out111` profile 显示：
+
+- `GiYOL direct non-tiny NT: 0`
+- `GiYOL direct NT objects: 0`
+- `GiYOL tiny flushes: 0`
+- 很多对象走了 staging fallback，例如 Storage：`929000412` 个 fallback object，`45723.74 MB`
+
+这说明当前 final GiYOL 不是“大量成功批量 NT store”的状态，而是“引入了 GiYOL 的 deferred/batch/staging 判定，但最后大量落回普通 `giy_copy_live_object`”。这会增加 GC full/core 成本，也会改变 GC 结束时的 cache 状态。
+
+原因 4：当前 GiYOL business 差距里有明显单轮异常成分。
+
+GiYOL 相对 GiY：
+
+| metric | GiYOL - GiY |
+|---|---:|
+| total CPU | +56.808 |
+| business CPU | +50.180 |
+| GC full CPU | +6.627 |
+| GC core | +5.171 |
+
+但这个 `business +50.180s` 不是均匀来自所有项目。主要来源：
+
+| benchmark | GiYOL business - GiY business |
+|---|---:|
+| Permute | +34.522 |
+| Sieve | +8.261 |
+| NBody | +3.862 |
+| CD | +2.674 |
+| Towers | +2.708 |
+| Storage | +0.072 |
+
+其中 `Permute` 尤其关键：
+
+- Permute 的 GC 时间几乎为零。
+- GiYOL profile 中 Permute 只有 `490` 个 staging fallback object，`0.02 MB`。
+- 但 GiYOL business 比 GiY 多 `34.522s`。
+
+这不可能主要由 GiYOL 的 copy/staging 路径直接解释。它更像单轮 benchmark 波动、代码布局、CPU 状态或其他非 GC 因素落入 business residual bucket。因此不能把 `GiYOL business +50.180s` 全部解释为“GiYOL 业务路径真的慢了 50 秒”。
+
+### 最终判断
+
+1. `coreGC` 用来评价 GC 核心机制更合适，尤其是 scan/traverse/copy/patch 主体。
+2. `fullGC` 用来评价一次 minor GC 从入口到出口的真实停顿/总 GC 成本。
+3. `business` 是 `total - fullGC` 的剩余项，不等于“业务语义操作完全相同所以一定应相同”。
+4. GiY/GiYOL 的 business 差距可以来自 GC 对 cache/TLB/old layout 的后效应，也可以来自单轮运行波动；尤其 Permute 的巨大差距不能用 GiYOL copy 工作量解释。
+5. 当前可靠结论应写成：GiY 的 GC core 明确优于 Cheney；GiYOL 的 core 比 GiY 差；GiYOL 的 end-to-end/business 结果当前含明显单轮异常，若要把 business 差距作为正式结论，必须做多轮 median 或 paired A/B 重跑。
+
+## 2026-05-08 当前 GiY / GiYOL 中 `_mm_sfence()` 的触发时机
+
+用户问的 `mm_fense`，当前源码里实际是 x86 intrinsic `_mm_sfence()`，不是 `_mm_mfence()`。它是 store fence，主要用于约束 non-temporal / streaming store 的可见顺序。
+
+源码位置：`ejsvm/GiY.cc`。
+
+### 1. 每次 protected old write 结束时会触发一次
+
+函数：
+
+```c
+static void giy_old_guard_protect_old_write(void *addr, size_t len) {
+  if (!g_old_guard_active)
+    return;
+#if defined(__x86_64__) || defined(__i386__)
+  _mm_sfence();
+#endif
+  giy_old_guard_set_range(addr, len, PROT_NONE);
+}
+```
+
+含义：
+
+- 只要 `g_old_guard_active == true`，每次允许写 old 区之后重新保护 old 区，都会先执行 `_mm_sfence()`。
+- 这不仅发生在 NT store 后；当前实现里，小对象普通 `memcpy` 到 old 区后，也会调用 `giy_old_guard_protect_old_write()`，因此也会触发这个 fence。
+- 这是当前 old-write guard 机制的一部分，目的是在重新 `mprotect(PROT_NONE)` 前，让之前对 old 区的 store 完成顺序更明确。
+
+### 2. GiY 对 live object 执行 copy/materialize 时
+
+普通 GiY 路径：
+
+```c
+giy_copy_live_object(dst_hdr, src_hdr, align_bytes, &used_nt_store);
+```
+
+`giy_copy_live_object()` 的行为：
+
+- `nbytes <= 256`：使用 `memcpy(dst, src, nbytes)`，然后调用 `giy_old_guard_protect_old_write()`，所以如果 old guard active，会触发一次 `_mm_sfence()`。
+- `nbytes > 256`：使用 `_mm_stream_si64` / `_mm_stream_si128` 做 NT store，设置 `*used_nt_store = true`，然后调用 `giy_old_guard_protect_old_write()`，因此会立即触发一次 `_mm_sfence()`。
+
+之后，在整个 `giy_traverse_stack_and_copy()` 结束时，还有：
+
+```c
+giy_finish_local_nt_stores(&used_nt_store);
+```
+
+它内部是：
+
+```c
+if (*used_nt_store)
+  _mm_sfence();
+*used_nt_store = false;
+```
+
+所以对普通 GiY 来说：
+
+1. live object copy 过程中，每次 old guard 重新保护 old 区时可能触发 fence；
+2. 如果本轮 traversal 中至少有一次对象 copy 使用了 NT store，traversal 结束时还会再触发一次 local `_mm_sfence()`。
+
+### 3. GiYOL 对 live object 执行 copy/materialize 时
+
+GiYOL 使用同一个 `giy_traverse_stack_and_copy()`，但在 `USE_GIYOL` 下会先走 GiYOL 分支。
+
+当前默认 GiYOL 配置：
+
+```c
+GIYOL_STAGING_COPY = 1
+GIYOL_TINY_STAGING = 1
+GIYOL_TINY_STAGING_BYTES = 4096
+GIYOL_TINY_FLUSH_BYTES = 4096
+GIYOL_TINY_MAX_OBJECT_BYTES = 64
+GIYOL_FORCE_TINY_TAIL_NT = 0
+GIYOL_DIRECT_NONTINY_NT = 0
+```
+
+GiYOL 的触发路径：
+
+- `>64B` 的对象：当前 `GIYOL_DIRECT_NONTINY_NT=0`，所以走 `giy_copy_live_object()`，也就是和 GiY 一样，`>256B` 才用 NT store，随后 old guard protect 可能触发 `_mm_sfence()`。
+- `<=64B` 的 tiny 对象：进入 tiny staging。只有当目标地址连续、chunk bytes 达到 `4096B`，或者 `GIYOL_FORCE_TINY_TAIL_NT=1` 时，`giyol_flush_tiny_chunk()` 才会调用 `giyol_stream_copy_region()` 执行 NT store。
+- 如果 tiny chunk 没达到 4096B，当前会 fallback 到逐对象 `giy_copy_live_object()`。
+
+因此 GiYOL 中 `_mm_sfence()` 的时机和 GiY 一样也有两类：
+
+1. 每次 old guard protect 时触发；
+2. 如果本次 traversal 中任何 GiYOL NT path 或 `giy_copy_live_object()` NT path 把 `used_nt_store` 置为 true，则 traversal 结束时 `giy_finish_local_nt_stores()` 再触发一次。
+
+### 4. patch old slot 时也可能触发
+
+GiY/GiYOL 修复 old 区 slot 时使用：
+
+```c
+giy_store_u64_old(...)
+```
+
+在 x86 下它会：
+
+```c
+_mm_stream_si64((long long *) slot, (long long) bits);
+g_used_nt_old_store = true;
+giy_old_guard_protect_old_write(slot, sizeof(*slot));
+```
+
+所以 old slot patch 的 NT store 会：
+
+- 立即在 `giy_old_guard_protect_old_write()` 中触发 `_mm_sfence()`；
+- 把全局 `g_used_nt_old_store = true`。
+
+在 `giy_minor_collect()` 末尾还有：
+
+```c
+if (g_used_nt_old_store)
+  _mm_sfence();
+```
+
+所以如果本次 minor GC 中 patch old slot 使用过 NT store，minor GC 主体结束处还会再触发一次全局 `_mm_sfence()`。
+
+### 5. weak clear / inline cache patch 后也可能触发
+
+`giy_weak_clear(ctx)` 开始时会：
+
+```c
+g_used_nt_old_store = false;
+```
+
+然后执行 weak clear 和 inline cache patch。结束时：
+
+```c
+if (g_used_nt_old_store)
+  _mm_sfence();
+```
+
+也就是说，如果 weak clear / inline cache patch 阶段通过 `giy_store_u64_old()` 做过 old slot NT store，结束时会再执行一次 `_mm_sfence()`。
+
+### 直接结论
+
+当前 GiY 和 GiYOL 中 `_mm_sfence()` 不是“每个 GC 只在最后启动一次”。实际更复杂：
+
+1. old guard active 时，每次 old write 结束并重新 protect old 区，都会先 `_mm_sfence()`；
+2. live object copy 使用 NT store 后，`giy_traverse_stack_and_copy()` 结束会再 fence 一次；
+3. old slot patch 使用 NT store 后，`giy_minor_collect()` 结束会再 fence 一次；
+4. weak clear / inline cache patch 如果产生 old NT store，`giy_weak_clear()` 结束也会 fence 一次；
+5. GiYOL 继承上述全部行为；额外的 GiYOL batch/tiny NT 只是在满足 tiny chunk >= `4096B` 或其他 batch 条件时才会把 `used_nt_store` 置 true，从而触发 traversal 末尾 fence。
+
+重要判断：
+
+- 当前实现里 fence 的数量可能比直觉中多，尤其是 `giy_old_guard_protect_old_write()` 里无条件 `_mm_sfence()` 这一点。
+- 如果要继续优化 GiY/GiYOL，`old guard protect` 内的 per-write fence 是否必要，值得单独做消融实验。它可能会让 NT store 的收益被频繁 fence 抵消。
+
+## 2026-05-08 导师汇报用：CheneyGC / GiY / GiYOL GC 时间简表
+
+数据来源：
+
+- 使用公平重跑中三者都已经完整完成的前两轮：
+  - CheneyGC：`out123_fair_cheney_552_r1`、`out128_fair_cheney_552_r2`
+  - GiY：`out124_fair_giy_552_r1`、`out127_fair_giy_552_r2`
+  - GiYOL：`out125_fair_giyol_552_r1`、`out126_fair_giyol_552_r2`
+- 每个目录 12/12 benchmarks status=0。
+- 第三轮当前尚未三者全部完成，因此本表不混入第三轮，避免 Cheney/GiY/GiYOL 样本数不一致。
+- 表中数值为前两轮平均值。
+
+### 总体结果
+
+| GC | Total CPU | Business CPU | Full GC | Core GC | Scavenge | Total vs Cheney | Full GC reduction | Core GC reduction |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| CheneyGC | 3558.039 | 3441.476 | 116.561 | 90.160 | 85.908 | baseline | baseline | baseline |
+| GiY | 3569.227 | 3481.822 | 87.406 | 55.458 | 53.885 | +11.189 (+0.314%) | 25.01% | 38.49% |
+| GiYOL | 3558.390 | 3466.772 | 91.620 | 60.194 | 58.373 | +0.351 (+0.010%) | 21.40% | 33.24% |
+
+### GC 减少量
+
+| GC | Full GC diff | Core GC diff | Scavenge diff | Business diff |
+|---|---:|---:|---:|---:|
+| GiY - Cheney | -29.155 | -34.702 | -32.023 | +40.346 |
+| GiYOL - Cheney | -24.942 | -29.966 | -27.534 | +25.296 |
+
+解释：
+
+- GiY 的 GC 减少最明显：Full GC 少 `29.155s`，Core GC 少 `34.702s`。
+- GiYOL 的 GC 也明显少于 Cheney：Full GC 少 `24.942s`，Core GC 少 `29.966s`。
+- 但 GiY/GiYOL 的 Business CPU 都高于 Cheney，分别多 `40.346s` 和 `25.296s`，抵消了 GC 收益。
+- 因此前两轮平均的 end-to-end 结果是：GiYOL 几乎与 Cheney 持平，GiY 小幅慢于 Cheney。
+
+### 每项 benchmark 的 Full GC 时间
+
+| benchmark | Cheney Full GC | GiY Full GC | GiY reduction | GiYOL Full GC | GiYOL reduction |
+|---|---:|---:|---:|---:|---:|
+| Bounce | 0.123 | 0.133 | -7.29% | 0.124 | -0.40% |
+| List | 0.017 | 0.010 | 38.24% | 0.018 | -2.94% |
+| Sieve | 2.321 | 1.369 | 40.98% | 1.260 | 45.72% |
+| Queens | 0.025 | 0.032 | -28.00% | 0.030 | -20.00% |
+| Permute | 0.002 | 0.002 | 0.00% | 0.002 | -33.33% |
+| Storage | 50.805 | 27.090 | 46.68% | 30.755 | 39.46% |
+| Towers | 0.002 | 0.002 | -33.33% | 0.005 | -233.33% |
+| Mandelbrot | 5.149 | 6.424 | -24.77% | 6.222 | -20.84% |
+| Richards | 0.100 | 0.104 | -4.00% | 0.104 | -4.00% |
+| CD | 11.502 | 11.401 | 0.88% | 11.693 | -1.66% |
+| NBody | 8.103 | 9.496 | -17.19% | 9.570 | -18.10% |
+| Havlak | 38.413 | 31.343 | 18.41% | 31.838 | 17.12% |
+
+导师汇报版结论：
+
+1. GiY/GiYOL 的 GC 主体确实比 CheneyGC 更快。
+2. GiY 的 Core GC 相比 CheneyGC 减少 `38.49%`，GiYOL 减少 `33.24%`。
+3. Full GC 上，GiY 减少 `25.01%`，GiYOL 减少 `21.40%`。
+4. End-to-end 上，GiYOL 与 CheneyGC 基本持平；GiY 因 Business CPU 增加较多，总时间小幅慢 `0.314%`。
+5. 最大 GC 收益主要来自 Storage、Havlak、Sieve；NBody 和 Mandelbrot 上 GiY/GiYOL 的 Full GC 反而慢于 CheneyGC。
+
+## 2026-05-08 导师展示用：指定 out110 / out113 / out111 三项数据
+
+本节只使用用户指定的三个目录：
+
+- `out110_final_giy_corrected_full`：GiY
+- `out113_final_cheney_552_full`：CheneyGC
+- `out111_final_giyol_corrected_full`：GiYOL
+
+不混入正在后台跑的公平三轮数据。
+
+### 总体表
+
+| GC | 目录 | Total CPU | Business CPU | Full GC | Core GC | Scavenge | Minor GC | Forward ops |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| CheneyGC | out113 | 3503.724 | 3387.517 | 116.206 | 89.304 | 85.105 | 2068906 | 1692894720 |
+| GiY | out110 | 3512.999 | 3401.309 | 111.692 | 72.560 | 71.038 | 2302292 | 1468806830 |
+| GiYOL | out111 | 3569.807 | 3451.489 | 118.319 | 77.731 | 75.972 | 2302292 | 1468806755 |
+
+### 相对 CheneyGC 的差异
+
+| GC | Total diff | Total pct | Full GC diff | Full GC reduction | Core GC diff | Core GC reduction | Scavenge diff | Scavenge reduction | Business diff |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| GiY - Cheney | +9.275 | +0.265% | -4.514 | +3.88% | -16.744 | +18.75% | -14.067 | +16.53% | +13.792 |
+| GiYOL - Cheney | +66.083 | +1.886% | +2.113 | -1.82% | -11.573 | +12.96% | -9.133 | +10.73% | +63.972 |
+
+### 每项 benchmark Total CPU
+
+| benchmark | Cheney out113 | GiY out110 | GiY - Cheney | GiYOL out111 | GiYOL - Cheney |
+|---|---:|---:|---:|---:|---:|
+| Bounce | 158.065 | 157.258 | -0.807 | 157.902 | -0.163 |
+| List | 99.719 | 98.093 | -1.626 | 98.645 | -1.074 |
+| Sieve | 121.319 | 121.526 | +0.207 | 129.743 | +8.424 |
+| Queens | 114.402 | 117.245 | +2.843 | 116.786 | +2.384 |
+| Permute | 381.063 | 409.291 | +28.228 | 443.811 | +62.748 |
+| Storage | 208.062 | 198.762 | -9.300 | 202.801 | -5.261 |
+| Towers | 179.687 | 182.585 | +2.898 | 185.294 | +5.607 |
+| Mandelbrot | 232.644 | 238.255 | +5.611 | 239.101 | +6.457 |
+| Richards | 955.000 | 945.469 | -9.531 | 943.737 | -11.263 |
+| CD | 254.701 | 244.298 | -10.403 | 247.496 | -7.205 |
+| NBody | 377.018 | 383.137 | +6.119 | 386.473 | +9.455 |
+| Havlak | 422.044 | 417.080 | -4.964 | 418.018 | -4.026 |
+
+导师展示版结论：
+
+1. 在这三个指定目录中，GiY 的 Core GC 明显优于 CheneyGC：`72.560s` vs `89.304s`，减少 `18.75%`。
+2. GiY 的 Full GC 也略优于 CheneyGC：`111.692s` vs `116.206s`，减少 `3.88%`。
+3. GiYOL 的 Core GC 也优于 CheneyGC：减少 `12.96%`；但 Full GC 比 CheneyGC 多 `2.113s`。
+4. End-to-end 上，CheneyGC 最快；GiY 慢 `9.275s / 0.265%`，GiYOL 慢 `66.083s / 1.886%`。
+5. GiY 没有赢 end-to-end 的直接原因是 Business CPU 比 CheneyGC 多 `13.792s`，抵消了 GC 收益。
+
+## 2026-05-08 交接记录：当前进度、数据目录、结论与下一步
+
+这是一份给下一个 AI 看的交接记录。当前工作目录：
+
+- `/home/qiancheng/ejs-new`
+
+用户有明确要求：
+
+- 所有阶段性结论、实验结论、解释都必须追加写入 `AIlog.md`。
+
+### 当前源码/工作区状态
+
+工作区是 dirty 状态，不要随意 revert。已知变化包括：
+
+- `ejsvm/GiY.cc`
+- `ejsvm/giy_rset.cc`
+- `ejsvm/common.mk`
+- `AIlog.md`
+- `build.debug/*` 生成/复制文件
+- `tools/giy_copy_microbench.cc`
+- `build.micro/giy_copy_microbench*`
+
+重要提醒：
+
+- 当前 `build.debug/ejsvm` 最后一次构建来自公平三轮中的 GiYOL 第 3 轮，因此当前二进制大概率是 `OPT_GC=giyol`。
+- 后续如果要跑 Cheney/GiY/GiYOL，必须重新显式执行 `make -B -C build.debug ejsvm OPT_GC=<...> CACHE_SIZE_KB=552 -j4`，不要假设当前二进制就是目标 GC。
+
+### 当前 GC 实现概况
+
+当前有三个主要 GC 对照：
+
+1. `cache_cheney`
+   - Cheney-style copy/scavenge。
+   - 使用 root-controlled generational root scan 和 function-table strong slot set。
+
+2. `giy`
+   - GiY 主体实现。
+   - 先在 young/cache 区解析活对象图，再 materialize/copy 到 old/DRAM。
+   - 小对象 `<=256B` 走 `memcpy`。
+   - 大对象 `>256B` 走 `_mm_stream_si64/_mm_stream_si128` NT store。
+
+3. `giyol`
+   - GiYOL 主体基本继承 GiY。
+   - 当前默认参数：
+     - `GIYOL_STAGING_COPY=1`
+     - `GIYOL_TINY_STAGING=1`
+     - `GIYOL_TINY_STAGING_BYTES=4096`
+     - `GIYOL_TINY_FLUSH_BYTES=4096`
+     - `GIYOL_TINY_MAX_OBJECT_BYTES=64`
+     - `GIYOL_FORCE_TINY_TAIL_NT=0`
+     - `GIYOL_DIRECT_NONTINY_NT=0`
+   - `>64B` 对象当前不走 GiYOL direct NT，而是回到 `giy_copy_live_object()`。
+   - `<=64B` tiny 对象进入 tiny staging；只有目标连续且 chunk 达到 4096B，或强制 tail NT 开启时，才会 batch NT。
+
+### `_mm_sfence()` 当前重要发现
+
+当前 GiY/GiYOL 中 `_mm_sfence()` 比直觉更多：
+
+1. `giy_old_guard_protect_old_write()` 里只要 old guard active，每次 old write 结束重新 protect old 区都会 `_mm_sfence()`。
+2. live object copy 使用 NT store 后，`giy_traverse_stack_and_copy()` 结束会通过 `giy_finish_local_nt_stores()` 再 fence 一次。
+3. old slot patch 使用 NT store 后，`giy_minor_collect()` 末尾如果 `g_used_nt_old_store` 为 true，会再 fence 一次。
+4. `giy_weak_clear()` / inline cache patch 如果产生 old NT store，结束也会 fence。
+
+潜在优化点：
+
+- `giy_old_guard_protect_old_write()` 内的 per-write `_mm_sfence()` 可能明显削弱 NT store 收益，值得做单独消融实验。
+
+### 应忽略的无效 benchmark 目录
+
+`out114_fair_*` 到 `out122_fair_*` 是一次无效尝试：
+
+- 原因：脚本使用了不存在的 `/usr/bin/time`。
+- 结果：所有 benchmark 很快返回 `status=127`。
+- 这些目录不要用于任何性能分析。
+
+### 用户指定展示用三项：out110 / out113 / out111
+
+用户明确说想先给导师展示这三项：
+
+- GiY：`build.debug/benchmarks/out110_final_giy_corrected_full`
+- CheneyGC：`build.debug/benchmarks/out113_final_cheney_552_full`
+- GiYOL：`build.debug/benchmarks/out111_final_giyol_corrected_full`
+
+这三项的总体数据：
+
+| GC | 目录 | Total CPU | Business CPU | Full GC | Core GC | Scavenge |
+|---|---|---:|---:|---:|---:|---:|
+| CheneyGC | out113 | 3503.724 | 3387.517 | 116.206 | 89.304 | 85.105 |
+| GiY | out110 | 3512.999 | 3401.309 | 111.692 | 72.560 | 71.038 |
+| GiYOL | out111 | 3569.807 | 3451.489 | 118.319 | 77.731 | 75.972 |
+
+相对 CheneyGC：
+
+| GC | Total diff | Full GC diff | Full GC reduction | Core GC diff | Core GC reduction | Business diff |
+|---|---:|---:|---:|---:|---:|---:|
+| GiY - Cheney | +9.275 | -4.514 | +3.88% | -16.744 | +18.75% | +13.792 |
+| GiYOL - Cheney | +66.083 | +2.113 | -1.82% | -11.573 | +12.96% | +63.972 |
+
+导师展示版结论：
+
+- 在 out110/out113/out111 这组里，GiY 的 Core GC 明显优于 CheneyGC，减少 `18.75%`。
+- GiY 的 Full GC 也略优于 CheneyGC，减少 `3.88%`。
+- GiYOL 的 Core GC 也优于 CheneyGC，减少 `12.96%`，但 Full GC 比 CheneyGC 多 `2.113s`。
+- End-to-end 上 CheneyGC 最快；GiY 慢 `9.275s / 0.265%`，GiYOL 慢 `66.083s / 1.886%`。
+- GiY 没赢总时间的直接原因是 Business CPU 比 CheneyGC 多 `13.792s`，抵消了 GC 收益。
+
+### 公平三轮 benchmark：out123 到 out131
+
+后来为了公正重跑，执行了三轮 full suite。方法：
+
+- 同一源码。
+- 同一 `CACHE_SIZE_KB=552`。
+- 每个 GC variant 重新 `make -B`。
+- `taskset -c 2` 固定同一 CPU。
+- 每个 benchmark 单独一个进程。
+- 顺序做了时间漂移平衡：
+  - 第 1 轮：Cheney -> GiY -> GiYOL
+  - 第 2 轮：GiYOL -> GiY -> Cheney
+  - 第 3 轮：GiY -> Cheney -> GiYOL
+
+目录：
+
+| GC | round 1 | round 2 | round 3 |
+|---|---|---|---|
+| CheneyGC | `out123_fair_cheney_552_r1` | `out128_fair_cheney_552_r2` | `out130_fair_cheney_552_r3` |
+| GiY | `out124_fair_giy_552_r1` | `out127_fair_giy_552_r2` | `out129_fair_giy_552_r3` |
+| GiYOL | `out125_fair_giyol_552_r1` | `out126_fair_giyol_552_r2` | `out131_fair_giyol_552_r3` |
+
+主日志：
+
+- `build.debug/benchmarks/out123_fair_master_run.log`
+
+完成状态：
+
+- `out123` 到 `out131` 全部完成。
+- 每个目录 12/12 benchmarks status=0。
+- smoke 也 status=0。
+- 这些目录可以用于后续正式三轮分析。
+
+三轮 round 汇总：
+
+| GC | round | Total | Business | Full GC | Core GC | Scavenge |
+|---|---|---:|---:|---:|---:|---:|
+| CheneyGC | r1 | 3578.288 | 3461.592 | 116.695 | 90.269 | 86.026 |
+| CheneyGC | r2 | 3537.790 | 3421.361 | 116.427 | 90.050 | 85.790 |
+| CheneyGC | r3 | 3824.395 | 3707.475 | 116.920 | 90.233 | 85.943 |
+| GiY | r1 | 3522.586 | 3435.292 | 87.298 | 55.378 | 53.805 |
+| GiY | r2 | 3615.869 | 3528.352 | 87.515 | 55.538 | 53.964 |
+| GiY | r3 | 3750.484 | 3663.003 | 87.481 | 55.612 | 54.043 |
+| GiYOL | r1 | 3579.291 | 3487.616 | 91.676 | 60.390 | 58.569 |
+| GiYOL | r2 | 3537.489 | 3445.928 | 91.563 | 59.997 | 58.178 |
+| GiYOL | r3 | 3535.561 | 3444.513 | 91.048 | 60.197 | 58.381 |
+
+三轮平均：
+
+| GC | Total | Business | Full GC | Core GC | Scavenge |
+|---|---:|---:|---:|---:|---:|
+| CheneyGC | 3646.824 | 3530.143 | 116.681 | 90.184 | 85.920 |
+| GiY | 3629.646 | 3542.216 | 87.431 | 55.509 | 53.937 |
+| GiYOL | 3550.780 | 3459.352 | 91.429 | 60.195 | 58.376 |
+
+三轮 median-of-rounds：
+
+| GC | Total | Business | Full GC | Core GC | Scavenge |
+|---|---:|---:|---:|---:|---:|
+| CheneyGC | 3578.288 | 3461.592 | 116.695 | 90.233 | 85.943 |
+| GiY | 3615.869 | 3528.352 | 87.481 | 55.538 | 53.964 |
+| GiYOL | 3537.489 | 3445.928 | 91.563 | 60.197 | 58.381 |
+
+相对 CheneyGC 的三轮平均差异：
+
+| GC | Total diff | Total pct | Full GC diff | Full GC reduction | Core GC diff | Core GC reduction | Scavenge diff | Scavenge reduction | Business diff |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| GiY - Cheney | -17.178 | -0.471% | -29.249 | +25.07% | -34.675 | +38.45% | -31.982 | +37.22% | +12.073 |
+| GiYOL - Cheney | -96.044 | -2.634% | -25.252 | +21.64% | -29.989 | +33.25% | -27.544 | +32.06% | -70.790 |
+
+注意：
+
+- 三轮中 Cheney r3 的 Business 时间明显偏高：`3707.475s`，导致 Cheney 三轮平均 total 被拉高。
+- GC 指标本身很稳定：Cheney Full GC 大约 `116.4-116.9s`，Core GC 大约 `90.0-90.3s`；GiY Full GC 大约 `87.3-87.5s`，Core GC 大约 `55.4-55.6s`；GiYOL Full GC 大约 `91.0-91.7s`，Core GC 大约 `60.0-60.4s`。
+- 因此若讨论 GC 机制，应优先引用 Full GC / Core GC / Scavenge；若讨论 end-to-end，应说明 Business 受长时间运行系统状态影响，建议使用 median 或继续增加轮次。
+
+### 当前可靠技术结论
+
+1. GiY 的 GC core 明确快于 CheneyGC。
+   - out110/out113 指定组：Core GC 减少 `18.75%`。
+   - 公平三轮平均：Core GC 减少 `38.45%`。
+
+2. GiYOL 的 GC core 也快于 CheneyGC，但慢于 GiY。
+   - 公平三轮平均：GiYOL Core GC `60.195s`，GiY Core GC `55.509s`。
+
+3. GiYOL 当前 OL 策略仍没有证明优于 GiY。
+   - 它的 Full GC 和 Core GC 均比 GiY 高。
+   - 当前 GiYOL 的收益更多体现在某些 end-to-end 轮次的 Business 时间，而不是 GC core。
+
+4. `Business CPU = Total CPU - Full GC CPU`，不是直接测出来的 JS 语义业务时间。
+   - 它会包含解释器、allocation fast path、write barrier、GC 后 cache/TLB 后效应、系统噪音等。
+
+5. `Permute` 和 `Richards` 等长运行 benchmark 对 Business 噪音很敏感。
+   - 之前 out111 里 GiYOL 的 Permute 明显异常慢。
+   - 公平三轮中 GiYOL 的 Permute 已不再出现 out111 那样的大异常。
+
+### 建议下一个 AI 接着做什么
+
+如果用户要给导师展示：
+
+- 先使用用户指定的 out110/out113/out111 表，因为用户明确说“先给导师展示这三项”。
+- 但要补充说明：这是单轮旧最终目录；更公正的三轮重跑 out123-out131 已完成，GC 指标趋势一致。
+
+如果用户要正式写报告：
+
+1. 用 out123-out131 做正式三轮分析。
+2. 主要展示：
+   - Full GC reduction
+   - Core GC reduction
+   - Scavenge reduction
+   - Total CPU median
+3. 对 end-to-end total 的表述要谨慎，因为 Cheney r3 business 明显偏高。
+4. 下一步值得做的技术实验：
+   - 消融 `giy_old_guard_protect_old_write()` 中的 per-write `_mm_sfence()`。
+   - 对 GiYOL 开/关 tiny staging、direct non-tiny NT、force tail NT 做小规模 targeted benchmark。
+   - 单独比较 `Storage/Havlak/Sieve/NBody/Mandelbrot`，因为这些最能区分 GC 行为。

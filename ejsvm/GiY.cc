@@ -75,7 +75,7 @@ struct GiYASUpdateLog {
 
 struct GiYASObjectUpdateEntry {
   cell_type_t type;
-  uintptr_t payload;
+  Shape *shape;
 };
 
 struct GiYASObjectUpdateLog {
@@ -135,11 +135,11 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 #endif
 
 #ifndef GIYOL_TINY_STAGING_BYTES
-#define GIYOL_TINY_STAGING_BYTES 2048
+#define GIYOL_TINY_STAGING_BYTES 4096
 #endif
 
 #ifndef GIYOL_TINY_FLUSH_BYTES
-#define GIYOL_TINY_FLUSH_BYTES 2048
+#define GIYOL_TINY_FLUSH_BYTES 4096
 #endif
 
 #ifndef GIYOL_TINY_MAX_OBJECT_BYTES
@@ -147,11 +147,15 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 #endif
 
 #ifndef GIYOL_FORCE_TINY_TAIL_NT
-#define GIYOL_FORCE_TINY_TAIL_NT 1
+#define GIYOL_FORCE_TINY_TAIL_NT 0
 #endif
 
 #ifndef GIYOL_DIRECT_NONTINY_NT
-#define GIYOL_DIRECT_NONTINY_NT 1
+#define GIYOL_DIRECT_NONTINY_NT 0
+#endif
+
+#ifndef GIYOL_DEFER_TINY_STAGING
+#define GIYOL_DEFER_TINY_STAGING 1
 #endif
 
 struct GiYOLCopyEntry {
@@ -620,6 +624,14 @@ static inline void giy_store_jsvalue_slot(JSValue *slot, JSValue value, bool slo
   *slot = value;
 }
 
+static inline void giy_finish_local_nt_stores(bool *used_nt_store) {
+#if defined(__x86_64__) || defined(__i386__)
+  if (*used_nt_store)
+    _mm_sfence();
+#endif
+  *used_nt_store = false;
+}
+
 static void giy_bind_stack_to_cache_impl() {
   if (g_gc_stack.in_cache_space && g_edge_log.in_cache_space &&
       g_ft_slot_set.in_cache_space)
@@ -931,7 +943,7 @@ static void giy_as_object_update_log_reset() {
 }
 
 static void giy_record_materialized_jsobject_for_as_update(cell_type_t type,
-                                                          uintptr_t payload) {
+                                                          uintptr_t source_payload) {
   if (!giy_cell_type_has_jsobject_shape(type))
     return;
 
@@ -956,7 +968,7 @@ static void giy_record_materialized_jsobject_for_as_update(cell_type_t type,
   GiYASObjectUpdateEntry *entry =
     &g_as_object_update_log.items[g_as_object_update_log.count++];
   entry->type = type;
-  entry->payload = payload;
+  entry->shape = ((JSObject *) source_payload)->shape;
 }
 
 static void giy_apply_materialized_object_alloc_site_updates() {
@@ -968,8 +980,7 @@ static void giy_apply_materialized_object_alloc_site_updates() {
     GiYASObjectUpdateEntry *entry = &g_as_object_update_log.items[i];
     if (!giy_cell_type_has_jsobject_shape(entry->type))
       continue;
-    JSObject *obj = (JSObject *) entry->payload;
-    giy_record_alloc_site_shape(obj->shape);
+    giy_record_alloc_site_shape(entry->shape);
   }
   g_as_object_update_log.count = 0;
   g_as_object_update_applying = false;
@@ -1982,6 +1993,11 @@ static void giyol_copy_batch_append(GiYOLCopyBatch *batch,
   batch->bytes += nbytes;
 }
 
+static inline void giyol_copy_batch_reset(GiYOLCopyBatch *batch) {
+  batch->count = 0;
+  batch->bytes = 0;
+}
+
 #if GIYOL_STAGING_COPY
 static void giyol_reserve_order_batch_begin() {
   if (!giyol_reserve_order_batch_active) {
@@ -2001,11 +2017,13 @@ static void giyol_reserve_order_log_append(void *dst,
 }
 
 static void giyol_ensure_staging_capacity(size_t bytes) {
+  if (bytes == 0)
+    return;
   if (giyol_staging_capacity >= bytes)
     return;
 
-  size_t new_capacity = giyol_staging_capacity == 0 ?
-                        (size_t) GIYOL_BATCH_BYTES : giyol_staging_capacity;
+  size_t new_capacity =
+    giyol_staging_capacity == 0 ? bytes : giyol_staging_capacity;
   while (new_capacity < bytes)
     new_capacity *= 2;
 
@@ -2107,6 +2125,79 @@ static void giyol_flush_tiny_staging_batch(GiYOLCopyBatch *batch,
     return;
 
   giyol_ensure_staging_capacity((size_t) GIYOL_TINY_STAGING_BYTES);
+
+#if GIYOL_DEFER_TINY_STAGING
+  size_t i = 0;
+  while (i < batch->count) {
+    GiYOLCopyEntry *entry = &batch->items[i];
+    bool small = entry->nbytes <= (size_t) GIYOL_TINY_MAX_OBJECT_BYTES;
+
+    if (!small) {
+      giy_copy_live_object(entry->dst, entry->src, entry->nbytes,
+                           used_nt_store);
+      giy_profile.giyol_small_flush_objects++;
+      giy_profile.giyol_small_flush_bytes += entry->nbytes;
+      giy_profile.giyol_staging_fallback_objects++;
+      giy_profile.giyol_staging_fallback_bytes += entry->nbytes;
+      giy_profile.giyol_tiny_fallback_objects++;
+      giy_profile.giyol_tiny_fallback_bytes += entry->nbytes;
+      i++;
+      continue;
+    }
+
+    size_t run_start = i;
+    uintptr_t expected = (uintptr_t) entry->dst;
+    while (i < batch->count) {
+      GiYOLCopyEntry *run_entry = &batch->items[i];
+      bool run_small =
+        run_entry->nbytes <= (size_t) GIYOL_TINY_MAX_OBJECT_BYTES;
+      uintptr_t dst = (uintptr_t) run_entry->dst;
+      if (!run_small || dst != expected)
+        break;
+      expected += run_entry->nbytes;
+      i++;
+    }
+
+    size_t pos = run_start;
+    while (pos < i) {
+      size_t chunk_start = pos;
+      size_t chunk_end = pos;
+      size_t bytes = 0;
+      uintptr_t chunk_dst = (uintptr_t) batch->items[pos].dst;
+
+      while (chunk_end < i &&
+             bytes + batch->items[chunk_end].nbytes <=
+             (size_t) GIYOL_TINY_STAGING_BYTES) {
+        bytes += batch->items[chunk_end].nbytes;
+        chunk_end++;
+        if (bytes >= (size_t) GIYOL_TINY_FLUSH_BYTES)
+          break;
+      }
+
+      bool use_nt = force_nt &&
+                    (bytes >= (size_t) GIYOL_TINY_FLUSH_BYTES ||
+                     GIYOL_FORCE_TINY_TAIL_NT);
+      if (use_nt) {
+        size_t off = 0;
+        for (size_t j = chunk_start; j < chunk_end; j++) {
+          memcpy(giyol_staging_buffer + off,
+                 batch->items[j].src,
+                 batch->items[j].nbytes);
+          off += batch->items[j].nbytes;
+        }
+      }
+
+      giyol_flush_tiny_chunk(batch->items, chunk_start, chunk_end,
+                             (void *) chunk_dst, bytes, force_nt,
+                             used_nt_store);
+      pos = chunk_end;
+    }
+  }
+
+  batch->count = 0;
+  batch->bytes = 0;
+  return;
+#endif
 
   size_t chunk_start = 0;
   size_t chunk_end = 0;
@@ -2378,13 +2469,15 @@ static void giy_traverse_stack_and_copy() {
                          &used_nt_store);
 #endif
 #if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
-    giy_record_materialized_jsobject_for_as_update(type, dst_payload);
+    giy_record_materialized_jsobject_for_as_update(type, src_payload);
 #endif
 		}
 #if defined(USE_GIYOL)
 #if GIYOL_STAGING_COPY
-  if (giyol_use_batch)
-    giyol_flush_copy_batch(&giyol_reserve_order_batch, true, &used_nt_store);
+	  if (giyol_use_batch)
+	    giyol_flush_copy_batch(&giyol_reserve_order_batch, true, &used_nt_store);
+	  else
+	    giyol_copy_batch_reset(&giyol_reserve_order_batch);
 #else
   if (giyol_use_batch)
     giyol_flush_copy_batch(&copy_batch,
@@ -2396,17 +2489,16 @@ static void giy_traverse_stack_and_copy() {
   giyol_batch_next_traversal =
     giyol_traversal_bytes >= (size_t) GIYOL_BATCH_BYTES;
 #else
-  (void) giyol_traversal_bytes;
+	  (void) giyol_traversal_bytes;
 #endif
 #endif
-  giy_profile_current_cell_type = GIY_PROFILE_CELL_TYPES;
+  giy_finish_local_nt_stores(&used_nt_store);
+	  giy_profile_current_cell_type = GIY_PROFILE_CELL_TYPES;
 #if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
-  giy_apply_materialized_object_alloc_site_updates();
+  if (!g_old_guard_active)
+	  giy_apply_materialized_object_alloc_site_updates();
 #endif
-
-  if (used_nt_store)
-    g_used_nt_old_store = true;
-}
+	}
 
 }  // namespace
 
@@ -2452,6 +2544,7 @@ void giy_print_profile() {
 	           (size_t) GIYOL_TINY_MAX_OBJECT_BYTES);
 	    printf("GiYOL force tiny tail NT:%d\n", GIYOL_FORCE_TINY_TAIL_NT);
 	    printf("GiYOL direct non-tiny NT:%d\n", GIYOL_DIRECT_NONTINY_NT);
+	    printf("GiYOL defer tiny staging:%d\n", GIYOL_DEFER_TINY_STAGING);
 	    printf("GiYOL tiny flushes:  %llu\n", giy_profile.giyol_tiny_flushes);
 	    printf("GiYOL tiny objects:  %llu\n", giy_profile.giyol_tiny_objects);
 	    printf("GiYOL tiny bytes:    %.2f MB\n",
@@ -2578,6 +2671,7 @@ void giy_print_profile() {
 	         (size_t) GIYOL_TINY_MAX_OBJECT_BYTES);
 	  printf("GiYOL force tiny tail NT:%d\n", GIYOL_FORCE_TINY_TAIL_NT);
 	  printf("GiYOL direct non-tiny NT:%d\n", GIYOL_DIRECT_NONTINY_NT);
+	  printf("GiYOL defer tiny staging:%d\n", GIYOL_DEFER_TINY_STAGING);
 	  printf("GiYOL tiny flushes:  %llu\n", giy_profile.giyol_tiny_flushes);
 	  printf("GiYOL tiny objects:  %llu\n", giy_profile.giyol_tiny_objects);
 	  printf("GiYOL tiny bytes:    %.2f MB\n",
@@ -2706,10 +2800,15 @@ void giy_minor_collect(Context *ctx,
 
   //phase 3: traverse the live young objects and copy them to old generation
   giy_old_guard_set_phase("young_traverse_copy");
-	giy_traverse_stack_and_copy();
-  giy_old_guard_set_phase("allocation_site_update");
+		giy_traverse_stack_and_copy();
+  giy_old_guard_set_phase("allocation_site_update_old_metadata");
+  giy_old_guard_end();
+#if GIY_AS_UPDATE && defined(ALLOC_SITE_CACHE)
+  giy_apply_materialized_object_alloc_site_updates();
+#endif
   giy_apply_alloc_site_updates();
   giy_advance_function_table_alloc_sites(ctx);
+  giy_old_guard_begin();
 
   //phase 4: patch the roots
   giy_old_guard_set_phase("scan_roots_patch");

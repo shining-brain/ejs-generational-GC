@@ -110,6 +110,15 @@ static bool rememberset_update_existing(uintptr_t obj_ptr, uintptr_t value) {
     return true;
 }
 
+static void rememberset_require_new_entry_space() {
+    if (remembered_set.count < remembered_set.capacity) {
+        return;
+    }
+
+    printf("Error: Remembered set full, cannot add more remembered objects!\n");
+    exit(1);
+}
+
 // Initialize the remembered set,and adjust cache_space.end accordingly, adjust total_size too
 void init_remembered_set() {
     remembered_set.count = 0;
@@ -156,12 +165,6 @@ static void rememberset_add_with_value(uintptr_t obj_ptr, uintptr_t value) {
         return;
     }
 
-    if (remembered_set.count >= remembered_set.capacity) {
-        printf("Error: Remembered set full, cannot add more remembered objects!\n");
-        exit(1);
-    }
-
-
     unsigned int hash_idx = MASK_HASH(obj_ptr);
     
     
@@ -194,7 +197,7 @@ static void rememberset_add_with_value(uintptr_t obj_ptr, uintptr_t value) {
         }
         
         if (existing == 0) {
-       
+            rememberset_require_new_entry_space();
             remembered_set.hash_table[idx] = obj_ptr;
             remembered_set.buffer[remembered_set.count] = obj_ptr;
             remembered_set.values[remembered_set.count] = value;
@@ -206,7 +209,12 @@ static void rememberset_add_with_value(uintptr_t obj_ptr, uintptr_t value) {
         }
     }
     
-  
+    if (rememberset_update_existing(obj_ptr, value)) {
+        write_barrier_duplicate_filtered++;
+        return;
+    }
+
+    rememberset_require_new_entry_space();
     remembered_set.buffer[remembered_set.count] = obj_ptr;
     remembered_set.values[remembered_set.count] = value;
 #if GIY_WB_PROFILE
