@@ -145,11 +145,7 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 #endif
 
 #ifndef GIYSB_TINY_TABLE_BYTES
-#define GIYSB_TINY_TABLE_BYTES (16 * 1024)
-#endif
-
-#ifndef GIYSB_TINY_STAGING_MIN_BYTES
-#define GIYSB_TINY_STAGING_MIN_BYTES (4 * 1024)
+#define GIYSB_TINY_TABLE_BYTES (64 * 1024)
 #endif
 
 #ifndef GIYSB_SMALL_OLD_RATIO
@@ -562,13 +558,22 @@ static object_header *giysb_reserve_old_object(uintptr_t payload_ptr,
   *deferred_tiny = false;
 
 #if GIYSB_TINY_BATCH
-  if (align_bytes <= (size_t) GIYSB_TINY_OBJECT_MAX_BYTES &&
-      g_giysb_old.small_free + align_bytes <= g_giysb_old.small_end &&
-      g_giysb_tiny_table != NULL &&
-      g_giysb_tiny_table_count < g_giysb_tiny_table_capacity) {
+  if (align_bytes <= (size_t) GIYSB_TINY_OBJECT_MAX_BYTES) {
+    if (g_giysb_old.small_free + align_bytes > g_giysb_old.small_end) {
+      printf("GiYSB tiny old space full (%zu bytes)\n", align_bytes);
+      exit(1);
+    }
+    if (g_giysb_tiny_table == NULL ||
+        g_giysb_tiny_table_count >= g_giysb_tiny_table_capacity) {
+      printf("GiYSB tiny table full (count=%zu capacity=%zu)\n",
+             g_giysb_tiny_table_count, g_giysb_tiny_table_capacity);
+      exit(1);
+    }
     object_header *dest_hdr = (object_header *) g_giysb_old.small_free;
-    if (!giysb_tiny_table_append(payload_ptr, align_bytes, dest_hdr))
-      goto reserve_large;
+    if (!giysb_tiny_table_append(payload_ptr, align_bytes, dest_hdr)) {
+      printf("GiYSB tiny table append failed\n");
+      exit(1);
+    }
     g_giysb_old.small_free += align_bytes;
     giysb_refresh_dram_available();
     *deferred_tiny = true;
@@ -592,7 +597,6 @@ static object_header *giysb_reserve_old_object(uintptr_t payload_ptr,
   }
 #endif
 
-reserve_large:
   if (g_giysb_old.large_free + align_bytes <= g_giysb_old.large_end) {
     object_header *dest_hdr = (object_header *) g_giysb_old.large_free;
     g_giysb_old.large_free += align_bytes;
@@ -1218,12 +1222,11 @@ static void giy_bind_stack_to_cache_impl() {
   g_giysb_staging_dst = 0;
   g_giysb_staging_expected = 0;
   g_giysb_tiny_batch_begin = 0;
-  printf("init_info: GiYSB staging bytes=%zuKB tiny_table=%zuKB tiny_capacity=%zu tiny_max=%zu tiny_stage_min=%zuKB old_small_ratio=%d%% worklist=LIFO\n",
+  printf("init_info: GiYSB staging-only bytes=%zuKB tiny_table=%zuKB tiny_capacity=%zu tiny_max=%zu old_small_ratio=%d%% worklist=LIFO\n",
          giysb_staging_bytes / 1024,
          giysb_tiny_table_bytes / 1024,
          g_giysb_tiny_table_capacity,
          (size_t) GIYSB_TINY_OBJECT_MAX_BYTES,
-         (size_t) GIYSB_TINY_STAGING_MIN_BYTES / 1024,
          GIYSB_SMALL_OLD_RATIO);
 #elif USE_GIYSB
   g_giysb_staging_buffer = NULL;
@@ -2877,13 +2880,15 @@ static inline uintptr_t forwarded_or_self(uintptr_t ptr) {
   return hdr->forwarding_pointer;
 }
 
-// Copy a live object from young to old generation, using non-temporal stores when beneficial.
-static inline void giy_copy_live_object(void *dst,
-                                        const void *src,
-                                        size_t nbytes,
-                                        bool *used_nt_store) {
+// Copy a live object from young to old generation. Normal GiY keeps the small
+// memcpy cutoff; forced mode is used by GiYSB two-class materialization.
+static inline void giy_copy_live_object_impl(void *dst,
+                                             const void *src,
+                                             size_t nbytes,
+                                             bool *used_nt_store,
+                                             bool force_nt_store) {
   giy_old_guard_allow_old_write(dst, nbytes);
-  if (nbytes <= GIY_NT_COPY_MIN_BYTES) {
+  if (!force_nt_store && nbytes <= GIY_NT_COPY_MIN_BYTES) {
     memcpy(dst, src, nbytes);
     giy_old_guard_protect_old_write(dst, nbytes);
     return;
@@ -2895,6 +2900,11 @@ static inline void giy_copy_live_object(void *dst,
 
 #if GIY_NT_COPY_BITS == 256 && defined(__AVX2__)
   if ((((uintptr_t) d) & 7) != 0) {
+    if (force_nt_store) {
+      printf("GiY forced NT copy alignment invariant failed (dst=%p, n=%zu)\n",
+             (void *) d, n);
+      exit(1);
+    }
     memcpy(dst, src, nbytes);
     giy_old_guard_protect_old_write(dst, nbytes);
     return;
@@ -2944,6 +2954,10 @@ static inline void giy_copy_live_object(void *dst,
   }
 
   if (n != 0) {
+    if (force_nt_store) {
+      printf("GiY forced NT copy tail invariant failed (n=%zu)\n", n);
+      exit(1);
+    }
     memcpy(d, s, n);
   }
 #else
@@ -2987,11 +3001,29 @@ static inline void giy_copy_live_object(void *dst,
   giy_old_guard_protect_old_write(dst, nbytes);
   return;
 #else
+  if (force_nt_store) {
+    printf("GiY forced NT copy is not supported on this architecture\n");
+    exit(1);
+  }
   // (void) used_nt_store;
 #endif
 
   memcpy(dst, src, nbytes);
   giy_old_guard_protect_old_write(dst, nbytes);
+}
+
+static inline void giy_copy_live_object(void *dst,
+                                        const void *src,
+                                        size_t nbytes,
+                                        bool *used_nt_store) {
+  giy_copy_live_object_impl(dst, src, nbytes, used_nt_store, false);
+}
+
+static inline void giy_nt_copy_live_object_forced(void *dst,
+                                                  const void *src,
+                                                  size_t nbytes,
+                                                  bool *used_nt_store) {
+  giy_copy_live_object_impl(dst, src, nbytes, used_nt_store, true);
 }
 
 #if USE_GIYSB
@@ -3005,10 +3037,10 @@ static void giysb_flush_staging(bool *used_nt_store, bool full_flush) {
   if (g_giysb_staging_used == 0)
     return;
 
-  giy_copy_live_object((void *) g_giysb_staging_dst,
-                       (const void *) g_giysb_staging_buffer,
-                       g_giysb_staging_used,
-                       used_nt_store);
+  giy_nt_copy_live_object_forced((void *) g_giysb_staging_dst,
+                                 (const void *) g_giysb_staging_buffer,
+                                 g_giysb_staging_used,
+                                 used_nt_store);
 #if GIYSB_PROFILE
   g_giysb_profile.staging_flushes++;
   if (full_flush)
@@ -3037,33 +3069,6 @@ static bool giysb_decode_tiny_entry(uint32_t entry,
          src_payload < cache_space.end;
 }
 
-static void giysb_copy_tiny_chunk_direct(size_t start,
-                                         size_t end,
-                                         uintptr_t dst_start,
-                                         bool *used_nt_store) {
-  uintptr_t dst_cursor = dst_start;
-  for (size_t i = start; i < end; i++) {
-    object_header *src_hdr = NULL;
-    size_t nbytes = 0;
-    if (!giysb_decode_tiny_entry(g_giysb_tiny_table[i],
-                                 &src_hdr,
-                                 &nbytes)) {
-      printf("GiYSB tiny table entry invariant failed\n");
-      exit(1);
-    }
-
-    giy_copy_live_object((void *) dst_cursor,
-                         (const void *) src_hdr,
-                         nbytes,
-                         used_nt_store);
-    dst_cursor += nbytes;
-#if GIYSB_PROFILE
-    g_giysb_profile.direct_tiny_objects++;
-    g_giysb_profile.direct_tiny_bytes += nbytes;
-#endif
-  }
-}
-
 static void giysb_stage_tiny_chunk(size_t start,
                                    size_t end,
                                    uintptr_t dst_start,
@@ -3072,7 +3077,9 @@ static void giysb_stage_tiny_chunk(size_t start,
                                    bool full_flush) {
   if (g_giysb_staging_buffer == NULL ||
       chunk_bytes > g_giysb_staging_capacity) {
-    giysb_copy_tiny_chunk_direct(start, end, dst_start, used_nt_store);
+    printf("GiYSB staging buffer unavailable or too small (chunk=%zu capacity=%zu)\n",
+           chunk_bytes, g_giysb_staging_capacity);
+    exit(1);
     return;
   }
 
@@ -3113,16 +3120,12 @@ static void giysb_flush_tiny_chunk(size_t start,
   if (chunk_bytes == 0 || start == end)
     return;
 
-  if (chunk_bytes >= (size_t) GIYSB_TINY_STAGING_MIN_BYTES) {
-    giysb_stage_tiny_chunk(start,
-                           end,
-                           dst_start,
-                           chunk_bytes,
-                           used_nt_store,
-                           full_flush);
-  } else {
-    giysb_copy_tiny_chunk_direct(start, end, dst_start, used_nt_store);
-  }
+  giysb_stage_tiny_chunk(start,
+                         end,
+                         dst_start,
+                         chunk_bytes,
+                         used_nt_store,
+                         full_flush);
 }
 
 static void giysb_flush_tiny_table(bool *used_nt_store) {
@@ -3762,15 +3765,15 @@ static void giy_traverse_stack_and_copy() {
 			object_header *dst_hdr = ((object_header *) dst_payload) - 1;
 
 #if USE_GIYSB && GIYSB_TINY_BATCH
-    if (giysb_is_tiny_destination((const void *) dst_hdr,
-                                   (size_t) align_bytes)) {
-      // Tiny objects are materialized after the LIFO traversal finishes.
-    } else {
-      giy_copy_live_object((void *) dst_hdr,
-                           (const void *) src_hdr,
-                           (size_t) align_bytes,
-                           &used_nt_store);
-    }
+	    if (giysb_is_tiny_destination((const void *) dst_hdr,
+	                                   (size_t) align_bytes)) {
+	      // Tiny objects are materialized after the LIFO traversal finishes.
+	    } else {
+	      giy_nt_copy_live_object_forced((void *) dst_hdr,
+	                                     (const void *) src_hdr,
+	                                     (size_t) align_bytes,
+	                                     &used_nt_store);
+	    }
 #elif defined(USE_GIYOL)
 	    giyol_traversal_bytes += (size_t) align_bytes;
 #if GIYOL_STAGING_COPY
@@ -3878,9 +3881,13 @@ void giy_print_profile() {
     printf("GiYSB profile:       %d\n", GIYSB_PROFILE);
     printf("GiYSB staging bytes: %zu\n", (size_t) GIYSB_STAGING_BYTES);
     printf("GiYSB tiny table bytes:%zu\n", (size_t) GIYSB_TINY_TABLE_BYTES);
-    printf("GiYSB small max:     %zu\n", (size_t) GIYSB_SMALL_OBJECT_MAX_BYTES);
+#if GIYSB_TINY_BATCH
     printf("GiYSB tiny max:      %zu\n", (size_t) GIYSB_TINY_OBJECT_MAX_BYTES);
-    printf("GiYSB tiny stage min:%zu\n", (size_t) GIYSB_TINY_STAGING_MIN_BYTES);
+    printf("GiYSB tiny policy:   staging-only forced NT\n");
+#else
+    printf("GiYSB small max:     %zu\n", (size_t) GIYSB_SMALL_OBJECT_MAX_BYTES);
+    printf("GiYSB tiny policy:   place-only\n");
+#endif
     printf("GiYSB old small ratio:%d\n", GIYSB_SMALL_OLD_RATIO);
 #if GIYSB_PROFILE
     printf("GiYSB tiny reserved:%llu objs, %.2f MB\n",
@@ -4078,9 +4085,13 @@ void giy_print_profile() {
   printf("GiYSB profile:       %d\n", GIYSB_PROFILE);
   printf("GiYSB staging bytes: %zu\n", (size_t) GIYSB_STAGING_BYTES);
   printf("GiYSB tiny table bytes:%zu\n", (size_t) GIYSB_TINY_TABLE_BYTES);
-  printf("GiYSB small max:     %zu\n", (size_t) GIYSB_SMALL_OBJECT_MAX_BYTES);
+#if GIYSB_TINY_BATCH
   printf("GiYSB tiny max:      %zu\n", (size_t) GIYSB_TINY_OBJECT_MAX_BYTES);
-  printf("GiYSB tiny stage min:%zu\n", (size_t) GIYSB_TINY_STAGING_MIN_BYTES);
+  printf("GiYSB tiny policy:   staging-only forced NT\n");
+#else
+  printf("GiYSB small max:     %zu\n", (size_t) GIYSB_SMALL_OBJECT_MAX_BYTES);
+  printf("GiYSB tiny policy:   place-only\n");
+#endif
   printf("GiYSB old small ratio:%d\n", GIYSB_SMALL_OLD_RATIO);
 #if GIYSB_PROFILE
   printf("GiYSB tiny reserved: %llu objs, %.2f MB\n",

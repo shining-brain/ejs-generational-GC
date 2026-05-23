@@ -24105,3 +24105,277 @@ large: footprint > 64B
 当前最稳妥的 tiny/large 分界点是 64B footprint。
 这是保守 baseline；之后可以实验 128B/256B，但不建议一开始就扩大。
 ```
+## 2026-05-23：GiYSB two-class staging-only forced-NT 实装记录
+
+这次按照导师的新原则，把 GiYSB 改成更纯粹的 two-class 策略：
+
+```text
+tiny:  object footprint <= 64B
+large: object footprint > 64B
+```
+
+这里的 object footprint 指 `ALIGN(sizeof(object_header) + payload)`，不是 payload 自己的大小。
+
+实现后的 GiYSB 策略如下：
+
+```text
+1. tiny 对象：
+   - 在 reserve 阶段直接 reserve 到 GiYSB 的 tiny/small old 区；
+   - 同时把 young payload 地址、对象大小、目标 old 地址记录进 tiny table；
+   - 在扫描对象图的时候暂时不真正复制对象内容；
+   - 等本次 minor GC 的 LIFO 扫描结束后，再按照 reserve 顺序处理 tiny table；
+   - tiny 对象先 memcpy 到 8KB staging buffer；
+   - staging buffer 满了就强制使用 256-bit non-temporal store 写入 old 区；
+   - 最后不足 8KB 的 tail 也强制使用 non-temporal store；
+   - 不再存在 tiny direct copy fallback。
+
+2. large 对象：
+   - 在 reserve 阶段 reserve 到 GiYSB 的 large old 区；
+   - 扫描并修正 child pointer 后，立刻使用强制 non-temporal copy 写入 old 区；
+   - 不再因为对象小于 256B 而退回 memcpy。
+```
+
+代码上的主要变化：
+
+```text
+1. ejsvm/GiY.cc
+   - giysb_reserve_old_object：
+     tiny 对象必须进入 tiny table。tiny old 区满、tiny table 满、append 失败都会直接报错退出，
+     不再 fallback 到 large old 区。
+
+   - giy_copy_live_object_impl：
+     新增 force_nt_store 参数。
+     普通 GiY 仍然保留 <=256B 使用 memcpy 的旧行为。
+     GiYSB 使用 giy_nt_copy_live_object_forced，绕过 <=256B memcpy cutoff。
+
+   - giysb_flush_staging：
+     staging buffer flush 改成强制 NT store。
+
+   - giysb_copy_tiny_chunk_direct：
+     删除。tiny 对象不再走 direct copy。
+
+   - giysb_flush_tiny_chunk：
+     删除 4KB threshold 判断。只要 tiny table 形成 chunk，就进入 staging，再由 staging 强制 NT flush。
+
+   - giy_traverse_stack_and_copy：
+     tiny destination 跳过即时 materialization；
+     large/non-tiny object 改成强制 NT copy。
+
+2. ejsvm/common.mk
+   - 删除 GIYSB_TINY_STAGING_MIN_BYTES 编译参数，因为现在没有 staging min threshold。
+```
+
+当前默认配置：
+
+```text
+GC local workspace: 896KB aggregate
+GC stack:           48KB
+FT slot set:        32KB
+GiYSB staging:       8KB
+GiYSB tiny table:   64KB
+GiYSB tiny max:     64B footprint
+NT copy width:     256-bit
+Young after aux:   532.24KB
+Aux total:         152KB
+```
+
+为什么把 tiny table 默认从 16KB 改成 64KB：
+
+```text
+严格 no-fallback 策略下，16KB tiny table 在 giy_gc_probe 上会满表：
+GiYSB tiny table full (count=4096 capacity=4096)
+
+64KB tiny table 的容量是 16384 entries，giy_gc_probe 可以正常完成。
+代价是 local workspace 里多占 48KB，因此 young after aux 从之前的 580.24KB 降到 532.24KB。
+这会影响公平比较，后续做 benchmark 时需要明确记录 tiny table 大小，或者做 equal-young 对照。
+```
+
+验证结果：
+
+```text
+构建命令：
+make OPT_GC=giy GIY_SB=true GIYSB_TINY_BATCH=1 GIY_NT_COPY_BITS=256 CACHE_SIZE_KB=896 -B -j2
+
+build 结果：
+通过。只有项目已有 warning，没有新的编译错误。
+
+hello_world:
+通过。没有触发 GC。
+
+giy_gc_probe:
+通过。触发 5 次 minor GC。
+初始化输出确认：
+GiYSB staging-only bytes=8KB tiny_table=64KB tiny_capacity=16384 tiny_max=64 old_small_ratio=50% worklist=LIFO
+
+profile 输出确认：
+GiYSB tiny table bytes:65536
+GiYSB tiny max:64
+GiYSB tiny policy:staging-only forced NT
+Young after aux:532.24KB
+Aux total:152KB
+```
+
+当前结论：
+
+```text
+GiYSB 的新 two-class staging-only forced-NT 版本已经实装并通过基本验证。
+它现在更符合导师提出的原则：tiny 一律 staging 后批量 NT，large 一律直接 NT。
+但这个版本会增加 tiny table 的 workspace 消耗，并且 large 中 65B~256B 的对象也会被强制 NT，
+这可能带来额外成本。后续正式 benchmark 时，需要把这个版本和标准 GiY 做公平对照。
+```
+
+## 2026-05-23：GiYSBF 与原版 GiYSB 完整 benchmark
+
+本次按用户要求，把当前 forced 版本命名为 GiYSBF，其中 F 表示 force。
+
+测试目的：
+
+```text
+比较当前 GiYSBF 和原版 GiYSB 的性能差异。
+GiYSBF：当前工作区代码，tiny 一律 staging 后 forced NT，large 一律 forced NT。
+原版 GiYSB：使用 git HEAD 基线中的原始 GiYSB 实现，通过临时 worktree 构建。
+```
+
+为了减少不公平因素，本次没有使用原版默认的 16KB tiny table，而是两边都使用 64KB tiny table：
+
+```text
+CACHE_SIZE_KB=896
+GIY_GC_STACK_BYTES=49152
+GIYSB_STAGING_BYTES=8192
+GIYSB_TINY_TABLE_BYTES=65536
+GIYSB_TINY_OBJECT_MAX_BYTES=64
+GIY_NT_COPY_BITS=256
+EJS_DISABLE_GC_PMU=1
+BENCH_CPU=0
+```
+
+这样做的原因：
+
+```text
+1. 当前 GiYSBF 的严格 no-fallback 策略在 16KB tiny table 下已经会在 giy_gc_probe 中满表。
+2. 如果 GiYSBF 用 64KB、原版 GiYSB 用 16KB，就会混入 workspace/young size 差异。
+3. 因此这次主要比较 copy/materialization 策略，而不是 tiny table 容量差异。
+```
+
+输出目录：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_vs_giysb_20260523_172759
+```
+
+生成的汇总文件：
+
+```text
+summary.tsv
+summary.csv
+summary.md
+```
+
+完整 benchmark 状态：
+
+```text
+13 个 benchmark，两种配置，共 26 个 run。
+全部 status=0。
+没有打开 perf/cache miss 测量。
+```
+
+总体结果：
+
+```text
+总运行时间：
+GiYSBF      6703.283 sec
+原版 GiYSB 6677.959 sec
+GiYSBF 慢 25.324 sec，慢 0.379%
+
+GC overhead：
+GiYSBF      211.272 sec
+原版 GiYSB 173.775 sec
+GiYSBF 慢 37.497 sec，慢 21.578%
+
+Business time：
+GiYSBF      6492.015 sec
+原版 GiYSB 6504.180 sec
+GiYSBF 快 12.165 sec，快 0.187%
+
+Minor GC count：
+两边完全相同，都是 1187074 次。
+```
+
+GC-heavy subset：
+
+```text
+定义：原版 GiYSB 的 GC overhead >= 1 sec。
+包含：CD, DeltaBlue, Havlak, Mandelbrot, NBody, Sieve, Storage。
+
+GC-heavy total：
+GiYSBF      3106.160 sec
+原版 GiYSB 3082.313 sec
+GiYSBF 慢 23.847 sec，慢 0.774%
+
+GC-heavy GC overhead：
+GiYSBF      210.787 sec
+原版 GiYSB 173.293 sec
+GiYSBF 慢 37.494 sec，慢 21.636%
+```
+
+关键单项：
+
+```text
+Storage：
+GiYSBF total 379.160 sec，GC 91.459 sec
+原版 GiYSB total 357.179 sec，GC 63.346 sec
+GiYSBF total 慢 6.154%，GC 慢 44.380%
+
+Havlak：
+GiYSBF total 818.346 sec，GC 75.601 sec
+原版 GiYSB total 807.283 sec，GC 65.712 sec
+GiYSBF total 慢 1.370%，GC 慢 15.049%
+
+NBody：
+GiYSBF total 647.975 sec，GC 13.322 sec
+原版 GiYSB total 651.842 sec，GC 13.552 sec
+GiYSBF total 快 0.593%，GC 快 1.697%
+
+Mandelbrot：
+GiYSBF total 401.088 sec，GC 7.404 sec
+原版 GiYSB total 402.451 sec，GC 7.721 sec
+GiYSBF total 快 0.339%，GC 快 4.106%
+```
+
+解释：
+
+```text
+1. 两边 minor GC count 完全相同。
+   所以性能差异不是 GC 频率造成的，而是每次 GC 的 materialization/copy 成本不同。
+
+2. GiYSBF 的核心变化是强制 NT：
+   - tiny flush 强制 NT；
+   - large 直接 forced NT；
+   - 不再让 65B~256B 对象走 memcpy。
+
+3. Storage 和 Havlak 明显变差，说明 forced NT 对 GC-heavy workload 的 copy path 是负收益。
+   尤其 Storage 的 GC 时间慢 44.380%，这是很强的信号。
+
+4. 有些业务主导 benchmark 看起来 total 略快，例如 Permute、NBody、Mandelbrot。
+   但其中 Permute、Richards、Towers 的 GC 时间非常小，不能拿来证明 GC 策略有效。
+
+5. GiYSBF 的 business time aggregate 略快 0.187%，但 GC overhead 慢 21.578%。
+   这说明 forced NT 并没有解决 GC 成本，反而在 GC-heavy 场景中扩大了成本。
+```
+
+结论：
+
+```text
+GiYSBF 当前不应该作为默认方向。
+它可以保留为实验选项，但不应该替代原版 GiYSB。
+
+当前数据支持的判断是：
+forced NT store 不是越多越好。
+对 tiny/small/mid-size object，memcpy 或 selective/adaptive 策略更合理。
+
+下一步更合理的方向：
+1. 保留 tiny staging，但不要强制所有 tail 和所有 large 都 NT；
+2. 恢复或设计 selective threshold；
+3. 针对 Storage/Havlak 进一步分析对象大小分布和 staging flush 质量；
+4. 如果继续做 GiYSBF，只应该作为 ablation study，而不是主方案。
+```
