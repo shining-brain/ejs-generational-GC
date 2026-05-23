@@ -290,6 +290,13 @@ static void gc_pmu_init_once(void)
         return;
     gc_pmu_initialized = 1;
 
+    const char *disable_pmu = getenv("EJS_DISABLE_GC_PMU");
+    if (disable_pmu != NULL && disable_pmu[0] != '\0' &&
+        strcmp(disable_pmu, "0") != 0) {
+        gc_pmu_supported = 0;
+        return;
+    }
+
 #ifdef __linux__
     int saved_errno = 0;
     gc_pmu_perf_event_paranoid = gc_read_perf_event_paranoid();
@@ -398,10 +405,12 @@ inline bool need_major_gc()
 void print_dram_space_usage()
 {
     int used_bytes = dram_space.total_size - dram_space.available_bytes;
+#if !defined(USE_GIYSB)
     if(dram_space.available_bytes!= dram_space.end - dram_space.free){
         printf("Warning: dram_space.available_bytes inconsistent with pointer!!!\n");
         exit(1);
     }
+#endif
     // printf("DRAM space usage: used %d KB, available bytes: %d KB, total %d KB\n", used_bytes / 1024, dram_space.available_bytes / 1024, dram_space.total_size / 1024);
 }
 
@@ -801,7 +810,10 @@ void space_init(size_t bytes, size_t threshold_bytes)
     dram_space.available_bytes = bytes;
     dram_space.end = dram_space.begin + dram_space.total_size;
 
-#ifdef USE_GIYOL
+#if defined(USE_GIYSB)
+        printf("Now we are using GiYSB GC. Cache DRAM Manager initialized: Cache size %d Kbytes, DRAM size %zu Kbytes\n",
+            cache_space.total_size / 1024, dram_space.total_size / 1024);
+#elif defined(USE_GIYOL)
         printf("Now we are using GiYOL GC. Cache DRAM Manager initialized: Cache size %d Kbytes, DRAM size %zu Kbytes\n",
             cache_space.total_size / 1024, dram_space.total_size / 1024);
 #else

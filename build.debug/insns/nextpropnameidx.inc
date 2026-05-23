@@ -9,15 +9,15 @@ TLnextpropnameidx_builtin:
 TLnextpropnameidx_flonum:
 TLnextpropnameidx_number_object:
 TLnextpropnameidx_array:
-TLnextpropnameidx_simple_object:
-TLnextpropnameidx_boolean_object:
 TLnextpropnameidx_string_object:
 TLnextpropnameidx_special:
+TLnextpropnameidx_boolean_object:
+TLnextpropnameidx_simple_object:
 TLnextpropnameidx_function:
 TLnextpropnameidx_any:
 TLnextpropnameidx_iterator:
 TLnextpropnameidx_fixnum:
-{ // normal_fixnum vmgen.newsynth.DecisionDiagram$Leaf@54
+{ // normal_builtin vmgen.newsynth.DecisionDiagram$Leaf@54
 
 /*
    nextpropnameidx itr dst

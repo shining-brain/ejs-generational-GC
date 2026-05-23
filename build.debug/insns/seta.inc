@@ -7,8 +7,8 @@ TLseta_function:
 TLseta_iterator:
 TLseta_regexp:
 TLseta_special:
-TLseta_array:
 TLseta_number_object:
+TLseta_array:
 TLseta_builtin:
 TLseta_flonum:
 TLseta_string_object:
@@ -16,7 +16,7 @@ TLseta_fixnum:
 TLseta_simple_object:
 TLseta_any:
 TLseta_string:
-{ // normal_builtin vmgen.newsynth.DecisionDiagram$Leaf@41d
+{ // normal_flonum vmgen.newsynth.DecisionDiagram$Leaf@54
 
   set_a(context, src);
 }

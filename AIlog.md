@@ -8375,3 +8375,15733 @@ if (g_used_nt_old_store)
    - 消融 `giy_old_guard_protect_old_write()` 中的 per-write `_mm_sfence()`。
    - 对 GiYOL 开/关 tiny staging、direct non-tiny NT、force tail NT 做小规模 targeted benchmark。
    - 单独比较 `Storage/Havlak/Sieve/NBody/Mandelbrot`，因为这些最能区分 GC 行为。
+
+## 2026-05-09 关于查询当前服务器登录密码
+
+结论：
+
+- 正常 Linux/Unix 服务器上，当前登录密码不能被查询出明文。
+- 系统通常只保存密码 hash，例如 `/etc/shadow` 中的 hash，而不是原始密码。
+- 如果已经登录但忘记密码，应使用重置方式，而不是尝试读取原密码。
+
+可行做法：
+
+- 如果知道当前密码，修改自己的密码：`passwd`
+- 如果有 sudo/admin 权限，重置某个用户密码：`sudo passwd <用户名>`
+- 如果是云服务器，使用云厂商控制台的 reset password / serial console / rescue mode。
+- 如果是 SSH key 登录，可能根本没有用密码登录；应检查本地 SSH key 或云控制台配置。
+
+## 2026-05-09 如何从另一台机器 SSH 到当前服务器
+
+当前检查结果：
+
+- 当前用户名：`qiancheng`
+- 当前主机名：`vpi`
+- 当前 SSH 会话显示的服务器地址：`172.18.0.5`
+- 当前 SSH 端口：`22`
+- 当前服务器上有 `sshd` 进程在运行。
+
+从另一台机器连接的基本命令：
+
+```bash
+ssh qiancheng@172.18.0.5
+```
+
+## 2026-05-09 有 SSH key 文件但仍要求密码的原因
+
+结论：
+
+- 免密登录需要“客户端私钥”和“服务器 authorized_keys 中的对应公钥”匹配。
+- 只有某一边有文件不够。
+- 如果另一台机器连接 `vpi` 时仍要求密码，常见原因是：
+  1. 另一台机器没有对应私钥；
+  2. 另一台机器有私钥，但 SSH 没有使用它；
+  3. `vpi` 上 `~/.ssh/authorized_keys` 没有这台机器私钥对应的公钥；
+  4. 用户名不一致，例如公钥在 `qiancheng` 用户下，但用别的用户登录；
+  5. 权限不对，SSH 拒绝读取 key 或 authorized_keys；
+  6. 连接到的不是同一台服务器或同一个地址；
+  7. 看到的是 key passphrase 提示，而不是服务器登录密码提示。
+
+排查命令：
+
+```bash
+ssh -vvv qiancheng@vpi
+```
+
+重点看：
+
+- 有没有 `Offering public key`
+- 有没有 `Server accepts key`
+- 最后提示是 `Enter passphrase for key` 还是 `qiancheng@host's password`
+
+推荐修复：
+
+```bash
+# 在另一台机器上生成 key
+ssh-keygen -t ed25519
+
+# 把另一台机器的公钥追加到 vpi 的 authorized_keys
+cat ~/.ssh/id_ed25519.pub
+```
+
+然后把输出追加到 `vpi` 上：
+
+```bash
+~/.ssh/authorized_keys
+```
+
+权限建议：
+
+```bash
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/id_ed25519
+```
+
+## 2026-05-09 如何把当前 AI 对话/项目上下文迁移到另一台服务器
+
+结论：
+
+- 活的聊天会话本身通常不能直接迁移到另一台服务器继续。
+- 最优雅、最可靠的方式是迁移“可恢复上下文”：
+  1. `AIlog.md`
+  2. 当前 git diff
+  3. 关键 benchmark 输出目录
+  4. 修改过的源码/工具文件
+
+最小迁移包建议：
+
+```bash
+cd /home/qiancheng/ejs-new
+git diff > handoff.patch
+tar czf ejs-handoff-minimal.tgz \
+  AIlog.md \
+  handoff.patch \
+  build.debug/benchmarks/out110_final_giy_corrected_full \
+  build.debug/benchmarks/out111_final_giyol_corrected_full \
+  build.debug/benchmarks/out113_final_cheney_552_full \
+  build.debug/benchmarks/out123_fair_master_run.log \
+  build.debug/benchmarks/out123_fair_cheney_552_r1 \
+  build.debug/benchmarks/out124_fair_giy_552_r1 \
+  build.debug/benchmarks/out125_fair_giyol_552_r1 \
+  build.debug/benchmarks/out126_fair_giyol_552_r2 \
+  build.debug/benchmarks/out127_fair_giy_552_r2 \
+  build.debug/benchmarks/out128_fair_cheney_552_r2 \
+  build.debug/benchmarks/out129_fair_giy_552_r3 \
+  build.debug/benchmarks/out130_fair_cheney_552_r3 \
+  build.debug/benchmarks/out131_fair_giyol_552_r3
+```
+
+复制到另一台服务器：
+
+```bash
+scp ejs-handoff-minimal.tgz user@new-server:/path/
+```
+
+在新服务器解包：
+
+```bash
+tar xzf ejs-handoff-minimal.tgz
+```
+
+如果新服务器上已经有同一个 git 仓库，则推荐：
+
+```bash
+git apply handoff.patch
+```
+
+给下一个 AI 的第一句话可以是：
+
+```text
+请先阅读 AIlog.md 最后的“交接记录”和“out110/out113/out111 三项数据”部分。当前项目在 /home/qiancheng/ejs-new，重点 benchmark 目录是 out110/out111/out113 和 out123-out131。
+```
+
+更完整的迁移方式：
+
+```bash
+rsync -a --info=progress2 \
+  --exclude='.git/' \
+  /home/qiancheng/ejs-new/ \
+  user@new-server:/path/ejs-new/
+```
+
+注意：
+
+- 如果只想让下一个 AI 立刻理解上下文，`AIlog.md` 是最重要的。
+- 如果要复现实验，必须同时迁移 benchmark 输出目录。
+- 如果要继续开发，必须迁移 `git diff` 或整个工作树。
+
+如果另一台机器使用指定私钥：
+
+```bash
+ssh -i ~/.ssh/<private_key> qiancheng@172.18.0.5
+```
+
+注意：
+
+- `172.18.0.5` 是私有网段地址。另一台机器必须和当前服务器处于同一内网/VPN/容器网络/跳板链路中，否则无法直接连。
+- 如果另一台机器不在同一网络，需要使用服务器公网 IP、云厂商端口映射、安全组放行，或通过跳板机：
+
+```bash
+ssh -J user@jump_host qiancheng@172.18.0.5
+```
+
+如果另一台机器没有登录密钥：
+
+1. 在另一台机器生成 key：
+
+```bash
+ssh-keygen -t ed25519
+```
+
+2. 把另一台机器的公钥内容追加到当前服务器的：
+
+```bash
+~/.ssh/authorized_keys
+```
+
+3. 再从另一台机器执行：
+
+```bash
+ssh qiancheng@172.18.0.5
+```
+
+## 2026-05-09 项目通读后的当前任务理解
+
+当前项目根目录是 `/home/qiancheng/ejs-new`，不是 `/home/qiancheng`。`/home/qiancheng/ejs-new` 才是有效 git 仓库，当前分支是 `master`。本次阅读时工作区只有 `AIlog.md` 有未提交修改，源码文件没有未提交 diff。
+
+项目主体是 eJS：一个面向嵌入式系统的 JavaScript VM。核心目录包括：
+
+- `ejsvm/`：VM 核心、对象模型、GC、解释器、loader、builtin。
+- `ejsc/`：JavaScript 到 SBC/OBC bytecode 的编译器。
+- `ejsi/`：解释器接口。
+- `vmgen/` 和 `vmdl/`：指令/类型分派生成工具。
+- `build.debug/benchmarks/`：当前主要实验 benchmark 与输出目录。
+
+当前研究任务的核心是围绕 `Cache/Young -> DRAM/Old` 架构实现和评估 GiY minor GC：
+
+- `cache_cheney` 是 root-controlled Cheney 对照组。
+- `giy` 是当前主方案：先在 Young/Cache 内完成 live object graph traversal 和字段修补，再把每个 live object materialize 到 DRAM/Old。
+- `giyol` 是 GiY 的进一步实验变体，加入 tiny staging / batch / non-temporal store 策略。
+
+我对当前实现的理解：
+
+- GiY 的核心入口在 `ejsvm/GiY.cc`，由 `giy_minor_collect()` 驱动。
+- `copy_for_minor()` 只在 Old/DRAM 预留目标地址，并把 forwarding pointer 写回 Young header；此时不立即复制对象。
+- `giy_traverse_stack_and_copy()` 弹出 Young 对象，在 Young 内扫描和修补其字段，之后调用 `giy_copy_live_object()` 一次性复制到 Old。
+- 小对象 `<=256B` 当前走 `memcpy`，大对象 `>256B` 走 `_mm_stream_si64/_mm_stream_si128` non-temporal store。
+- `GIY_MPROTECT_OLD=1` 用于验证 GiY 核心阶段不读 Old/DRAM；允许窗口是最终 object copy 和必要的 Old slot patch。
+- `weak_clear` 当前被明确归类为 `weak_clear_generic_old_metadata`，仍会访问 old metadata；它不是 GiY strict core 的一部分。
+- function table 不再整体扫描，而是通过 `giy_record_ft_jsvalue_slot()` / `giy_record_ft_ptr_slot()` 记录 constant pool、allocation site cache 中写入 Young 指针的强 slot。
+- remembered set 在 GiY 中同时记录 slot 地址和最近写入值，避免 minor GC reserve 阶段回读 Old slot。
+
+我对当前实验状态的理解：
+
+- 用户指定给导师展示的三项是：
+  - GiY：`build.debug/benchmarks/out110_final_giy_corrected_full`
+  - GiYOL：`build.debug/benchmarks/out111_final_giyol_corrected_full`
+  - CheneyGC：`build.debug/benchmarks/out113_final_cheney_552_full`
+- 这三项中，GiY 的 Core GC 明显优于 CheneyGC；Full GC 也略优，但 end-to-end 总时间仍略慢，主要因为 Business CPU 抵消了 GC 收益。
+- 更公平的三轮 benchmark 是 `out123` 到 `out131`，同一源码、同一 `CACHE_SIZE_KB=552`、每个 GC 重新构建、固定 CPU、顺序平衡。三轮 GC 指标稳定，GiY 和 GiYOL 的 Core GC/Full GC 均低于 CheneyGC。
+- GiYOL 当前没有证明 GC core 优于 GiY；GiYOL 的可能价值更多出现在某些 end-to-end/business 时间波动中，而不是稳定的 GC core 优势。
+
+当前最可能的下一步任务：
+
+1. 如果目标是导师汇报，应优先整理 out110/out111/out113 的展示表，同时补充说明 out123-out131 三轮公平重跑支持 GC 指标趋势。
+2. 如果目标是继续优化，应做消融实验：
+   - `giy_old_guard_protect_old_write()` 中 per-write `_mm_sfence()` 的影响。
+   - GiYOL tiny staging / direct non-tiny NT / force tiny tail NT 的开关组合。
+   - 重点 benchmark：`Storage`、`Havlak`、`Sieve`、`NBody`、`Mandelbrot`。
+3. 如果导师要求更严格的 0 Old read，需要单独设计 GiY 专用 weak remembered set；不能简单把通用 `weak_clear` 局部改成 Young-only。
+
+当前理解程度：
+
+- 对项目结构、构建入口、GC 变体关系、GiY/GiYOL 当前实现、benchmark 目录和已有结论：理解度约 80%-85%。
+- 对每个 VM instruction、编译器 `ejsc` 全部优化流程、所有历史 benchmark 目录细节：还没有逐行完全展开，理解度约 50%-60%。
+- 对继续做 GC 优化或写导师汇报所需的上下文：已经足够开始工作。
+
+## 2026-05-09 GiY 和 GiYOL 差异代码位置与实现思想
+
+用户指出：以后这类项目理解、代码调查、会议整理内容都需要同步记载到 `AIlog.md`。本次补记此前关于 GiY/GiYOL 差异的说明。
+
+代码位置：
+
+- `ejsvm/common.mk`
+  - `OPT_GC=giy` 和 `OPT_GC=giyol` 都编译 `giy_dram_manager.cc`、`giy_rset.cc`、`GiY.cc`。
+  - `giyol` 相比 `giy` 只额外打开 `-DUSE_GIYOL`。
+  - 因此 GiYOL 不是另一份独立 GC 文件，而是同一套 GiY minor GC 主体上的条件编译变体。
+- `ejsvm/giy_dram_manager.cc`
+  - minor GC 主入口相同，都是调用 `giy_minor_collect(ctx, ...)`。
+  - 打印信息会根据 `USE_GIYOL` 显示 GiY 或 GiYOL。
+- `ejsvm/GiY.cc`
+  - `copy_for_minor()`：reserve Old/DRAM 目标地址，设置 forwarding pointer，push GC stack。
+  - `giy_copy_live_object()`：GiY 的真正 object copy 路径。
+  - `giyol_*` 函数：GiYOL 的 batch、staging buffer、tiny object flush、stream copy 逻辑。
+  - `giy_traverse_stack_and_copy()`：GiY 和 GiYOL 分歧的核心位置。
+
+GiY 的基本思想：
+
+1. root / remembered set / function table strong slot 发现 Young object。
+2. `copy_for_minor()` 只给 object 在 Old/DRAM 中预留目标地址，并把目标 payload 地址写入 Young object header 的 forwarding pointer。
+3. `copy_for_minor()` 此时不复制 object 内容。
+4. `giy_traverse_stack_and_copy()` 从 GC stack 弹出 Young object。
+5. 先在 Young/Cache 中扫描这个 object 的字段，并把 Young-to-Young 引用 patch 成对应的 forwarding pointer。
+6. 字段修补完成后，调用 `giy_copy_live_object(dst, src, size, ...)`，把已经修好的 Young object 内容真正 materialize 到 Old/DRAM。
+
+GiYOL 的基本思想：
+
+- GiYOL 保留 GiY 的 root scanning、remembered set、function table slot、weak clear 等语义。
+- GiYOL 主要只改变 materialize/copy 的策略。
+- 目标是减少很多小 object 一个一个 copy 到 Old 的开销，并让多个小 object 合并成较大连续写入，从而更容易发挥 non-temporal store / streaming store 的效果。
+- 当前默认重点优化 tiny object：
+  - `GIYOL_STAGING_COPY=1`
+  - `GIYOL_TINY_STAGING=1`
+  - `GIYOL_TINY_MAX_OBJECT_BYTES=64`
+  - `GIYOL_TINY_STAGING_BYTES=4096`
+  - `GIYOL_TINY_FLUSH_BYTES=4096`
+  - `GIYOL_DIRECT_NONTINY_NT=0`
+- 因此当前 GiYOL 中 `<=64B` 的 tiny object 会进入 staging/batch 逻辑；大于 64B 的 object 默认仍回到 GiY 的 `giy_copy_live_object()` 路径。
+
+continuous objects 的准确含义：
+
+- 当前代码中的 continuous objects 指的是 Old/DRAM 目标地址连续，不是 Young 源地址连续。
+- GiYOL copy entry 记录的是 `(dst, src, nbytes)`。
+- 判断连续的逻辑是：
+  - 第一个 entry 的目标地址为 `expected`。
+  - 下一个 entry 必须满足 `entry->dst == expected`。
+  - 然后 `expected += entry->nbytes`。
+  - 如果下一个目标地址不等于 expected，就说明 Old 目标地址中间有 gap，当前连续 run 被切断。
+- 也就是说，GiYOL 想要的是多个 tiny object 在 Old reserve address 上连续，这样才能把它们合成一个 staging chunk，再对 Old 做一段连续 stream write。
+
+什么时候才会真正 copy：
+
+- `copy_for_minor()` 名字里有 copy，但在 GiY/GiYOL 当前实现中它不是真正复制 object 内容。
+- `copy_for_minor()` 做的是：
+  - 计算 object 对齐后的大小。
+  - 从 `dram_space.free` bump pointer 中分配/reserve Old 地址。
+  - 更新 `dram_space.free` 和 `available_bytes`。
+  - 设置 source object header 的 `forwarding_pointer`。
+  - 把 source payload push 到 GC stack。
+  - 在 GiYOL staging 模式下，如果 object 足够小，还会把 `(dst, src, size)` 记录进 `giyol_reserve_order_batch`。
+- 真正 copy 发生在 object 字段已经在 Young/Cache 中被扫描和 patch 之后：
+  - GiY：在 `giy_traverse_stack_and_copy()` 中直接调用 `giy_copy_live_object()`。
+  - GiYOL：tiny object 先记录 copy entry，不立即 copy；等 traversal 结束后调用 `giyol_flush_copy_batch()`，再通过 `giyol_flush_tiny_staging_batch()` / `giyol_flush_tiny_chunk()` / `giyol_stream_copy_region()` 真正写入 Old。如果不能形成合适 batch，则 fallback 到 `giy_copy_live_object()`。
+
+为什么这样实现：
+
+- 必须先 reserve Old 地址，因为 object graph 中互相引用时，需要 forwarding pointer 来修补引用。
+- 不能在 reserve 时就真正 copy，因为此时 source object 内部字段可能还没有被修补成新的 Old 地址。
+- GiY 的设计是先把对象图在 Young/Cache 内处理完，再把修补后的 object 一次性 materialize 到 Old，减少核心 traversal 阶段对 Old/DRAM 的读取。
+- GiYOL 进一步利用这个“reserve 和真正 copy 分离”的结构：先收集 tiny object 的 copy entry，等 Young 内修补完成后再批量写 Old。
+- staging buffer 的作用是把多个源地址不一定连续的 tiny Young object 内容拼成一段连续临时 buffer，然后对 Old 中连续 reserve address 做较大粒度 streaming write。
+
+当前 GiYOL 的问题和下一步可能性：
+
+- 当前 Old reserve 仍然来自同一个 `dram_space.free` bump pointer。
+- 大 object 虽然默认不进入 tiny staging batch，但它仍然会在 reserve 阶段占用 Old 地址。
+- 如果一个大 object 插在很多 tiny object 中间，tiny object 的 Old reserve address 就会被大 object 打断，导致 `dst != expected`，continuous run 被切断。
+- 用户提出的下一步想法是合理的：
+  - 在 scan/reserve 阶段就识别某些很大的 object。
+  - 把大 object 预先 reserve 到另一个专门放大 object 的 Old 区域。
+  - 让更多小 object 的 reserve address 保持连续。
+  - 这样 GiYOL tiny staging 更容易形成较大的 continuous chunk。
+- 另一个可能性：
+  - 如果两个 live object 中间的 garbage/gap 很小，可以考虑把这个小 garbage 也一起 copy 到 Old。
+  - 这样可以用少量额外复制换取更大的连续写入区间。
+  - 需要实验判断额外 copy 的浪费是否小于连续 streaming write 带来的收益。
+
+会议记录事项：
+
+- 切换实验主机。
+- 确定 cache 的大小。
+
+## 2026-05-09 GiYOL 相对 GiY 的具体差异行号
+
+用户要求明确说明 GiYOL 和 GiY 的差异分别在哪些文件、哪些行，以及为什么这样实现。补记如下。
+
+主要差异文件和行号：
+
+1. `ejsvm/common.mk`
+   - `135-176`：允许通过 make 变量覆盖 GiYOL 参数，例如 `GIYOL_BATCH_BYTES`、`GIYOL_STAGING_COPY`、`GIYOL_TINY_STAGING_BYTES`、`GIYOL_TINY_MAX_OBJECT_BYTES` 等。
+   - `446-457`：`OPT_GC=giy` 和 `OPT_GC=giyol` 编译同一批文件；`giyol` 只比 `giy` 多 `-DUSE_GIYOL`。
+   - 含义：GiYOL 不是独立文件实现，而是 GiY 主体上的条件编译实验变体。
+
+2. `ejsvm/giy_dram_manager.cc`
+   - `804-810`：根据 `USE_GIYOL` 打印 GiY 或 GiYOL。
+   - `895-909`：GiY 和 GiYOL minor GC 入口相同，都是 `giy_minor_collect(...)`，之后都是 `giy_weak_clear(ctx)`。
+   - 含义：GC 主控制流没有分叉；差异集中在 `GiY.cc` 内部 copy/materialize 策略。
+
+3. `ejsvm/GiY.cc`
+   - `113-158`：GiYOL 默认参数。
+     - `GIYOL_BATCH_BYTES=128KB`
+     - `GIYOL_STAGING_COPY=1`
+     - `GIYOL_TINY_STAGING=1`
+     - `GIYOL_TINY_STAGING_BYTES=4096`
+     - `GIYOL_TINY_FLUSH_BYTES=4096`
+     - `GIYOL_TINY_MAX_OBJECT_BYTES=64`
+     - `GIYOL_DIRECT_NONTINY_NT=0`
+   - `161-183`：GiYOL copy entry、copy batch、staging buffer、reserve-order batch。
+   - `214-232`：GiYOL profile counters。
+   - `1162-1195`：`copy_for_minor()` 中的 GiYOL staging hook。GiY 只 reserve Old 地址；GiYOL 在 staging 模式下还会把小对象的 `(dst, src, nbytes)` 记录到 `giyol_reserve_order_batch`。
+   - `1795-1855`：GiY 原本的 `giy_copy_live_object()`，也是 GiYOL fallback 路径。小对象走 `memcpy`，大对象走 non-temporal store。
+   - `1857-1937`：`USE_GIYOL` 下的 stream copy 函数，包括 `giyol_stream_copy_region()` 和 direct NT copy。
+   - `1939-2018`：GiYOL batch 初始化、append、reset，以及 reserve-order log append。
+   - `2019-2076`：staging buffer 扩容和 staging chunk flush。能形成合适大块时，先把多个源对象 copy 到 staging buffer，再 stream copy 到 Old。
+   - `2078-2118`：tiny chunk flush。只有 chunk 足够大，或强制 tail NT 时，才用 stream copy；否则 fallback 到 GiY copy。
+   - `2121-2199`：tiny staging 主逻辑。只接受 `nbytes <= GIYOL_TINY_MAX_OBJECT_BYTES` 的小对象；用 `dst == expected` 判断 Old 目标地址是否连续。
+   - `2280-2388`：通用 staging/batch flush 逻辑。非 tiny staging 分支里可以排序、按连续 Old 目标地址形成 chunk，再决定是否 stream copy。
+   - `2393-2495`：GiY 和 GiYOL 真正分叉的核心函数 `giy_traverse_stack_and_copy()`。
+     - GiY：每弹出一个对象、扫描并 patch 完后，立刻 `giy_copy_live_object()`。
+     - GiYOL staging：大于 tiny 阈值的对象直接走 GiY/fallback；tiny 对象不在循环里立即 copy，而是等循环结束后 `giyol_flush_copy_batch()`。
+   - `2518-2564` 和 `2646-2691`：GiYOL profile 输出。
+   - `2767-2776`：minor GC 开始时，如果是 GiYOL staging copy，初始化 reserve-order batch。
+
+为什么这么实现：
+
+- `copy_for_minor()` 必须先 reserve Old 地址，但不能立即复制。原因是对象内部字段还没有完成 forwarding/patch；如果过早 copy 到 Old，Old 中会留下旧 Young 指针。
+- GiY 的核心思想是：先在 Young/Cache 中完成对象图遍历和字段修补，然后再把修补后的对象一次性 materialize 到 Old/DRAM。
+- GiYOL 利用 GiY 已经存在的“reserve 和真正 copy 分离”结构，把多个 tiny object 的 copy 延迟到 traversal 之后。
+- GiYOL 的目标不是改变 GC 语义，而是改变写 Old 的方式：把多个小对象聚合成更大的连续写入，以减少小 copy 开销，并尽量发挥 non-temporal store 的收益。
+- continuous objects 在当前实现中指 Old 目标地址连续。判断逻辑是 `dst == expected`，之后 `expected += nbytes`。如果中间有大对象或 gap，连续区间就断开。
+- staging buffer 的作用是解决 Young 源地址不连续的问题：多个源对象可以先被拼进 staging buffer，再对 Old 中连续目标地址做一次 stream write。
+- `GIYOL_TINY_MAX_OBJECT_BYTES=64` 是为了把策略集中在 tiny object；大对象本身 copy 量足够大，默认回到 GiY copy 路径，避免 staging 的额外一次 memcpy 成本。
+- `GIYOL_TINY_FLUSH_BYTES=4096` 是为了避免太小的 stream write。non-temporal store 对很小数据可能不划算，所以当前实现倾向于达到 4KB 再 flush。
+- 当前实现的主要问题是：大对象虽然不进入 tiny staging，但仍然在同一个 `dram_space.free` 上 reserve 地址，会打断 tiny object 的 Old 地址连续性。这正是后续可以考虑“大对象单独 reserve 区域”的原因。
+
+## 2026-05-09 关于 GiY.cc 中 copy 指针为什么用 unsigned char *
+
+用户问：`ejsvm/GiY.cc` 约 `1876` 行里，GiY/GiYOL copy 代码为什么把 `dst` 转成 `unsigned char *`，地址明明是 64 位。
+
+解释：
+
+- `unsigned char *` 的意思不是“地址只有 1 byte”。
+- 在 64 位机器上，`unsigned char *` 这个指针变量本身仍然是 64 位地址。
+- `char`/`unsigned char` 表示的是这个指针指向的数据单位大小是 1 byte。
+- copy 代码需要按 byte 移动源/目标指针，所以使用 `unsigned char *d` 和 `const unsigned char *s`。
+- 例如 `d += 8` 表示目标地址前进 8 bytes；如果使用 `uint64_t *d`，`d += 8` 会前进 8 个 `uint64_t`，也就是 64 bytes，语义会错。
+- 后续真正做 64-bit 或 128-bit store 时，代码会临时把地址 cast 成 `_mm_stream_si64((long long *) d, ...)` 或 `_mm_stream_si128((__m128i *) d, ...)`。
+- 因此这里用 `unsigned char *` 是为了 byte-level pointer arithmetic，而不是因为地址宽度是 8 bit。
+
+## 2026-05-09 关于 GiYOL stream copy 中 memcpy 到局部变量 v
+
+用户问：`ejsvm/GiY.cc` 约 `1886` 行开始为什么先 `memcpy(&v, s, sizeof(v))`，`v` 存在哪里，是否看起来多存了一次。
+
+解释：
+
+- 代码形式是：
+
+```cpp
+uint64_t v;
+memcpy(&v, s, sizeof(v));
+_mm_stream_si64((long long *) d, (long long) v);
+```
+
+- `v` 是函数里的局部自动变量。语义上它在当前函数栈帧里；实际编译优化后，编译器很可能直接把它放在寄存器里，不一定真的写到栈内存。
+- 这里用 `memcpy` 的主要原因是安全地从 `s` 指向的 byte 地址读取 8 bytes。
+- `s` 是 `const unsigned char *`，它可能不是 8 字节对齐地址。如果直接写 `*(uint64_t *)s`，在 C/C++ 语义上可能有 alignment/strict-aliasing 问题。
+- `memcpy(&v, s, 8)` 表达的是“从任意 byte 地址复制 8 bytes 到一个 64-bit 临时值”，这是标准、安全的写法。
+- 对固定 8 bytes 的 `memcpy`，优化编译时通常会被编译器优化成一次普通 load 或几个 load，不一定真的调用 `memcpy` 函数。
+- `_mm_stream_si64` 的接口需要一个 64-bit 值作为参数，而不是源地址；所以无论如何都需要先把源内存的 8 bytes load 成一个值，再 stream store 到目标地址。
+- 因此这不是为了把数据多存一份到长期内存里，而是为了安全地构造 `_mm_stream_si64` 需要的 64-bit register value。
+- 中间大块 16 bytes 的路径使用 `_mm_loadu_si128`，因为它本来就是“unaligned load”指令接口；8 bytes 的头尾路径没有对应地直接用 unaligned scalar load intrinsic，所以这里使用 `memcpy` 更稳妥。
+
+## 2026-05-09 GiYOL staging buffer 的大小和存放位置
+
+用户问：`ejsvm/GiY.cc` 约 `2019` 行开始的 staging 代码如何确定 staging 区大小，以及这个空间放在哪里。
+
+解释：
+
+- staging buffer 的全局状态定义在 `GiY.cc` 约 `179-183` 行：
+
+```cpp
+static unsigned char *giyol_staging_buffer = NULL;
+static size_t giyol_staging_capacity = 0;
+static GiYOLCopyBatch giyol_reserve_order_batch;
+static bool giyol_reserve_order_batch_active = false;
+```
+
+- 真正分配空间的是 `giyol_ensure_staging_capacity(size_t bytes)`，约 `2019-2040` 行。
+- 如果当前 `giyol_staging_capacity >= bytes`，不重新分配。
+- 如果不够，就从当前 capacity 开始翻倍，直到 `new_capacity >= bytes`。
+- 然后调用：
+
+```cpp
+realloc(giyol_staging_buffer, new_capacity)
+```
+
+- 因此 staging buffer 不在 `cache_space`，也不在 `dram_space`。
+- 它是普通 C heap 上的一块全局缓冲区，由 libc `malloc/realloc` 管理。
+- 这块 buffer 会跨 GC 复用；代码只扩大 capacity，不在每次 GC 后缩小或释放。
+
+当前默认 tiny staging 路径下大小如何决定：
+
+- 默认参数：
+  - `GIYOL_TINY_STAGING_BYTES=4096`
+  - `GIYOL_TINY_FLUSH_BYTES=4096`
+  - `GIYOL_TINY_MAX_OBJECT_BYTES=64`
+- `giyol_flush_tiny_staging_batch()` 约 `2121-2199` 行一开始会调用：
+
+```cpp
+giyol_ensure_staging_capacity((size_t) GIYOL_TINY_STAGING_BYTES);
+```
+
+- 所以默认第一次使用 tiny staging 时，至少申请 4096 bytes。
+- 之后组 chunk 时，代码用 `bytes + entry->nbytes <= GIYOL_TINY_STAGING_BYTES` 限制一个 tiny chunk 不超过 4096 bytes。
+- 如果 chunk 达到 `GIYOL_TINY_FLUSH_BYTES`，即默认 4096 bytes，就 flush。
+- 如果 chunk 没达到阈值，通常 fallback 到普通 GiY copy；只有 `GIYOL_FORCE_TINY_TAIL_NT` 打开时，tail 小块也会走 NT stream。
+
+非 tiny/general staging 路径：
+
+- `giyol_flush_staging_chunk()` 约 `2042-2076` 行会根据实际 chunk bytes 调用：
+
+```cpp
+giyol_ensure_staging_capacity(bytes);
+```
+
+- 这时 staging buffer 至少扩到当前 chunk 所需大小。
+- 但当前默认 `GIYOL_TINY_STAGING=1`，主要走 tiny staging 逻辑。
+
+为什么不放在 cache_space / dram_space：
+
+- staging buffer 是临时复制缓冲区，不是 VM object，不应该被 GC 当作 Young 或 Old object 管理。
+- 如果放在 cache_space，会挤占 Young/cache 区，影响 GC 实验变量。
+- 如果放在 dram_space，会污染 Old/DRAM 的对象布局和 reserve 连续性，反而破坏 GiYOL 要观察的 Old 目标地址连续性。
+- 所以当前实现把 staging buffer 放在普通 C heap 上，作为 GC 算法外部的辅助缓冲区。
+
+## 2026-05-09 GiYOL staging chunk 中 2056 行为什么用 memcpy
+
+用户问：`ejsvm/GiY.cc` 约 `2056` 行为什么要用 `memcpy`。
+
+相关代码在 `giyol_flush_staging_chunk()` 中：
+
+```cpp
+for (size_t i = start; i < end; i++) {
+  memcpy(giyol_staging_buffer + off, items[i].src, items[i].nbytes);
+  off += items[i].nbytes;
+}
+giyol_stream_copy_region(dst, giyol_staging_buffer, bytes, used_nt_store);
+```
+
+解释：
+
+- 这里的 `memcpy` 是把多个源 object 的 bytes 从各自的 Young 地址复制到一个连续的 staging buffer。
+- 原因是这些 object 的 Old 目标地址可以连续，但它们的 Young 源地址不一定连续。
+- `giyol_stream_copy_region()` 只能从一段连续的源内存 stream copy 到一段连续的目标 Old 内存。
+- 如果没有 staging buffer，就只能对每个 object 单独 stream/copy，无法把多个 tiny object 合并成一次大块连续写。
+- 因此 `memcpy` 的作用是“pack”：把零散源对象拼成连续源 buffer。
+- 后面的 `giyol_stream_copy_region(dst, giyol_staging_buffer, bytes, ...)` 才是真正写 Old/DRAM。
+- 这确实会多一次从 Young 到 staging buffer 的普通 copy；GiYOL 的假设是，当多个 tiny object 合并成较大连续 Old 写入时，减少小 copy 和提升 streaming write 效率可能抵消这次额外 copy。
+- 如果 chunk 太小、不值得这样做，代码会走 fallback：逐个调用 `giy_copy_live_object()`。
+
+## 2026-05-10 对 GiYOL copy 策略理解的校正
+
+用户给出的解释：
+
+> GiYOL 的不同点在于：在数据 copy 环节当中，不是像 GiY 一样立刻复制，而是判断大小。如果对象大小小于 64B，那么就记录进表格里；如果小于 256B 大于 64B，那么就立刻 memcpy；剩下的大对象就立刻 NT store。然后在这个环节结束之后，再查验表格，如果大于某一个阈值，就复制到 staging place 然后使用 NT store，否则就照常使用 memcpy。
+
+评估：大方向正确，但需要几处精确修正。
+
+正确的部分：
+
+- GiYOL 相比 GiY 的核心差异确实在 object materialize/copy 策略，而不是 root scanning 或 remembered set 主语义。
+- 当前默认 `GIYOL_TINY_MAX_OBJECT_BYTES=64`，小于等于这个阈值的 tiny object 会进入 GiYOL reserve-order batch。
+- 大于 tiny 阈值的对象在 `giy_traverse_stack_and_copy()` 中会直接走 `giy_copy_live_object()`。
+- `giy_copy_live_object()` 中 `<= GIY_NT_COPY_MIN_BYTES`，即当前 `<=256B`，走 `memcpy`；更大的对象在 x86 下走 non-temporal store。
+- traversal 结束后，GiYOL 会 flush batch；如果 tiny chunk 达到 `GIYOL_TINY_FLUSH_BYTES=4096`，会 copy 到 staging buffer，然后对 Old 连续目标地址做 NT stream copy；否则默认 fallback 到逐个 `giy_copy_live_object()`，对于 tiny object 实际就是普通 `memcpy`。
+
+需要修正的部分：
+
+- 代码判断的不是纯 payload “对象大小”，而是：
+
+```cpp
+ALIGN(hdr->size + sizeof(object_header))
+```
+
+也就是包含 object header 后再对齐的 `align_bytes`。
+
+- “小于 64B”更准确应说“`align_bytes <= GIYOL_TINY_MAX_OBJECT_BYTES`”，当前阈值是 `<=64B`，不是 `<64B`。
+- tiny object 记录进表格的时间点不是“真正 data copy 环节”，而是在 `copy_for_minor()` 的 reserve 阶段，代码约 `1168-1195` 行。
+- GiYOL staging 模式下，`<=64B` 的 tiny object 在 `giy_traverse_stack_and_copy()` 循环里不会立刻 copy；它依靠之前 reserve 阶段记录的 batch，在 traversal 完成后统一 flush。
+- `64B < align_bytes <= 256B` 的对象会在 traversal 中直接 `giy_copy_live_object()`，并因为 `nbytes <= 256` 走 `memcpy`。
+- `align_bytes > 256B` 的对象会在 traversal 中直接 `giy_copy_live_object()`，并在 x86 下走 NT store。
+- batch flush 时，不是只看总大小，还要求 Old 目标地址连续。tiny staging 代码通过 `dst == expected` 判断 continuous run。
+- 默认 `GIYOL_FORCE_TINY_TAIL_NT=0`，所以不足 `4096B` 的 tail chunk 不会强行 NT store，会 fallback 到逐个普通 copy。
+
+更准确的一句话版本：
+
+GiYOL 默认策略是：在 reserve 阶段把 `align_bytes <=64B` 的 tiny object 记录到 reserve-order batch；在 traversal/copy 阶段，`>64B` 的对象立即走 GiY 的 `giy_copy_live_object()`，其中 `<=256B` 用 `memcpy`，`>256B` 用 NT store；traversal 结束后，对 batch 中 Old 目标地址连续的 tiny objects 组 chunk，如果 chunk 达到 `4096B`，先 pack 到 staging buffer 再 NT store 到 Old，否则 fallback 到普通 GiY copy。
+
+日语版：
+
+GiYOL の違いは、主に object を Old 領域へ copy する部分にある。GiY では、object を scan して中の pointer を直したあと、すぐに Old 領域へ copy する。
+
+一方、GiYOL では、`align_bytes` が `64B` 以下の tiny object は、reserve の段階で copy せず、`dst`、`src`、`size` を batch に記録しておく。ここでいう size は payload だけではなく、object header を含めて align したサイズである。
+
+`64B` より大きい object は、GiY と同じようにその場で copy する。そのとき、`256B` 以下なら普通の `memcpy` を使い、`256B` より大きければ NT store を使う。
+
+すべての traversal が終わったあと、GiYOL は batch に記録した tiny object を確認する。Old 領域での destination address が連続している tiny object をまとめて chunk にする。
+
+その chunk が `4096B` 以上になれば、まず staging buffer にまとめて copy し、そのあと staging buffer から Old 領域へ NT store で copy する。
+
+もし chunk が `4096B` 未満なら、デフォルトでは NT store を使わず、普通の GiY copy に戻る。この場合、tiny object は `64B` 以下なので、実際には `memcpy` になる。
+
+## 2026-05-10 GiYOL PPT 三页英文内容
+
+用户要求：准备约三页 PPT 内容，用英语清楚说明 GiYOL 是什么，以及当前进度。
+
+建议 PPT 内容如下：
+
+Slide 1: What is GiYOL?
+
+- GiYOL is an experimental extension of GiY.
+- It keeps the main GiY minor GC design:
+  - reserve Old addresses first,
+  - traverse and patch live objects in Young/Cache,
+  - then materialize the patched objects into Old/DRAM.
+- The key difference is in the final copy/materialization step.
+- GiY copies each live object to Old immediately after it is processed.
+- GiYOL delays copying tiny objects and tries to copy them in larger contiguous chunks.
+
+Speaker note:
+
+GiYOL does not change the root scanning or remembered-set semantics. It mainly changes how small live objects are copied to Old space.
+
+Slide 2: GiYOL Copy Strategy
+
+- During reserve, if `align_bytes <= 64B`, GiYOL records the object in a copy batch:
+  - destination address,
+  - source address,
+  - aligned object size.
+- Objects larger than `64B` are copied immediately, using the normal GiY copy path.
+- In the normal GiY copy path:
+  - `<=256B`: copied with `memcpy`,
+  - `>256B`: copied with non-temporal stores.
+- After traversal, GiYOL checks the tiny-object batch.
+- If tiny objects have contiguous Old destination addresses, they are grouped into a chunk.
+- If the chunk reaches `4096B`, GiYOL packs the objects into a staging buffer and then uses non-temporal stores to copy the chunk to Old.
+- If the chunk is smaller than `4096B`, it falls back to normal GiY copy, which is usually `memcpy` for tiny objects.
+
+Speaker note:
+
+The staging buffer is needed because Young source addresses are not necessarily contiguous, even when Old destination addresses are contiguous.
+
+Slide 3: Current Progress, Findings, and Next Steps
+
+- Implementation status:
+  - GiYOL is implemented as a compile-time variant of GiY using `USE_GIYOL`.
+  - It is located mainly in `ejsvm/GiY.cc`.
+  - Current default settings focus on tiny objects:
+    - tiny object threshold: `64B`,
+    - tiny staging buffer size: `4096B`,
+    - tiny flush threshold: `4096B`.
+- Current finding:
+  - GiYOL can reduce small-object copy fragmentation in principle.
+  - However, current benchmark results do not yet show GiYOL clearly outperforming GiY in GC core time.
+  - A likely reason is that large objects still reserve space in the same Old allocation stream, which can break the continuity of tiny-object destination addresses.
+- Next steps:
+  - switch the experiment host,
+  - finalize the cache size,
+  - test whether large objects can be detected during scanning/reserve and placed in a separate large-object area,
+  - evaluate whether copying very small garbage gaps into Old is acceptable if it helps preserve larger contiguous chunks.
+
+Speaker note:
+
+The next design question is how to make more tiny objects receive contiguous Old addresses. This is necessary for GiYOL to form larger chunks and make non-temporal stores more effective.
+
+## 2026-05-10 GiYOL PPT 精简版与插图建议
+
+用户反馈上一版 PPT 文字量太多，要求减少文字量并提供插图建议。建议改为三页，每页只放 3-5 个短 bullet，细节放口头说明。
+
+Slide 1: GiYOL = GiY + Batched Tiny Copy
+
+PPT text:
+
+- Same minor GC flow as GiY
+- Difference: final copy to Old
+- GiY: copy each object immediately
+- GiYOL: delay tiny objects and batch them
+
+Figure suggestion:
+
+- 左右对比图。
+- 左边 GiY：Young object -> patch -> copy to Old，一次一个 object。
+- 右边 GiYOL：tiny objects -> batch table -> staging buffer -> Old contiguous chunk。
+
+Slide 2: Copy Policy
+
+PPT text:
+
+- `<=64B`: record in batch
+- `64B-256B`: immediate `memcpy`
+- `>256B`: immediate NT store
+- Tiny batch flush:
+  - contiguous Old addresses
+  - chunk >= `4096B`
+
+Figure suggestion:
+
+- 用三段颜色表示 size classes：
+  - tiny `<=64B`
+  - small `64B-256B`
+  - large `>256B`
+- 每段箭头指向不同 copy path。
+- 对 tiny path 再画 batch -> staging -> NT store。
+
+Slide 3: Current Status and Next Steps
+
+PPT text:
+
+- Implemented with `USE_GIYOL`
+- Main file: `ejsvm/GiY.cc`
+- Current issue:
+  - large objects break tiny-object continuity
+- Next:
+  - separate large-object reserve area
+  - test small-gap copying
+  - switch host / fix cache size
+
+Figure suggestion:
+
+- 画 Old address layout。
+- 当前：tiny, tiny, large, tiny, tiny，连续区间被 large object 打断。
+- 目标：tiny, tiny, tiny, tiny 连续；large objects 放到 separate area。
+
+## 2026-05-14 GiYOL staging buffer 和 reserve-order batch 是否在 Young/cache 区
+
+用户问：GiYOL 的 `staging buffer` 和记录 copy entry 的 `giyol_reserve_order_batch` 是否都在规定的 Young 区，即预期在 cache 上的那部分。
+
+结论：当前实现中，两者都不在规定的 Young/cache 区。
+
+代码依据：
+
+- `ejsvm/GiY.cc` 约 `179-183`：
+
+```cpp
+static unsigned char *giyol_staging_buffer = NULL;
+static size_t giyol_staging_capacity = 0;
+static GiYOLCopyBatch giyol_reserve_order_batch;
+static bool giyol_reserve_order_batch_active = false;
+```
+
+- `giyol_staging_buffer` 是静态全局指针，但它指向的 buffer 在 `giyol_ensure_staging_capacity()` 中通过 `realloc()` 分配，约 `2019-2040`：
+
+```cpp
+unsigned char *new_buffer =
+  (unsigned char *) realloc(giyol_staging_buffer, new_capacity);
+```
+
+因此 staging buffer 位于普通 C heap，由 libc malloc/realloc 管理，不在 `cache_space`，也不在 `dram_space`。
+
+- `giyol_reserve_order_batch` 本身是静态全局变量，位于程序的全局/静态数据区，不在 Young/cache 区。
+- 其 entry 存储 `items` 初始指向 `batch->inline_items`，约 `1939-1943`：
+
+```cpp
+batch->items = batch->inline_items;
+batch->capacity = GIYOL_INLINE_COPY_ENTRIES;
+```
+
+- `inline_items` 是 `GiYOLCopyBatch` 结构体内部数组，约 `167-172`：
+
+```cpp
+GiYOLCopyEntry inline_items[GIYOL_INLINE_COPY_ENTRIES];
+```
+
+因为 `giyol_reserve_order_batch` 是静态全局对象，所以这个 inline table 也在全局/静态数据区。
+
+- 如果 entry 超过 inline capacity，`giyol_copy_batch_reserve_entry()` 会用 `malloc()` 或 `realloc()` 扩容，约 `1957-1981`：
+
+```cpp
+new_items = (GiYOLCopyEntry *) malloc(...);
+...
+new_items = (GiYOLCopyEntry *) realloc(...);
+```
+
+扩容后的 table 位于普通 C heap，也不在 Young/cache 区。
+
+对比：确实绑定到 Young/cache 区的是 GiY 的某些辅助结构，例如 `g_gc_stack` 和 `g_ft_slot_set`。`giy_bind_stack_to_cache_impl()` 约 `635-689` 从 `cache_space.end` 预留空间，并设置：
+
+```cpp
+g_gc_stack.items = (uintptr_t *) stack_begin;
+g_ft_slot_set.items = (uintptr_t *) ft_slot_begin;
+cache_space.end = stack_begin;
+```
+
+但是当前代码没有对 `giyol_staging_buffer` 或 `giyol_reserve_order_batch.items` 做类似绑定。
+
+含义：
+
+- 如果实验预期是“GiYOL 所有 GC 辅助结构也必须在 cache/Young 区”，当前实现不满足这个预期。
+- 当前 GiYOL 的 staging buffer 和 batch table 是 GC 外部辅助内存，会额外使用普通 heap。
+- 这可能影响实验解释：GiYOL 使用了不属于模拟 cache/Young 的额外内存空间。
+
+后续如果要修正：
+
+- 可以在 `giy_bind_stack_to_cache_impl()` 或 GiYOL 专用 bind 函数中，从 `cache_space.end` 再预留一段空间给：
+  - fixed-size `giyol_reserve_order_batch.items`
+  - fixed-size `giyol_staging_buffer`
+- 然后相应减少 `cache_space.end` / `cache_space.total_size`，让这部分内存真实计入 cache/Young 预算。
+- 需要同时处理容量不足时的策略：不能再随意 `malloc/realloc`，要么报错，要么 flush batch，要么动态限制 batch 大小。
+
+## 2026-05-14 关于“不能叫 cache 区”的命名讨论
+
+用户指出：预期所有 GiYOL 辅助结构都要塞进的那块空间不能直接叫 cache 区，否则导师可能误解为真实 CPU cache。
+
+推荐命名：
+
+- 中文：`GC 本地工作区`
+- 英文：`GC Local Workspace`
+
+推荐原因：
+
+- 不暗示它是真实 CPU cache。
+- 能表达这是 GC 算法使用的临时空间。
+- 适合包含 stack、batch table、staging buffer 等不同辅助结构。
+- 可以进一步说明它是 “allocated from the Young-space budget” 或 “counted against the cache-size budget”。
+
+其他可选名称：
+
+- `Young-space Auxiliary Area`
+  - 强调它来自 Young space，更接近实现。
+  - 但听起来比较像 heap layout 的一部分。
+- `GC Scratch Space`
+  - 简洁，适合临时 buffer/table。
+  - 但略口语，PPT 上需要补充说明它计入预算。
+- `Cache-budgeted GC Workspace`
+  - 最清楚表达“计入 cache 预算，但不是 CPU cache”。
+  - 名字较长，适合论文/说明，不一定适合代码变量。
+- `Young-budgeted GC Workspace`
+  - 避开 cache 这个词，强调预算来自 Young 区。
+  - 如果导师关心实验预算，表达比较准确。
+
+建议 PPT 表述：
+
+```text
+GC Local Workspace
+(reserved from the Young-space / cache-size budget, not the CPU cache)
+```
+
+建议代码/文档中逐步避免裸用 `cache area` 表达，改成：
+
+- `Young-space GC workspace`
+- `GC local workspace`
+- `cache-budgeted workspace`
+
+最终命名决定：
+
+- 从现在起，用户决定把“预期全部存进 cache-size/Young 预算中的 GC 辅助空间”统一称为：
+
+```text
+GC Local Workspace
+```
+
+- 后续讨论、PPT、文档和代码说明中，应优先使用 `GC Local Workspace`。
+- 需要时补充解释：
+
+```text
+GC Local Workspace is reserved from the Young-space / cache-size budget.
+It is not the hardware CPU cache.
+```
+
+## 2026-05-14 当前 GiY/GiYOL 哪些结构在 GC Local Workspace
+
+用户问：当前 GiYOL 和 GiY 中，哪些结构实际放在 `GC Local Workspace`，哪些没有。
+
+定义：
+
+- `GC Local Workspace` 指从 Young-space / cache-size budget 中预留出来的 GC 辅助空间。
+- 它不是 CPU hardware cache。
+- 代码层面主要表现为：从 `cache_space.end` 向下切出空间，并减少 `cache_space.end` / `cache_space.total_size`。
+
+当前在 GC Local Workspace 中的结构：
+
+1. Remembered set backing arrays，GiY/GiYOL 共用
+   - 文件：`ejsvm/giy_rset.cc`
+   - 位置：约 `122-141`
+   - 包括：
+     - `remembered_set.values`
+     - `remembered_set.buffer`
+     - `remembered_set.hash_table`
+   - 代码从 `cache_space.end` 向下分配，并减少 `cache_space.end` 和 `cache_space.total_size`。
+   - 注意：`RememberedSet remembered_set` 这个结构体本身是全局变量，不在 workspace；在 workspace 中的是它指向的 backing arrays。
+
+2. GiY traversal stack backing array，GiY/GiYOL 共用
+   - 文件：`ejsvm/GiY.cc`
+   - 位置：约 `635-689`
+   - `g_gc_stack.items = (uintptr_t *) stack_begin`
+   - 从 `cache_space.end` 预留 `stack_bytes`。
+   - 注意：`g_gc_stack` 结构体本身是全局变量；真正进入 workspace 的是 `items` backing array。
+
+3. Function-table strong-slot set backing array，GiY/GiYOL 共用
+   - 文件：`ejsvm/GiY.cc`
+   - 位置：约 `635-689`，使用位置约 `737-759`
+   - `g_ft_slot_set.items = (uintptr_t *) ft_slot_begin`
+   - 用于记录 function table 中可能指向 Young 的强引用 slot。
+   - 同样，`g_ft_slot_set` 结构体本身是全局变量；在 workspace 中的是 `items` backing array。
+
+当前不在 GC Local Workspace 中的结构：
+
+1. GiYOL staging buffer
+   - 文件：`ejsvm/GiY.cc`
+   - 定义：约 `179-181`
+   - 分配：约 `2019-2040`
+   - `giyol_staging_buffer` 通过 `realloc()` 分配。
+   - 所以它位于普通 C heap，不在 GC Local Workspace。
+
+2. GiYOL reserve-order batch table
+   - 文件：`ejsvm/GiY.cc`
+   - 定义：约 `167-183`
+   - 初始化：约 `1939-1943`
+   - 追加/扩容：约 `1957-1981`
+   - `giyol_reserve_order_batch` 本身是 static global object。
+   - 初始 `items` 指向 `inline_items`，因此 inline table 在全局/静态数据区。
+   - 超过 inline capacity 后，`items` 通过 `malloc()` / `realloc()` 扩容，位于普通 C heap。
+   - 因此当前也不在 GC Local Workspace。
+
+3. EdgePatchLog
+   - 文件：`ejsvm/GiY.cc`
+   - 定义：约 `41-53`
+   - 绑定：约 `648` 和 `672-675`
+   - 当前 `edge_bytes = 0`，`g_edge_log.items = NULL`，`capacity = 0`。
+   - 它没有实际 backing array；目前主要只用 `g_edge_log.count` 做 profiling 计数。
+   - 因此不能说它实际占用了 GC Local Workspace。
+
+4. Allocation-site update logs
+   - 文件：`ejsvm/GiY.cc`
+   - 定义：约 `64-88`
+   - 分配：约 `815-833`、`944-965`
+   - `g_as_update_log.items` 和 `g_as_object_update_log.items` 使用 `realloc()`。
+   - 如果相关功能开启并使用，它们在普通 C heap，不在 GC Local Workspace。
+
+5. Optional remembered-set fast index
+   - 文件：`ejsvm/giy_rset.cc`
+   - 位置：约 `38-40`、`144-155`
+   - `remembered_set_hash_indices` 在 `GIY_RSET_INDEX_FAST` 打开时通过 `malloc()` 分配。
+   - 当前如果启用，也不在 GC Local Workspace。
+
+6. 全局 profile / guard / control metadata
+   - 例如 `giy_profile`、`g_old_guard_*`、`g_used_nt_old_store`、`giyol_batch_next_traversal` 等。
+   - 它们是普通全局/静态变量，不在 GC Local Workspace。
+   - 通常体积很小，但如果严格要求所有 GC metadata 都计入预算，也需要单独处理。
+
+简表：
+
+| 结构 | GiY | GiYOL | 当前位置 |
+|---|---:|---:|---|
+| `remembered_set.values/buffer/hash_table` | yes | yes | GC Local Workspace |
+| `g_gc_stack.items` | yes | yes | GC Local Workspace |
+| `g_ft_slot_set.items` | yes | yes | GC Local Workspace |
+| `g_edge_log.items` | no real storage | no real storage | none / global count only |
+| `giyol_staging_buffer` | N/A | yes | C heap, not workspace |
+| `giyol_reserve_order_batch.inline_items` | N/A | yes | global/static data, not workspace |
+| expanded `giyol_reserve_order_batch.items` | N/A | yes | C heap, not workspace |
+| allocation-site update log arrays | optional | optional | C heap, not workspace |
+| `remembered_set_hash_indices` when enabled | optional | optional | C heap, not workspace |
+
+重要结论：
+
+- 当前 GiY 的主要 GC auxiliary backing arrays 大多已经计入 `GC Local Workspace`。
+- 当前 GiYOL 新增的核心辅助结构，即 staging buffer 和 reserve-order batch table，还没有计入 `GC Local Workspace`。
+- 如果要让 GiYOL 满足“辅助结构全部来自 GC Local Workspace”的实验假设，需要把这两个结构从 `malloc/realloc` 或 global inline storage 改成从 `cache_space.end` 预留的固定区域，或实现 workspace 内的 bounded allocator / flush-on-full 策略。
+
+## 2026-05-14 当前 GiYOL staging buffer 和 reserve-order batch 的大小
+
+用户问：当前 GiYOL 的 `staging buffer` 和 `giyol_reserve_order_batch` 各有多大。
+
+当前机器是 64-bit，因此：
+
+- `void *` = 8 bytes
+- `const void *` = 8 bytes
+- `size_t` = 8 bytes
+
+`GiYOLCopyEntry` 定义在 `ejsvm/GiY.cc` 约 `161-165`：
+
+```cpp
+struct GiYOLCopyEntry {
+  void *dst;
+  const void *src;
+  size_t nbytes;
+};
+```
+
+所以一个 entry 当前是：
+
+```text
+8 + 8 + 8 = 24 bytes
+```
+
+### staging buffer
+
+定义位置：`ejsvm/GiY.cc` 约 `179-181`
+
+```cpp
+static unsigned char *giyol_staging_buffer = NULL;
+static size_t giyol_staging_capacity = 0;
+```
+
+初始大小：
+
+```text
+0 bytes
+```
+
+第一次 tiny staging flush 时，`giyol_flush_tiny_staging_batch()` 会调用：
+
+```cpp
+giyol_ensure_staging_capacity((size_t) GIYOL_TINY_STAGING_BYTES);
+```
+
+当前默认：
+
+```text
+GIYOL_TINY_STAGING_BYTES = 4096
+```
+
+所以默认情况下，staging buffer 第一次使用后通常是：
+
+```text
+4096 bytes
+```
+
+在当前默认 `GIYOL_TINY_STAGING=1` 的路径中，tiny chunk 被限制不超过 `4096B`，所以 staging buffer 一般不会超过 `4096B`。如果以后关闭 tiny staging 或修改参数，`giyol_ensure_staging_capacity(bytes)` 仍可能按需求扩容，并且扩容方式是 capacity 翻倍直到足够。
+
+### giyol_reserve_order_batch
+
+定义位置：`ejsvm/GiY.cc` 约 `167-183`
+
+```cpp
+struct GiYOLCopyBatch {
+  GiYOLCopyEntry *items;
+  size_t count;
+  size_t capacity;
+  size_t bytes;
+  GiYOLCopyEntry inline_items[GIYOL_INLINE_COPY_ENTRIES];
+};
+```
+
+当前默认：
+
+```text
+GIYOL_INLINE_COPY_ENTRIES = 64
+```
+
+inline entry table 大小：
+
+```text
+64 entries * 24 bytes = 1536 bytes
+```
+
+`GiYOLCopyBatch` 结构体前面还有：
+
+```text
+items pointer  = 8 bytes
+count          = 8 bytes
+capacity       = 8 bytes
+bytes          = 8 bytes
+```
+
+所以 `giyol_reserve_order_batch` 这个 static global object 本身大约是：
+
+```text
+32 + 1536 = 1568 bytes
+```
+
+这部分在 global/static data，不在 GC Local Workspace。
+
+如果 tiny object 数超过 64 个，`giyol_copy_batch_reserve_entry()` 会扩容：
+
+```cpp
+new_capacity = batch->capacity * 2;
+malloc/realloc(new_capacity * sizeof(GiYOLCopyEntry));
+```
+
+扩容大小示例：
+
+```text
+128 entries -> 128 * 24 = 3072 bytes
+256 entries -> 256 * 24 = 6144 bytes
+512 entries -> 512 * 24 = 12288 bytes
+1024 entries -> 1024 * 24 = 24576 bytes
+```
+
+注意：
+
+- batch 的 `count` 和 `bytes` 每次 minor GC 开始会 reset。
+- 但如果 `items` 已经扩容到 heap，capacity 不会在每次 GC 后缩小。
+- 因此 reserve-order batch 的 heap memory 是“按历史最大 tiny object entry 数增长并保留”的。
+
+当前默认理解：
+
+```text
+staging buffer:
+  initial 0B, normally grows to 4096B after first use
+
+giyol_reserve_order_batch:
+  initial inline capacity 64 entries
+  inline table 1536B
+  whole static batch object about 1568B
+  overflow then malloc/realloc, doubling capacity
+```
+
+## 2026-05-14 GiYOL staging buffer 下一步设计想法：5KB buffer + 4KB NT threshold
+
+用户提出一个可能策略：
+
+- 在 `GC Local Workspace` 中给 GiYOL staging buffer 预留稍微多一点空间，例如 `5KB`。
+- 一旦 tiny chunk 超过或达到 `4KB`，就启动 non-temporal store，把 staging buffer 中的数据写入 Old。
+
+评估：
+
+- 这个方向合理，尤其适合把当前 heap-allocated staging buffer 改成固定大小的 `GC Local Workspace` buffer。
+- 当前默认实现是：
+  - `GIYOL_TINY_STAGING_BYTES = 4096`
+  - `GIYOL_TINY_FLUSH_BYTES = 4096`
+  - staging buffer 通过 `realloc()` 分配，不在 `GC Local Workspace`。
+- 新设计可以改成：
+  - `GIYOL_TINY_STAGING_BYTES = 5 * 1024`
+  - `GIYOL_TINY_FLUSH_BYTES = 4 * 1024`
+  - staging buffer 从 `GC Local Workspace` 固定预留，不再 `malloc/realloc`。
+
+好处：
+
+- 4KB 仍然作为 NT store 的触发阈值，避免太小的 streaming write。
+- 5KB buffer 提供 headroom，避免因为 tiny object 边界导致刚好接近 4KB 时处理过于紧张。
+- 固定 5KB 更容易解释实验预算：staging buffer 明确计入 `GC Local Workspace`。
+- 实现上可以做到 bounded：如果 staging buffer 满了，就 flush；不再动态扩容到 C heap。
+
+需要注意：
+
+- 当前 tiny chunk 逻辑在加 object 后如果 `bytes >= GIYOL_TINY_FLUSH_BYTES` 就 break，所以即使 buffer 是 5KB，实际每次 chunk 通常只会略大于 4KB，而不是接近 5KB。
+- 如果希望利用完整 5KB buffer，需要调整 chunk 形成逻辑：可以在达到 4KB 后允许继续收集直到接近 5KB，或者保持当前“达到 4KB 就 flush”的低延迟策略。
+- NT store 的 destination alignment 仍然要满足现有 `giyol_stream_copy_region()` 的 alignment invariant。
+- 如果 chunk 小于 4KB，默认仍应 fallback 到普通 GiY copy / memcpy，除非专门打开 tail NT 实验。
+
+建议 PPT 表述：
+
+```text
+Next design:
+Reserve a fixed 5KB staging buffer in GC Local Workspace.
+Trigger NT store when a contiguous tiny-object chunk reaches 4KB.
+```
+
+建议代码方向：
+
+- 新增或修改参数：
+
+```cpp
+#define GIYOL_TINY_STAGING_BYTES (5 * 1024)
+#define GIYOL_TINY_FLUSH_BYTES   (4 * 1024)
+```
+
+- 把 `giyol_staging_buffer` 从 `realloc()` 改为从 `GC Local Workspace` 预留。
+- 超过固定 buffer capacity 时强制 flush，而不是扩容到 C heap。
+
+## 2026-05-14 实现记录：GiYOL staging/batch 进入 GC Local Workspace
+
+用户决定采用以下设计，并要求处理尾部对齐，同时把高频访问数据放进 `GC Local Workspace`：
+
+- 固定预留 `5KB` GiYOL staging buffer。
+- tiny chunk 达到 `4KB` 后触发 non-temporal store。
+- `giyol_staging_buffer` 和 `giyol_reserve_order_batch` 的 backing storage 都必须来自 `GC Local Workspace`，不再使用 C heap。
+
+本次修改文件：
+
+- `ejsvm/GiY.cc`
+- `ejsvm/common.mk`
+
+主要修改：
+
+1. 修改 GiYOL 默认参数：
+
+```cpp
+#define GIYOL_TINY_STAGING_BYTES (5 * 1024)
+#define GIYOL_TINY_FLUSH_BYTES   (4 * 1024)
+```
+
+2. 新增固定 batch entry 数：
+
+```cpp
+#define GIYOL_WORKSPACE_BATCH_ENTRIES 4096
+```
+
+- 一个 `GiYOLCopyEntry` 在当前 64-bit 环境中是 `24B`。
+- 因此 batch backing storage 大小为：
+
+```text
+4096 * 24B = 98304B = 96KB
+```
+
+3. `giy_bind_stack_to_cache_impl()` 现在会把 GiYOL 的两个高频结构也从 `cache_space.end` 预留出来：
+
+- `giyol_staging_buffer`：`5KB`
+- `giyol_reserve_order_batch` metadata：约 `32B`
+- `giyol_reserve_order_batch.items`：`96KB`
+
+这两部分会计入 `aux_total_bytes`，也会减少 `cache_space.end` 和 `cache_space.total_size`，因此属于 `GC Local Workspace`。
+
+4. `giyol_staging_buffer` 不再通过 `realloc()` 扩容。
+
+- `giyol_ensure_staging_capacity()` 现在只做 fixed-capacity 检查。
+- 如果需要的 bytes 超过 workspace 中预留的 staging capacity，会直接报错，而不是偷偷用 C heap。
+
+5. `giyol_reserve_order_batch` 不再使用 global inline table 或 C heap 扩容。
+
+- 在 `GIYOL_STAGING_COPY=1` 下，`GiYOLCopyBatch` 不再包含 `inline_items`。
+- `giyol_reserve_order_batch` 本体改为 workspace 内对象，代码只保留一个 global pointer。
+- `giyol_reserve_order_batch.items` 也绑定到 `GC Local Workspace`。
+- 如果本轮 reserve tiny object 数超过 `GIYOL_WORKSPACE_BATCH_ENTRIES`，设置 `giyol_reserve_order_batch_overflow = true`。
+- overflow 时，为保证正确性，本轮 traversal 阶段退回 GiY immediate copy，不再 flush 已记录 batch。
+
+6. 尾部/对齐处理：
+
+- `giyol_stream_copy_region()` 不再假设尾部只能剩 `8B`。
+- 对 destination 非 8-byte 对齐或不适合 NT 的情况，fallback 到 `memcpy`。
+- 主体仍使用 `_mm_stream_si128` 进行 16B NT store。
+- 8B 尾部使用 `_mm_stream_si64`。
+- 小于 8B 的剩余尾部使用普通 `memcpy` 处理，避免因为非预期尾部大小直接 abort。
+
+7. profile 输出现在显示 GiYOL workspace 用量：
+
+```text
+Aux total: ... (stack ..., edge ..., ft ..., giyol staging ..., giyol batch ...)
+```
+
+已验证：
+
+1. 构建：
+
+```bash
+cd /home/qiancheng/ejs-new/build.debug
+make OPT_GC=giyol -j2
+```
+
+- 第一次链接失败是因为旧的 `build.debug/giy_dram_manager.o` 引用了当前 glibc 没有的 `__isoc23_fscanf`。
+- 删除该生成物后重新 make，重新编译得到 `__isoc99_fscanf`，链接通过。
+
+2. 最小启动：
+
+```bash
+./ejsvm ../ejsvm/js/hello.sbc
+```
+
+- 通过。
+- 没触发 minor GC。
+- profile 显示：
+
+```text
+giyol staging 5.00 KB
+giyol batch 96.03 KB
+GiYOL tiny staging bytes:5120
+GiYOL tiny flush bytes:4096
+```
+
+3. 触发 GC 的 probe：
+
+```bash
+./ejsvm benchmarks/giy_gc_probe.sbc
+```
+
+- 通过。
+- Minor GC count: `26`
+- GiYOL NT batches: `325`
+- GiYOL staging bytes: `1.28 MB`
+- Aux total 中显示 `giyol staging 5.00 KB` 和 `giyol batch 96.03 KB`。
+
+4. mprotect 验证：
+
+```bash
+GIY_MPROTECT_OLD=1 ./ejsvm benchmarks/giy_gc_probe.sbc
+```
+
+- 通过。
+- 无 old-space violation。
+- 说明新 staging/NT copy 路径没有破坏当前 GiYOL 核心阶段的 Old/DRAM 访问约束。
+
+当前注意事项：
+
+- `GIYOL_WORKSPACE_BATCH_ENTRIES=4096` 是当前默认容量；如果实际 benchmark 中 tiny object entry 超过这个上限，本轮会退回 immediate copy，保证正确性但减少 GiYOL batching 收益。
+- 这比继续 `malloc/realloc` 更符合 `GC Local Workspace` 设计理念。
+- 后续可以实验不同 batch entry 容量，例如 `2048/4096/8192`，观察 GC Local Workspace 占用和 GiYOL batch 成功率之间的 tradeoff。
+
+## 2026-05-14 当前 GiY 和 GiYOL 的 GC Local Workspace 使用量
+
+用户问：现在 GiYOL 和 GiY 的 local space 空间使用情况。
+
+口径说明：
+
+- `GC Local Workspace` 指从 Young-space / cache-size budget 中预留给 GC 辅助结构的空间。
+- 当前默认 `CACHE_SIZE_KB=512`。
+- `init_remembered_set()` 先从 `cache_space.end` 预留 remembered set，所以初始化后打印的 cache size 是 `320KB`。
+- 运行 `./ejsvm ../ejsvm/js/hello.sbc` 得到当前 GiYOL profile：
+
+```text
+Young before aux:    300.24 KB
+Young after aux:     129.69 KB
+Aux total:           170.55 KB
+  stack              37.52 KB
+  edge               0.00 KB
+  ft                 32.00 KB
+  giyol staging       5.00 KB
+  giyol batch        96.03 KB
+```
+
+### remembered set，两者共用
+
+文件：`ejsvm/giy_rset.cc`
+
+当前 remembered set backing arrays：
+
+- `remembered_set.values`: `64KB`
+- `remembered_set.buffer`: `64KB`
+- `remembered_set.hash_table`: `64KB`
+
+合计：
+
+```text
+192KB
+```
+
+这部分 GiY 和 GiYOL 都使用，并且属于 `GC Local Workspace`，因为它从 `cache_space.end` 预留并减少 `cache_space.total_size`。
+
+### GiY 当前使用量
+
+GiY 没有 GiYOL staging/batch。
+
+minor GC auxiliary workspace：
+
+```text
+stack: 37.52 KB
+edge:   0.00 KB
+ft:    32.00 KB
+----------------
+aux:   69.52 KB
+```
+
+如果把 remembered set 也算入完整 `GC Local Workspace`：
+
+```text
+remembered set: 192.00 KB
+GiY aux:         69.52 KB
+-----------------------
+total:          261.52 KB
+```
+
+剩余 Young work area 约：
+
+```text
+300.24 KB - 69.52 KB = 230.72 KB
+```
+
+### GiYOL 当前使用量
+
+GiYOL 当前新增：
+
+- staging buffer: `5.00KB`
+- reserve-order batch:
+  - metadata: about `32B`
+  - entries: `4096 * 24B = 96KB`
+  - total printed: `96.03KB`
+
+minor GC auxiliary workspace：
+
+```text
+stack:          37.52 KB
+edge:            0.00 KB
+ft:             32.00 KB
+giyol staging:   5.00 KB
+giyol batch:    96.03 KB
+-----------------------
+aux:           170.55 KB
+```
+
+如果把 remembered set 也算入完整 `GC Local Workspace`：
+
+```text
+remembered set: 192.00 KB
+GiYOL aux:      170.55 KB
+------------------------
+total:          362.55 KB
+```
+
+剩余 Young work area 约：
+
+```text
+300.24 KB - 170.55 KB = 129.69 KB
+```
+
+### 对比
+
+```text
+GiY aux only:        69.52 KB
+GiYOL aux only:     170.55 KB
+extra GiYOL aux:   +101.03 KB
+
+GiY total incl RS:   261.52 KB
+GiYOL total incl RS: 362.55 KB
+extra GiYOL total:  +101.03 KB
+```
+
+额外的 `101.03KB` 基本来自：
+
+```text
+5.00 KB staging + 96.03 KB reserve-order batch
+```
+
+当前结论：
+
+- GiYOL 现在比 GiY 多占约 `101KB` 的 `GC Local Workspace`。
+- 这符合刚刚的设计理念：高频访问的 staging buffer 和 reserve-order batch 不再放在 C heap/global table，而是显式计入 local workspace。
+- 代价是 Young work area 从约 `230.72KB` 降到约 `129.69KB`，可能影响 GC 频率和 benchmark 结果，需要后续实验确认 tradeoff。
+
+## 2026-05-14 关于 GC Local Workspace 是否真的需要这么大
+
+问题：除了实际用于 ordinary young objects 的 Young work area 之外，其它空间是否真的需要这么大？
+
+当前 GiYOL 的 512KB cache/local-space budget 大致分布为：
+
+```text
+remembered set:        192.00 KB
+init objects:           19.76 KB
+GiY/GiYOL aux:         170.55 KB
+actual Young work:     129.69 KB
+--------------------------------
+total:                 512.00 KB
+```
+
+其中 GiYOL aux 为：
+
+```text
+stack:                  37.52 KB
+edge log:                0.00 KB
+function-table slots:   32.00 KB
+GiYOL staging:           5.00 KB
+GiYOL reserve batch:    96.03 KB
+```
+
+用 `GIY_PROFILE_DETAIL=1` 跑 `benchmarks/giy_gc_probe.sbc` 得到的当前观测：
+
+```text
+Minor collections:      26
+Max stack depth:        684 entries  ~= 5.34 KB
+FT max live set:        227 entries  ~= 1.77 KB
+RSet slots scanned:     2021 total   ~= 77.7 entries / GC
+Tiny objects staged:    22350 total  ~= 859.6 entries / GC
+Tiny staging bytes:     1.28 MB total
+Max materialized bytes per GC: 129.23 KB
+```
+
+判断：
+
+1. `GiYOL staging buffer = 5KB`
+   - 这个大小是比较合理的。
+   - 设计目标是超过 `4KB` 就使用 NT store，所以 buffer 必须至少大于等于 `4KB`。
+   - `5KB` 只是给 tail/alignment 留一点余量；它不是主要浪费来源。
+
+2. `giyol_reserve_order_batch = 96KB`
+   - 这是 GiYOL 额外空间里最大的一块。
+   - 当前大小来自 `4096 * sizeof(GiYOLCopyEntry)`，每个 entry 现在是 `dst + src + nbytes = 24B`。
+   - 它不是每次都真的用满。probe 平均大约每次 GC 记录 `~860` 个 tiny objects，平均实际 entry 数据约 `860 * 24B = 20KB`。
+   - 但是这张表承担一个重要语义：它按 reserve order 记录对象，让最后 copy 时可以恢复 Old 区连续地址顺序。因为对象在 traversal 阶段还没全部 patch 完，所以不能简单地边发现边 flush。
+   - 因此，在当前实现里，如果想避免 overflow 复杂性，表就必须足够容纳一次 minor GC 中可能出现的大量 tiny objects。
+   - 结论：`96KB` 对当前 benchmark 看起来偏大，但对当前算法来说是保守设计。更好的优化方向不是盲目缩小，而是：
+     - 增加 max batch count 计数；
+     - 尝试 `GIYOL_WORKSPACE_BATCH_ENTRIES=2048` 或 `1024`；
+     - 或把 entry 压缩到 16B 左右，例如用 per-GC `dst offset` 代替完整 64-bit `dst`；
+     - 或实现 safe overflow / processed-prefix flush，否则缩小后可能破坏正确性或丢失 GiYOL 效果。
+
+3. `function-table slot set = 32KB`
+   - 当前 profile 最大只用了 `227` 个 entry，约 `1.77KB`。
+   - 现在代码里有最小值 `4096 * sizeof(uintptr_t) = 32KB`，这明显是保守预留。
+   - 从当前数据看，它很可能可以缩到 `4KB` 或 `8KB`。
+   - 但当前 overflow 行为是直接 `exit(1)`，所以如果缩小，应先加 fallback 或至少加更完整的 benchmark 验证。
+
+4. `GC traversal stack = 37.52KB`
+   - 当前 probe 最大深度 `684`，约 `5.34KB`，实际远小于预留。
+   - 这个 stack 的风险是 correctness：如果对象图 frontier 很大，stack overflow 会直接失败。
+   - 所以它可以作为实验缩小，但不建议在没有 fallback 的情况下激进缩小。
+
+5. `remembered set = 192KB`
+   - 这块 GiY 和 GiYOL 共用，不是 GiYOL 新增。
+   - 当前由三部分组成：
+     - `values`: 64KB
+     - `buffer`: 64KB
+     - `hash_table`: 64KB
+   - 当前 probe 每次 GC 平均扫描的 RSet entry 只有约 `78` 个，因此 `values/buffer` 的 8192 容量对该 workload 明显偏大。
+   - 但是 RSet 不是只受 Young 区大小限制。大量 old slots 可以指向少量 young objects，因此理论上 RSet entry 数量可能远大于 young object 数量。
+   - 更重要的是：`hash_table` 每次 `rememberset_clear()` 都会整块 `memset 64KB`，所以这 64KB 不是单纯 reserved，而是每次 minor GC 都会被实际写一遍。
+   - 优化方向：
+     - 记录 max remembered_set.count；
+     - 把 RSet capacity / hash size 做成可配置；
+     - 用 occupied-index list，只清理实际用过的 hash slots，避免每次清 64KB；
+     - 或把 `hash_table` 与 `buffer/values` 的大小分开调。
+
+总判断：
+
+```text
+最应该优先怀疑过大的部分：
+1. remembered set hash/table area, especially 64KB full clear per GC
+2. GiYOL reserve-order batch, 96KB
+3. function-table slot set, 32KB
+
+比较合理、暂时不是主要问题：
+1. GiYOL staging buffer, 5KB
+2. traversal stack, unless later profile shows consistently low max depth across benchmarks
+```
+
+建议下一步：
+
+1. 先补 profile：max RSet count、max GiYOL batch count、max batch bytes。
+2. 做三个参数实验：
+   - `GIYOL_WORKSPACE_BATCH_ENTRIES=4096 / 2048 / 1024`
+   - FT slot min: `4096 / 1024 / 512 entries`
+   - RSet capacity/hash size: `8192 / 4096 / 2048 entries`
+3. 如果要真正减少空间而不牺牲正确性，优先做：
+   - batch entry 压缩；
+   - RSet lazy clear；
+   - overflow fallback，而不是只改常数。
+
+## 2026-05-14 Cheney / GiY / GiYOL 的 GC Local Workspace 空间占用对比
+
+统一口径：
+
+- `CACHE_SIZE_KB=512`，总 local/cache budget 是 `512KB`。
+- `init objects` 当前约 `19.76KB`，这部分在 `cache_space.begin` 到 `cache_space.work_begin`，不是普通 Young work area，也不是 GC auxiliary table。
+- remembered set 在初始化时先从 `cache_space.end` 预留。
+- minor GC auxiliary structures 在 `work_begin` 固定后继续从 `cache_space.end` 预留。
+
+当前共同基准：
+
+```text
+total local/cache budget: 512.00 KB
+after remembered set:     320.00 KB
+init objects:              19.76 KB
+young before minor aux:   300.24 KB
+```
+
+### Remembered set
+
+Cheney 和 GiY/GiYOL 的 remembered set 总大小都是 `192KB`，但组成不同。
+
+Cheney:
+
+```text
+remembered_set.buffer:     128 KB
+remembered_set.hash_table:  64 KB
+total:                     192 KB
+```
+
+GiY / GiYOL:
+
+```text
+remembered_set.buffer:      64 KB
+remembered_set.values:      64 KB
+remembered_set.hash_table:  64 KB
+total:                     192 KB
+```
+
+原因：
+
+- Cheney 的 RSet 只记录 slot address。
+- GiY/GiYOL 为了避免在 minor GC 中读旧区 slot，还额外记录 last written value，所以同样 192KB 下，slot capacity 从 Cheney 的 `16384` entries 变成 GiY/GiYOL 的 `8192` pairs。
+
+### Minor GC auxiliary structures
+
+Cheney:
+
+```text
+function-table slot set: 37.52 KB
+aux total:               37.52 KB
+young after aux:        262.72 KB
+```
+
+GiY:
+
+```text
+traversal stack:         37.52 KB
+edge log:                 0.00 KB
+function-table slot set: 32.00 KB
+aux total:               69.52 KB
+young after aux:        230.72 KB
+```
+
+GiYOL:
+
+```text
+traversal stack:          37.52 KB
+edge log:                  0.00 KB
+function-table slot set:  32.00 KB
+staging buffer:            5.00 KB
+reserve-order batch:      96.03 KB
+aux total:               170.55 KB
+young after aux:         129.69 KB
+```
+
+### Full local/cache budget view
+
+不把 init objects 算进 GC Local Workspace，只看 RSet + minor aux：
+
+```text
+Cheney: 192.00 +  37.52 = 229.52 KB
+GiY:    192.00 +  69.52 = 261.52 KB
+GiYOL:  192.00 + 170.55 = 362.55 KB
+```
+
+如果把 init objects 也算作占用 local/cache budget：
+
+```text
+Cheney: 192.00 + 19.76 +  37.52 + 262.72 = 512.00 KB
+GiY:    192.00 + 19.76 +  69.52 + 230.72 = 512.00 KB
+GiYOL:  192.00 + 19.76 + 170.55 + 129.69 = 512.00 KB
+```
+
+结论：
+
+```text
+Cheney 可用普通 Young work area 最大: 262.72 KB
+GiY 次之:                         230.72 KB
+GiYOL 最小:                       129.69 KB
+```
+
+GiYOL 比 GiY 多占 `101.03KB`，来自：
+
+```text
+staging buffer:        5.00 KB
+reserve-order batch:  96.03 KB
+```
+
+GiY 比 Cheney 多占 `32.00KB`，主要因为 GiY 增加了 traversal stack，同时 GiY 的 FT slot set 比 Cheney 小一点：
+
+```text
+GiY extra stack:       +37.52 KB
+GiY FT smaller:         -5.52 KB
+net GiY - Cheney:      +32.00 KB
+```
+
+## 2026-05-15 GiY 核心原则与当前服务器上的 local workspace 最佳大小判断
+
+服务器 CPU 配置：
+
+```text
+CPU: Intel Xeon W-2235 @ 3.80GHz
+cores: 6 physical cores, 12 logical CPUs
+SMT: 2 threads / core
+L1d: 32KB per core
+L2:  1024KB per core, shared by SMT siblings
+L3:  8448KB shared by all logical CPUs
+cache line: 64B
+L2 associativity: 16-way
+```
+
+GiY 的核心原则：
+
+1. Minor GC 的高频 metadata 应该留在 cache-friendly 的 local area。
+2. Young object graph 的发现、reserve、patch 尽量在 local area 内完成，减少对 Old/DRAM slot 的反复读取。
+3. Old 区只在对象真正 materialize/copy 时写入。
+4. Local workspace 不是越大越好：太小会 overflow 或导致频繁 GC；太大则不能稳定留在 L2，反而破坏 GiY 想要的 locality。
+
+当前 GiY 空间：
+
+```text
+CACHE_SIZE_KB total budget: 512KB
+remembered set:             192.00 KB
+GiY minor aux:               69.52 KB
+  traversal stack:           37.52 KB
+  function-table slots:      32.00 KB
+GC Local Workspace total:   261.52 KB
+ordinary Young work area:   230.72 KB
+init objects:                19.76 KB
+```
+
+结合 CPU cache 的判断：
+
+```text
+L1d 32KB:
+  太小，不可能容纳 GiY workspace。只能容纳当前正在访问的小窗口。
+
+L2 1024KB:
+  这是 GiY 应该主要瞄准的 cache level。
+  512KB total local/cache budget 约等于 L2 的一半，比较合理。
+
+L3 8448KB shared:
+  可以作为后备，但不应该把 GiY 的设计目标设成“主要依赖 L3”。
+  L3 是所有 core 共享的，benchmark 噪声更大。
+```
+
+因此分两个口径判断：
+
+### 1. 如果 local workspace 指整块 local/cache budget
+
+最佳起点仍然是：
+
+```text
+CACHE_SIZE_KB = 512KB
+```
+
+理由：
+
+- 512KB 可以稳定放进 1MB L2，并给 VM stack、代码路径、临时访问的 young object、copy source/destination 元数据留出空间。
+- 768KB 或 1MB 虽然也可能放进 L2，但会接近 L2 容量上限；SMT sibling、VM 热数据、cache conflict 都可能让它不稳定。
+- 256KB 会更容易留在 L2/L1 附近，但 ordinary Young work area 太小，可能显著增加 minor GC 次数。
+
+推荐实验范围：
+
+```text
+384KB, 512KB, 640KB
+```
+
+当前最推荐：
+
+```text
+512KB
+```
+
+不建议优先尝试：
+
+```text
+>= 768KB
+```
+
+除非后续实验显示 GC frequency 的下降收益明显超过 L2 locality 损失。
+
+### 2. 如果 local workspace 指 RSet + GiY auxiliary metadata
+
+当前：
+
+```text
+RSet + GiY aux = 261.52KB
+```
+
+这个数值对 1MB L2 来说可以接受，但略高于理想值。理想目标应是：
+
+```text
+224KB - 256KB
+```
+
+更具体地说：
+
+```text
+RSet:         暂时保持 192KB
+stack:        32KB 左右
+FT slots:      4KB - 8KB
+--------------------------------
+target:      about 228KB - 232KB
+```
+
+理由：
+
+- RSet 是 correctness + write barrier 结构，不能只根据一个 benchmark 盲目缩小。
+- FT slot set 当前 profile 最大只到约 1.77KB，32KB 明显偏保守。
+- traversal stack 当前 profile 最大约 5.34KB，但它和对象图形状有关，缩小要比 FT slot set 更保守。
+
+最终判断：
+
+```text
+GiY total local/cache budget 最佳当前值: 512KB
+GiY metadata workspace 最佳目标:        约 232KB，最高不超过 256KB
+当前 GiY metadata workspace:            261.52KB，略高但仍可接受
+```
+
+下一步如果要优化空间，优先顺序：
+
+1. 把 FT slot set 从 `32KB` 调到 `8KB` 做实验。
+2. 给 traversal stack 和 FT slot set 加 max/overflow profile。
+3. 暂时不要先砍 RSet；先做 max RSet count 和 lazy clear profile。
+4. 做 `CACHE_SIZE_KB=384/512/640` 的性能实验，观察 GC 次数、pause、cache miss。
+
+## 2026-05-15 关于是否让 local/cache budget 占 L2 约 90%
+
+用户想法：
+
+> 想让 local workspace 占 L2 大概 90% 左右，因为大多数情况下不会访问 local workspace 之外的地方。
+
+当前服务器每个物理核：
+
+```text
+L2 = 1024KB
+90% L2 ~= 921KB
+```
+
+判断需要分两个概念：
+
+### 如果指整块 local/cache budget
+
+也就是 `CACHE_SIZE_KB`，设置到约 `896KB` 或 `900KB` 是可以作为实验的。
+
+优点：
+
+- ordinary Young work area 会明显变大；
+- minor GC 次数可能下降；
+- 如果 benchmark 确实主要在 local/cache region 内活动，可能有收益。
+
+风险：
+
+- L2 不是只给 local/cache region 用。VM stack、C/C++ runtime 数据、Context、roots、function table、当前执行代码带来的 data footprint、prefetch 访问、write barrier metadata 都会占 L2。
+- 这台 CPU 的 L2 是每个物理核 1MB，但和 SMT sibling 共享。如果另一个 logical thread 有活动，90% 会非常紧。
+- L2 是 16-way set associative，不是完全相联。即使总大小小于 1MB，也可能因为 set conflict 产生 L2 miss。
+- GiY minor GC 虽然尽量避免读 Old slot，但不是完全不访问 local/cache region 之外：
+  - 会写 Old/DRAM destination；
+  - 会执行 VM/GC 代码；
+  - roots、Context、function table、runtime stack 不一定全部在 local/cache region 内；
+  - NT store 仍会占用 store buffer / write combining 资源。
+
+因此：
+
+```text
+CACHE_SIZE_KB = 896KB 或 900KB 可以实验
+但不建议直接认定为最佳默认值
+```
+
+比较合理的实验组：
+
+```text
+512KB, 640KB, 768KB, 896KB
+```
+
+如果必须选一个“激进但仍有解释力”的点：
+
+```text
+CACHE_SIZE_KB = 896KB
+```
+
+选择 `896KB` 比 `921KB` 更干净，因为它是 64KB 的整数倍，并且给 L2 留约 `128KB` 给非 local/cache 数据。
+
+### 如果指 GC metadata workspace
+
+不建议让 `RSet + stack + FT + GiYOL batch` 这类 metadata 占 L2 90%。
+
+原因：
+
+- metadata 过大意味着 ordinary Young work area 反而变小；
+- GiY/GiYOL 的目标是让 metadata 热，而不是让 metadata 吃掉大部分 L2；
+- metadata 很多结构是保守预留，不是每次真的用满。
+
+结论：
+
+```text
+整块 local/cache budget 占 L2 约 90%：可以做实验，推荐 896KB。
+GC metadata workspace 占 L2 约 90%：不推荐。
+```
+
+如果后续实验 `CACHE_SIZE_KB=896` 比 `512` 好，需要同时确认：
+
+```text
+minor GC count 是否下降
+GC pause 是否下降
+PMU L2/LLC miss 是否没有明显恶化
+不同 benchmark 是否稳定
+单线程 pin core 后是否仍然成立
+```
+
+## 2026-05-15 对 `CACHE_SIZE_KB=896` 作为强候选实验点的判断
+
+当前共识：
+
+```text
+整块 local/cache budget 占 L2 约 90%：可以做实验，推荐 896KB。
+```
+
+判断：
+
+- 这个方案是合理的，尤其适合作为 GiY/GiYOL 的强候选实验点。
+- 它符合 GiY 的核心假设：minor GC 的主要工作集尽可能留在 per-core L2。
+- `896KB` 比理论上的 `921KB` 更合适，因为它是 `64KB` 对齐的整数点，并且给 1MB L2 留出约 `128KB` 给 VM stack、Context、roots、GC/VM 其它热数据和 cache conflict 余量。
+- 但是目前仍应把它叫作 experimental candidate，而不是直接叫 optimal default。是否成为默认值需要靠 benchmark 验证。
+
+推荐实验矩阵：
+
+```text
+CACHE_SIZE_KB = 512, 640, 768, 896
+```
+
+重点比较：
+
+```text
+minor GC count
+average / total GC pause
+total runtime
+young after aux
+RSet pressure
+GiY/GiYOL workspace overflow 是否发生
+L2 / LLC miss，如果 PMU 权限允许
+```
+
+如果 `896KB` 在多数 benchmark 中降低 GC 次数和总时间，同时没有明显增加 cache miss，那么它可以成为当前服务器上的推荐默认值。
+
+## 2026-05-15 `CACHE_SIZE_KB=896` 后建议的 heap/local-space 配置结构
+
+目标：
+
+```text
+让整块 local/cache budget 接近 per-core L2 的 90%，但不要让 GC metadata 也等比例膨胀。
+```
+
+当前服务器：
+
+```text
+L2 = 1024KB
+recommended local/cache budget = 896KB
+reserved L2 headroom = about 128KB
+```
+
+建议的逻辑结构：
+
+```text
+Local/cache region: 896KB total
+
+low address
+  [init objects]                 about 20KB, program dependent
+  [ordinary Young work area]      main expandable part
+  [minor-GC aux metadata]         stack / FT / GiYOL staging / GiYOL batch
+  [remembered set]                fixed first at high end
+high address
+
+Old/DRAM region:
+  keep current large DRAM/old-space setting unchanged
+```
+
+### Minimal-change result with current formulas
+
+如果只设置：
+
+```text
+CACHE_SIZE_KB=896
+```
+
+并保持当前代码公式不变，假设 init objects 仍约 `19.76KB`，则：
+
+```text
+total local/cache budget: 896.00 KB
+remembered set:          192.00 KB
+after remembered set:    704.00 KB
+init objects:             19.76 KB
+young before minor aux:  684.24 KB
+```
+
+Cheney:
+
+```text
+minor aux:                85.52 KB
+GC Local Workspace:      277.52 KB
+ordinary Young work:     598.72 KB
+```
+
+GiY:
+
+```text
+traversal stack:          85.52 KB
+function-table slots:     32.00 KB
+minor aux:               117.52 KB
+GC Local Workspace:      309.52 KB
+ordinary Young work:     566.72 KB
+```
+
+GiYOL:
+
+```text
+traversal stack:          85.52 KB
+function-table slots:     32.00 KB
+staging buffer:            5.00 KB
+reserve-order batch:      96.03 KB
+minor aux:               218.55 KB
+GC Local Workspace:      410.55 KB
+ordinary Young work:     465.69 KB
+```
+
+这个 minimal-change 配置的优点：
+
+- 不需要改太多代码；
+- ordinary Young work area 比 512KB 配置明显变大；
+- 可以先验证 `896KB` 这个方向是否有效。
+
+缺点：
+
+- GiY stack 会从约 `37.52KB` 自动涨到约 `85.52KB`，但之前 profile 最大只用约 `5.34KB`；
+- Cheney FT slot set 也会涨到约 `85.52KB`；
+- metadata 有一部分是跟着 local/cache budget 被动放大，不一定真的需要。
+
+### 我建议的目标结构
+
+如果后续要把 `896KB` 做成正式配置，而不仅是实验点，建议不要让 metadata 等比例增长。目标结构应是：
+
+GiY:
+
+```text
+total local/cache budget: 896KB
+remembered set:          192KB
+init objects:             ~20KB
+traversal stack:           32KB - 64KB
+function-table slots:       8KB
+ordinary Young work:      about 612KB - 644KB
+```
+
+GiYOL:
+
+```text
+total local/cache budget: 896KB
+remembered set:          192KB
+init objects:             ~20KB
+traversal stack:           32KB - 64KB
+function-table slots:       8KB
+staging buffer:             5KB
+reserve-order batch:       96KB first, later test 48KB/64KB
+ordinary Young work:      about 511KB - 543KB
+```
+
+推荐阶段：
+
+1. 第一阶段只改 `CACHE_SIZE_KB=896`，不要同时改太多结构，先拿性能数据。
+2. 第二阶段固定 `CACHE_SIZE_KB=896`，开始压缩 metadata：
+   - FT slot set: `32KB -> 8KB`
+   - stack: 当前公式产生 `85KB`，建议试 `64KB` 或 `32KB`
+   - GiYOL batch: `96KB` 先保留；有 max batch profile 后再试 `64KB` 或 `48KB`
+3. RSet 先保持 `192KB`，不要和第一轮实验混在一起；后续单独做 lazy clear 或缩小 RSet 实验。
+
+最终推荐：
+
+```text
+先实验的配置:
+  CACHE_SIZE_KB=896
+  RSet=192KB
+  current aux formulas unchanged
+
+更理想的正式配置目标:
+  CACHE_SIZE_KB=896
+  RSet=192KB
+  stack=32KB-64KB
+  FT slots=8KB
+  GiYOL staging=5KB
+  GiYOL batch=96KB first, later 64KB/48KB experiment
+```
+
+## 2026-05-15 术语纠正：GC Local Workspace 的定义
+
+纠正：
+
+之前把 `RSet + minor aux metadata` 单独称作 `GC Local Workspace` 是不准确的。
+
+用户定义的 **GC Local Workspace** 应该是：
+
+```text
+所有预期放进 cache 的 local/cache budget 的总空间
+```
+
+也就是代码里的整块 `cache_space` budget：
+
+```text
+GC Local Workspace = CACHE_SIZE_KB 指定的整块 local/cache region
+```
+
+其中包含多个子区域：
+
+```text
+GC Local Workspace
+  - init objects
+  - ordinary Young work area
+  - remembered set
+  - minor-GC auxiliary metadata
+      - traversal stack
+      - function-table slot set
+      - GiYOL staging buffer
+      - GiYOL reserve-order batch
+```
+
+因此之后必须这样表述：
+
+- `GC Local Workspace total`: 整块预期进入 cache 的总空间，例如 `512KB` 或 `896KB`。
+- `ordinary Young work area`: GC Local Workspace 中真正给普通 young objects 分配的部分。
+- `metadata / auxiliary area inside GC Local Workspace`: RSet、stack、FT slots、GiYOL staging、GiYOL batch 等。
+
+不能再把 `RSet + aux` 叫作完整的 `GC Local Workspace`；它只是 GC Local Workspace 内部的 metadata/auxiliary 子区域。
+
+在 `CACHE_SIZE_KB=896` 时，正确说法是：
+
+```text
+GC Local Workspace total = 896KB
+```
+
+GiYOL 当前公式下的内部结构大约是：
+
+```text
+GC Local Workspace total: 896.00 KB
+  remembered set:        192.00 KB
+  init objects:           19.76 KB
+  GiYOL minor aux:       218.55 KB
+  ordinary Young work:   465.69 KB
+```
+
+GiY 当前公式下的内部结构大约是：
+
+```text
+GC Local Workspace total: 896.00 KB
+  remembered set:        192.00 KB
+  init objects:           19.76 KB
+  GiY minor aux:         117.52 KB
+  ordinary Young work:   566.72 KB
+```
+
+Cheney 当前公式下的内部结构大约是：
+
+```text
+GC Local Workspace total: 896.00 KB
+  remembered set:        192.00 KB
+  init objects:           19.76 KB
+  Cheney minor aux:       85.52 KB
+  ordinary Young work:   598.72 KB
+```
+
+## 2026-05-15 如何公平比较不同 GC Local Workspace 大小
+
+问题：
+
+如果改变 `GC Local Workspace` 大小，但内部结构不是用统一原则计算，那么 Cheney / GiY / GiYOL 之间的比较会不公平。
+
+结论：
+
+公平比较需要先明确比较口径，并且一次只改变一个主要变量。
+
+### 口径 A：固定硬件预算，比较真实算法成本
+
+这是最重要的口径。
+
+规则：
+
+```text
+所有 GC 使用相同的 GC Local Workspace total
+例如都使用 CACHE_SIZE_KB=512 或都使用 CACHE_SIZE_KB=896
+```
+
+然后内部结构按统一布局原则分配：
+
+```text
+GC Local Workspace total = init objects
+                         + remembered set
+                         + common auxiliary structures
+                         + algorithm-specific auxiliary structures
+                         + ordinary Young work area
+```
+
+在这个口径下：
+
+- Cheney 不需要 GiY stack，所以它得到更多 ordinary Young work area，这是 Cheney 的真实优势。
+- GiYOL 需要 staging/batch，所以 ordinary Young work area 变小，这是 GiYOL 的真实成本。
+- 不能为了让 GiYOL 看起来更好而给它额外 workspace，也不能为了让 Cheney/GiY 看起来更公平而强行浪费空间。
+
+这回答的是：
+
+```text
+在同样 L2/cache budget 下，哪个方案整体更好？
+```
+
+### 口径 B：固定 ordinary Young work area，隔离算法本身
+
+这是辅助口径。
+
+规则：
+
+```text
+让 Cheney / GiY / GiYOL 拥有相同 ordinary Young work area
+然后各自额外承担自己的 metadata
+```
+
+这会导致不同 GC 的 `GC Local Workspace total` 不同。
+
+这个口径回答的是：
+
+```text
+在相同 young capacity / GC frequency 条件下，算法本身的 copying / scanning / patching 成本如何？
+```
+
+它适合做机制分析，但不适合作为最终硬件预算结论。
+
+### 对 `CACHE_SIZE_KB=896` 的建议
+
+第一轮实验应采用口径 A：
+
+```text
+Cheney: CACHE_SIZE_KB=896
+GiY:    CACHE_SIZE_KB=896
+GiYOL:  CACHE_SIZE_KB=896
+```
+
+也就是所有算法使用同一个 `GC Local Workspace total`。
+
+但内部结构不应该“随便自动膨胀”。目前代码里有一个问题：
+
+```text
+GiY stack = young_bytes / 8
+Cheney FT slots = young_bytes / 8
+GiY FT slots = max(young_bytes / 64, 32KB)
+```
+
+因此当 `CACHE_SIZE_KB` 从 512KB 增加到 896KB 时，有些 metadata 会跟着变大，有些不会。这会让实验混入另一个变量：metadata policy 变化。
+
+更公平的做法是：
+
+1. 先做 minimal-change 实验，记录真实内部布局。
+2. 然后做 normalized-layout 实验，把 metadata policy 固定下来。
+
+建议 normalized-layout：
+
+```text
+RSet: fixed 192KB for all GC
+FT slots: fixed 8KB or 32KB for all GC that needs FT slot tracking
+GiY/GiYOL stack: fixed 32KB or 64KB
+GiYOL staging: fixed 5KB
+GiYOL reserve batch: fixed 96KB first, later test 64KB/48KB
+ordinary Young work area: remaining space
+```
+
+在 fixed hardware budget 口径下，算法专有 metadata 仍然计入成本：
+
+```text
+GiYOL batch/staging 减少 ordinary Young work area，这是 GiYOL 的真实空间成本。
+GiY stack 减少 ordinary Young work area，这是 GiY 的真实空间成本。
+Cheney 不需要这些结构，就不应该强行分配给 Cheney。
+```
+
+推荐实验顺序：
+
+```text
+1. CACHE_SIZE_KB=512, 640, 768, 896
+   使用当前代码公式，得到 baseline。
+
+2. 固定 CACHE_SIZE_KB=896
+   使用 normalized metadata layout：
+     RSet fixed
+     FT fixed
+     stack fixed
+     GiYOL staging/batch fixed
+
+3. 再做口径 B：
+   固定 ordinary Young work area，隔离算法 copy/scanning 成本。
+```
+
+最终对论文/汇报最公平的说法：
+
+```text
+Primary comparison:
+  same GC Local Workspace total, because this reflects the same L2/cache budget.
+
+Secondary analysis:
+  same ordinary Young work area, because this isolates algorithmic overhead from GC frequency.
+```
+
+## 2026-05-15 GiY 在不同 GC Local Workspace 总大小下的内部结构
+
+定义确认：
+
+```text
+GC Local Workspace = 整块预期放进 cache 的 local/cache budget
+                   = CACHE_SIZE_KB 指定的总大小
+```
+
+这里分析的是 GiY，不包含 GiYOL 的 staging buffer / reserve-order batch。
+
+假设：
+
+```text
+init objects ~= 19.76 KB
+remembered set = 192.00 KB
+GiY edge log = 0.00 KB
+GiY stack = young_before_aux / 8
+GiY FT slot set = max(young_before_aux / 64, 32KB)
+```
+
+当前四组 GiY 配置：
+
+```text
+GC Local Workspace total = 512KB
+  remembered set:        192.00 KB
+  init objects:           19.76 KB
+  young before aux:      300.24 KB
+  GiY stack:              37.52 KB
+  GiY FT slots:           32.00 KB
+  GiY minor aux total:    69.52 KB
+  ordinary Young work:   230.72 KB
+
+GC Local Workspace total = 640KB
+  remembered set:        192.00 KB
+  init objects:           19.76 KB
+  young before aux:      428.24 KB
+  GiY stack:              53.52 KB
+  GiY FT slots:           32.00 KB
+  GiY minor aux total:    85.52 KB
+  ordinary Young work:   342.72 KB
+
+GC Local Workspace total = 768KB
+  remembered set:        192.00 KB
+  init objects:           19.76 KB
+  young before aux:      556.24 KB
+  GiY stack:              69.52 KB
+  GiY FT slots:           32.00 KB
+  GiY minor aux total:   101.52 KB
+  ordinary Young work:   454.72 KB
+
+GC Local Workspace total = 896KB
+  remembered set:        192.00 KB
+  init objects:           19.76 KB
+  young before aux:      684.24 KB
+  GiY stack:              85.52 KB
+  GiY FT slots:           32.00 KB
+  GiY minor aux total:   117.52 KB
+  ordinary Young work:   566.72 KB
+```
+
+表格总结：
+
+```text
+Total workspace | RSet   | Init  | Stack | FT   | Aux total | Ordinary Young
+512KB           | 192KB  | 19.76 | 37.52 | 32KB |  69.52KB  | 230.72KB
+640KB           | 192KB  | 19.76 | 53.52 | 32KB |  85.52KB  | 342.72KB
+768KB           | 192KB  | 19.76 | 69.52 | 32KB | 101.52KB  | 454.72KB
+896KB           | 192KB  | 19.76 | 85.52 | 32KB | 117.52KB  | 566.72KB
+```
+
+判断：
+
+- 这四组的比较是公平的，因为 `GC Local Workspace total` 是明确设定的实验变量。
+- RSet 保持固定 `192KB`，避免把 RSet policy 变化混入 heap-size 实验。
+- FT slots 当前因为 `max(young/64, 32KB)`，在这四组里都保持 `32KB`。
+- stack 会随 total workspace 增大而线性变大，这是当前 GiY 公式的结果。
+- 如果只想分析 total workspace 大小，第一轮应该保持这些公式不变。
+- 如果之后要分析 metadata policy，应另开实验，把 stack/FT 改成固定值，不要和 workspace-size 实验混在一起。
+
+## 2026-05-15 GiY 的 edge log / stack / FT slot set 分别是什么
+
+### stack
+
+代码结构：
+
+```cpp
+struct GiYGCStack {
+  uintptr_t *items;
+  size_t count;
+  size_t capacity;
+  bool in_cache_space;
+};
+```
+
+作用：
+
+- 保存已经被发现为 live young object、并且已经 reserve 了 Old/DRAM 目的地址的 young object payload pointer。
+- `copy_for_minor()` 第一次遇到一个 young object 时：
+  - 在 Old/DRAM 里 reserve 目标地址；
+  - 把 forwarding pointer 写进 young object header；
+  - `gc_stack_push(payload_ptr)` 把这个 young object 放进 GiY stack。
+- 后续 `giy_traverse_stack_and_copy()` 从这个 stack 里 pop object，扫描它的子对象，最后真正 materialize/copy 到 Old/DRAM。
+
+为什么需要：
+
+- GiY 不是发现一个对象就马上 copy，而是先 reserve，再遍历 young graph，再 materialize。
+- stack 是 young object graph traversal 的 worklist。
+
+空间：
+
+```text
+当前公式: stack = young_before_aux / 8
+```
+
+### edge log
+
+代码结构：
+
+```cpp
+struct EdgePatchEntry {
+  void *slot_addr;
+  EdgePatchKind kind;
+};
+
+struct EdgePatchLog {
+  EdgePatchEntry *items;
+  size_t count;
+  size_t capacity;
+  bool in_cache_space;
+};
+```
+
+当前状态：
+
+- 结构还在代码里，但当前实现没有真正为它分配 entries。
+- `edge_bytes = 0`
+- `g_edge_log.items = NULL`
+- `g_edge_log.capacity = 0`
+
+现在它主要用于 profile 计数：
+
+- `g_edge_log.count++`
+- 记录 max edge count per object / per GC
+- 统计 young edge visits
+
+它原本/概念上的用途：
+
+- 记录某个 object 内部哪些 edge slot 需要 patch。
+- 但当前 GiYReserveTracer 在扫描 young object 时，如果 slot 本身在 young object 内，就直接 patch 这个 slot，不需要把 slot 地址记下来等以后 patch。
+
+所以当前结论：
+
+```text
+edge log 当前不占 GC Local Workspace 空间。
+edge log 在 profile 语义上存在，但不是当前空间分析的实际占用项。
+```
+
+### FT slot set
+
+FT = function table。
+
+代码结构：
+
+```cpp
+struct GiYFTSlotSet {
+  uintptr_t *items;
+  size_t count;
+  size_t capacity;
+  bool in_cache_space;
+};
+```
+
+作用：
+
+- 记录 function table / inline cache 等 VM metadata 里面指向 young object 的 slot。
+- 这些 slot 不一定在普通 young object 内，也不一定会被 roots scanning 完整覆盖。
+- 当这些 slot 被写入 young pointer 时，会调用：
+  - `giy_record_ft_jsvalue_slot(JSValue *slot, JSValue value)`
+  - `giy_record_ft_ptr_slot(void **slot, void *value)`
+- 它们把 slot address 记录到 `g_ft_slot_set`。
+
+minor GC 时怎么用：
+
+1. reserve 阶段：
+
+```text
+giy_reserve_function_table_slots()
+```
+
+读取这些 slot 当前保存的 young pointer，并对目标 young object 调用 reserve。
+
+2. patch 阶段：
+
+```text
+giy_patch_function_table_slots()
+```
+
+把 slot 里的 young pointer patch 成 forwarding pointer 指向的 Old/DRAM address。
+
+3. GC 结束：
+
+```text
+giy_clear_function_table_slots()
+```
+
+清空这次记录。
+
+为什么需要：
+
+- function table / inline cache slot 属于 VM metadata，不是普通 young object field。
+- 如果不记录，minor GC 后这些 metadata 可能还指向已经被回收的 young address。
+
+空间：
+
+```text
+当前公式: FT slot set = max(young_before_aux / 64, 32KB)
+在 512/640/768/896KB 四组 GiY 实验里都是 32KB。
+```
+
+## 2026-05-15 GiY workspace size benchmark 运行计划
+
+目标：
+
+```text
+彻底测试 GiY 在 512KB / 640KB / 768KB / 896KB 四种 GC Local Workspace 总大小下的性能。
+```
+
+规则：
+
+- 只测试 GiY：`OPT_GC=giy`
+- 只改变 `CACHE_SIZE_KB`
+- benchmark 文件使用 `build.debug/benchmarks` 文件夹里的主 benchmark `.sbc`
+- 不混入 `hello_world`、`giy_gc_probe`、`bounce_check` 这类 smoke/probe
+- 每个 size 重新 build 一次
+- 每个 benchmark 保存 `.out`、`.time`、`.status`
+- 使用 `taskset -c 0` 尽量固定在同一个 logical CPU 上，减少调度噪声
+
+benchmark 集合：
+
+```text
+Bounce
+CD
+DeltaBlue
+Havlak
+List
+Mandelbrot
+NBody
+Permute
+Queens
+Richards
+Sieve
+Storage
+Towers
+```
+
+输出脚本：
+
+```text
+tools/run_giy_cache_size_benchmarks.sh
+tools/parse_giy_cache_size_benchmarks.py
+```
+
+预期输出目录：
+
+```text
+build.debug/benchmarks/out_giy_cache_size_YYYYMMDD_HHMMSS/
+```
+
+## 2026-05-15 GiY workspace size benchmark 结果
+
+输出目录：
+
+```text
+build.debug/benchmarks/out_giy_cache_size_20260515_004640
+```
+
+生成文件：
+
+```text
+build.debug/benchmarks/out_giy_cache_size_20260515_004640/summary.csv
+build.debug/benchmarks/out_giy_cache_size_20260515_004640/summary.md
+```
+
+执行情况：
+
+- 四个配置都完成：`CACHE_SIZE_KB=512/640/768/896`
+- 每个配置都重新 build
+- 每个配置都运行 13 个主 benchmark
+- 共 4 个 build status + 52 个 benchmark status = 56 个 status 文件
+- 所有 status 都是 0
+
+### 聚合结果
+
+| GC Local Workspace | 完成数 | 总执行时间(s) | GC overhead(s) | minor GC 次数 |
+|---:|---:|---:|---:|---:|
+| 512KB | 13 | 6793.957 | 165.650 | 2749204 |
+| 640KB | 13 | 6729.767 | 138.876 | 1846048 |
+| 768KB | 13 | 6635.928 | 121.671 | 1389777 |
+| 896KB | 13 | 6661.375 | 114.211 | 1114512 |
+
+相对 512KB 的总执行时间：
+
+| GC Local Workspace | 总时间变化 |
+|---:|---:|
+| 640KB | -0.945% |
+| 768KB | -2.326% |
+| 896KB | -1.951% |
+
+### 每个 benchmark 的最优配置
+
+| Benchmark | 最优配置 |
+|---|---:|
+| Bounce | 896KB |
+| CD | 768KB |
+| DeltaBlue | 768KB |
+| Havlak | 768KB |
+| List | 768KB |
+| Mandelbrot | 896KB |
+| NBody | 896KB |
+| Permute | 768KB |
+| Queens | 896KB |
+| Richards | 768KB |
+| Sieve | 896KB |
+| Storage | 896KB |
+| Towers | 768KB |
+
+计数：
+
+```text
+768KB: 7 个 benchmark 最快
+896KB: 6 个 benchmark 最快
+512KB/640KB: 0 个 benchmark 最快
+```
+
+### 768KB 与 896KB 的关键差异
+
+按总执行时间：
+
+```text
+768KB = 6635.928s
+896KB = 6661.375s
+896KB 比 768KB 慢 25.447s，约 +0.383%
+```
+
+按 GC overhead：
+
+```text
+768KB = 121.671s
+896KB = 114.211s
+896KB 比 768KB 少 7.460s，约 -6.131%
+```
+
+按 minor GC 次数：
+
+```text
+768KB = 1389777
+896KB = 1114512
+896KB 比 768KB 少 275265 次，约 -19.806%
+```
+
+所以这次结果显示：
+
+```text
+如果目标是总执行时间，768KB 是当前 full benchmark suite 的最好点。
+如果目标是降低 GC overhead / minor GC 次数，896KB 是当前最好点。
+```
+
+896KB 没有拿到总时间第一，主要是因为它虽然减少了 GC 成本，但在若干长 benchmark 上变慢：
+
+| Benchmark | 896KB - 768KB 时间差(s) |
+|---|---:|
+| Havlak | +26.484 |
+| Richards | +9.943 |
+| Permute | +3.143 |
+| DeltaBlue | +1.580 |
+| CD | +0.456 |
+| Towers | +0.315 |
+| List | +0.017 |
+
+而 896KB 明显更快的 benchmark 是：
+
+| Benchmark | 896KB - 768KB 时间差(s) |
+|---|---:|
+| Bounce | -6.604 |
+| Storage | -5.339 |
+| NBody | -2.126 |
+| Mandelbrot | -1.386 |
+| Queens | -0.547 |
+| Sieve | -0.489 |
+
+### 当前判断
+
+这次单轮 full benchmark suite 的结论：
+
+- 512KB 明显太小：minor GC 次数和 GC overhead 都最高。
+- 640KB 比 512KB 明显改善，但不是最优。
+- 768KB 是总执行时间最优点。
+- 896KB 是 GC 指标最优点，但总时间略输给 768KB。
+
+工程判断：
+
+```text
+768KB 更适合作为当前默认候选。
+896KB 更适合作为“接近 90% L2 cache budget”的实验候选。
+```
+
+原因是：
+
+- 896KB 的 GC 次数确实更少，说明扩大 GC Local Workspace 有效果。
+- 但 896KB 接近 1MB L2，给代码、栈、运行时热点数据、硬件预取和其他临时数据留下的 L2 余量更少。
+- 因此总执行时间不一定继续下降。
+- GiY 的核心原则不是单纯把 workspace 做大，而是让高频访问的 GC 工作集留在 cache 内，并避免挤出同样重要的非 GC 热点数据。
+
+注意：
+
+```text
+这次是每个 benchmark / 每个配置各跑一次的 full suite 长跑。
+如果要做论文或答辩图表，建议之后对 768KB 和 896KB 做多轮重复，报告 median / min / variance。
+```
+
+## 2026-05-15 Cheney 对照组 benchmark 计划
+
+目的：
+
+```text
+为 GiY 的 512KB / 640KB / 768KB / 896KB GC Local Workspace 实验建立公平对照组。
+```
+
+公平性规则：
+
+- 使用同一台实验主机。
+- 使用同一个 `build.debug/benchmarks` 文件夹里的 `.sbc` benchmark。
+- 使用同一组 benchmark：
+
+```text
+Bounce
+CD
+DeltaBlue
+Havlak
+List
+Mandelbrot
+NBody
+Permute
+Queens
+Richards
+Sieve
+Storage
+Towers
+```
+
+- 使用同样的四个 `CACHE_SIZE_KB`：
+
+```text
+512
+640
+768
+896
+```
+
+- 每个 size 都重新 build。
+- 使用 `taskset -c 0` 固定到同一个 logical CPU。
+- 保存 `.out`、`.time`、`.status`，并允许断点恢复。
+
+对照组 GC：
+
+```text
+OPT_GC=cache_cheney
+```
+
+注意：
+
+```text
+这里的 Cheney 对照组不是传统 full-heap copying collector。
+它是当前代码库里的 cache_cheney：young/local workspace + DRAM old 区 + remembered set + Cheney-style immediate copying minor GC。
+因此它与 GiY 的公平比较重点是：
+在相同 GC Local Workspace budget 下，
+Cheney-style immediate copying minor GC 与 GiY reserve-first/materialize-later minor GC 的差异。
+```
+
+新增脚本：
+
+```text
+tools/run_cache_cheney_cache_size_benchmarks.sh
+tools/parse_gc_cache_size_benchmarks.py
+```
+
+预期输出目录：
+
+```text
+build.debug/benchmarks/out_cache_cheney_cache_size_YYYYMMDD_HHMMSS/
+```
+
+## 2026-05-15 Cheney 对照组 benchmark 结果
+
+输出目录：
+
+```text
+build.debug/benchmarks/out_cache_cheney_cache_size_20260515_115946
+```
+
+生成文件：
+
+```text
+build.debug/benchmarks/out_cache_cheney_cache_size_20260515_115946/summary.csv
+build.debug/benchmarks/out_cache_cheney_cache_size_20260515_115946/summary.md
+build.debug/benchmarks/out_cache_cheney_cache_size_20260515_115946/compare_giy_vs_cache_cheney.csv
+build.debug/benchmarks/out_cache_cheney_cache_size_20260515_115946/compare_giy_vs_cache_cheney.md
+```
+
+执行情况：
+
+- 四个配置都完成：`CACHE_SIZE_KB=512/640/768/896`
+- 每个配置都重新 build：`OPT_GC=cache_cheney`
+- 每个配置都运行同样 13 个主 benchmark
+- 共 4 个 build status + 52 个 benchmark status = 56 个 status 文件
+- 所有 status 都是 0
+
+### Cheney 聚合结果
+
+| GC Local Workspace | 完成数 | 总执行时间(s) | GC overhead(s) | minor GC 次数 |
+|---:|---:|---:|---:|---:|
+| 512KB | 13 | 6631.114 | 143.579 | 2374914 |
+| 640KB | 13 | 6585.095 | 126.606 | 1660894 |
+| 768KB | 13 | 6636.327 | 117.653 | 1282009 |
+| 896KB | 13 | 6946.021 | 112.801 | 1044731 |
+
+Cheney 内部最优点：
+
+```text
+总执行时间最优：640KB = 6585.095s
+GC overhead 最低：896KB = 112.801s
+minor GC 次数最少：896KB = 1044731
+```
+
+这个形状和 GiY 很像：
+
+```text
+workspace 变大以后，GC overhead / minor GC 次数会下降。
+但总执行时间不会一直下降。
+```
+
+Cheney 在 896KB 下总时间明显变差，主要来自长 benchmark：
+
+```text
+Richards:
+  512KB = 1734.365s
+  640KB = 1749.271s
+  768KB = 1749.952s
+  896KB = 1992.976s
+
+Havlak:
+  512KB = 792.579s
+  640KB = 755.147s
+  768KB = 759.832s
+  896KB = 819.027s
+```
+
+### GiY vs Cheney 同 size 比较
+
+这里的差值定义：
+
+```text
+GiY - Cheney
+负数表示 GiY 更快或更少。
+正数表示 Cheney 更快或更少。
+```
+
+| GC Local Workspace | GiY 总时间(s) | Cheney 总时间(s) | GiY-Cheney(s) | GiY vs Cheney | GiY GC(s) | Cheney GC(s) | GiY-Cheney GC(s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 512KB | 6793.957 | 6631.114 | +162.843 | +2.456% | 165.650 | 143.579 | +22.071 |
+| 640KB | 6729.767 | 6585.095 | +144.672 | +2.197% | 138.876 | 126.606 | +12.270 |
+| 768KB | 6635.928 | 6636.327 | -0.399 | -0.006% | 121.671 | 117.653 | +4.018 |
+| 896KB | 6661.375 | 6946.021 | -284.646 | -4.098% | 114.211 | 112.801 | +1.410 |
+
+同 size 结论：
+
+- 512KB：Cheney 更快，GiY 慢约 2.456%。
+- 640KB：Cheney 更快，GiY 慢约 2.197%。
+- 768KB：几乎打平，GiY 快 0.399s，只有 0.006%。
+- 896KB：GiY 更快，主要因为 Cheney 在 Richards 上明显变慢。
+
+跨所有 GC/size 的总时间排名：
+
+```text
+1. cache_cheney 640KB: 6585.095s
+2. cache_cheney 512KB: 6631.114s
+3. GiY 768KB:          6635.928s
+4. cache_cheney 768KB: 6636.327s
+5. GiY 896KB:          6661.375s
+6. GiY 640KB:          6729.767s
+7. GiY 512KB:          6793.957s
+8. cache_cheney 896KB: 6946.021s
+```
+
+最优 Cheney vs 最优 GiY：
+
+```text
+best Cheney = 640KB, 6585.095s
+best GiY    = 768KB, 6635.928s
+GiY 比 Cheney 慢 50.833s，约 +0.772%
+```
+
+### 重要公平性说明
+
+这次比较是公平的“总 GC Local Workspace budget”比较：
+
+```text
+CACHE_SIZE_KB 相同。
+同 benchmark。
+同 build.debug。
+同 CPU pinning。
+同输出和解析方式。
+```
+
+但这不是“普通 young 可分配区完全相同”的比较。
+
+原因：
+
+- Cheney 也会在 local workspace 里放 remembered set 和 FT slot set。
+- GiY 还需要额外的 reserve stack，以及 FT slot set。
+- 在当前实现里，GiY 的普通 young 可分配区比 Cheney 小约 32KB。
+
+按当前公式估算：
+
+| GC Local Workspace | Cheney 普通 young 约(KB) | GiY 普通 young 约(KB) | Cheney-GiY |
+|---:|---:|---:|---:|
+| 512KB | 262.71 | 230.71 | +32.00KB |
+| 640KB | 374.71 | 342.71 | +32.00KB |
+| 768KB | 486.71 | 454.71 | +32.00KB |
+| 896KB | 598.71 | 566.71 | +32.00KB |
+
+这个差异不应该被认为是实验不公平。
+它是 GiY 算法设计本身的空间成本：
+
+```text
+GiY 用一部分 GC Local Workspace 换取 reserve-first / materialize-later 的执行方式。
+Cheney 用较少辅助结构，因此在同样总 workspace 下有更大的普通 young 区。
+```
+
+如果之后想隔离“复制策略本身”的差异，可以再设计第二类实验：
+
+```text
+固定 ordinary young size 相同，
+然后分别给 GiY/Cheney 分配各自需要的 aux space。
+```
+
+但那就不是用户当前定义的统一 `GC Local Workspace` budget 比较。
+
+### 当前解释
+
+这次数据说明：
+
+- GiY 的 reserve-first 设计没有在当前实现上显著压过 Cheney。
+- 在小 workspace 下，GiY 因为 reserve stack / FT 等辅助区占用，普通 young 更小，所以 minor GC 更多，总 GC overhead 更高。
+- 到 768KB 时，GiY 与 Cheney 总时间几乎相同。
+- 到 896KB 时，GiY 虽然 GC overhead 仍略高于 Cheney，但总时间明显好于 Cheney，因为 Cheney 在 Richards 上出现大幅变慢。
+
+因此当前更稳妥的表达是：
+
+```text
+GiY 当前已经接近 Cheney 的最好性能点，但还没有稳定超过 Cheney。
+GiY 的优势可能出现在较大的 GC Local Workspace 下，或者出现在 Cheney 对 cache pressure 更敏感的 workload 上。
+下一步应该重点分析 768KB/896KB，并对 Havlak/Richards 做多轮重复。
+```
+
+## 2026-05-16 GiY cache miss rate 测试方法设计
+
+问题：
+
+```text
+当前 GiY 是否真的降低了 cache miss rate？
+```
+
+当前不能直接下结论。
+已有 benchmark 主要证明了：
+
+- GiY / Cheney 的总执行时间差异；
+- GC overhead 差异；
+- minor GC 次数差异；
+- 不同 GC Local Workspace 大小下的性能形状。
+
+但这些不是硬件 cache miss rate。
+
+当前代码里已经有 GC-window PMU 计数框架：
+
+- `ejsvm/giy_dram_manager.cc`
+- `ejsvm/cache_dram_manager.cc`
+
+它会在 minor GC 窗口内尝试记录：
+
+```text
+cache-misses
+cache-references
+instructions
+cache-miss rate
+cache MPKI
+```
+
+但是当前机器限制：
+
+```text
+/proc/sys/kernel/perf_event_paranoid = 4
+```
+
+因此之前输出里显示：
+
+```text
+PMU counters: unavailable on this machine/config
+PMU init errno: 13 (Permission denied)
+```
+
+也就是说：
+
+```text
+当前还没有硬件 cache miss counter 证据证明 GiY 降低 cache miss rate。
+```
+
+### 推荐测试方法
+
+最好的实验应该分两层：
+
+#### 1. Whole-program perf stat
+
+目的：
+
+```text
+看整个 benchmark 运行期间的 cache miss rate 是否变化。
+```
+
+优点：
+
+- 外部工具测量，不依赖 VM 内部计时代码。
+- 容易对 GiY / Cheney / GiYOL 做统一比较。
+
+缺点：
+
+- 包含业务逻辑、解释器、GC、初始化等所有阶段。
+- 如果业务逻辑占比很大，GC 的 cache miss 改善可能被稀释。
+
+建议指标：
+
+```text
+cycles
+instructions
+cache-references
+cache-misses
+L1-dcache-loads
+L1-dcache-load-misses
+LLC-loads
+LLC-load-misses
+LLC-stores
+LLC-store-misses
+```
+
+如果机器权限不足，至少先用 generic counters：
+
+```text
+cycles
+instructions
+cache-references
+cache-misses
+```
+
+建议命令形状：
+
+```text
+perf stat -x, -r 5 \
+  -e cycles,instructions,cache-references,cache-misses \
+  taskset -c 0 ../ejsvm Benchmark.sbc
+```
+
+#### 2. GC-window PMU
+
+目的：
+
+```text
+只测 minor GC 期间的 cache miss rate。
+```
+
+这是更接近论文主张的方法。
+
+原因：
+
+- GiY 的目标不是让整个程序所有阶段都降低 cache miss。
+- GiY 的目标是让 GC 的高频工作集留在 GC Local Workspace / cache 内。
+- 所以最重要的是 GC-window cache miss rate，而不是 whole-program cache miss rate。
+
+当前代码已经有基础设施：
+
+```text
+gc_pmu_start_window()
+gc_pmu_stop_window()
+```
+
+它的位置覆盖 minor GC 主体。
+
+要让这个方法工作，需要：
+
+```text
+sudo sysctl kernel.perf_event_paranoid=1
+```
+
+或者用 root 权限运行 benchmark。
+
+成功后，benchmark 输出里应该出现真实数字：
+
+```text
+PMU-sampled GC:      N / N
+cache-misses:        ...
+cache-references:    ...
+cache-miss rate:     ...%
+instructions:        ...
+cache MPKI:          ...
+```
+
+#### 3. Phase-level PMU
+
+如果需要更强的机制证明，可以进一步把 GC-window 拆成阶段：
+
+Cheney：
+
+```text
+scan_roots
+scan_RS
+scavenge / copy
+```
+
+GiY：
+
+```text
+scan_roots / reserve
+scan_RS / reserve
+young trace
+materialize / copy to old
+patch
+```
+
+这样可以回答更细的问题：
+
+```text
+GiY 到底是哪一段降低了 miss？
+reserve 阶段是否更 cache-local？
+materialize 阶段是否增加了 miss？
+GiY 的额外 aux structure 是否抵消了收益？
+```
+
+### 推荐实验矩阵
+
+第一轮不要全量跑所有组合，先选最有信息量的点：
+
+```text
+GC: cache_cheney, giy
+workspace: 640KB, 768KB, 896KB
+benchmarks: Havlak, Richards, CD, Storage, NBody
+repeat: 5 次
+```
+
+原因：
+
+- 640KB 是 Cheney 总时间最优点。
+- 768KB 是 GiY 总时间最优点，且 GiY/Cheney 几乎打平。
+- 896KB 是 GiY 相对 Cheney 明显占优的点。
+- Havlak/Richards 是差异最大的长 benchmark。
+- CD/Storage/NBody 可以代表高分配量和不同访问模式。
+
+第二轮再扩展到 full suite。
+
+### 判断标准
+
+不要只看 miss rate 百分比，还要同时看：
+
+```text
+cache-misses
+cache-references
+cache MPKI = cache-misses / instructions * 1000
+total execution time
+GC overhead
+minor GC count
+```
+
+原因：
+
+- miss rate 下降但 references 暴涨，不一定好。
+- miss rate 上升但总 miss 数下降，也可能是好事。
+- GiY 如果减少 long-latency miss，但增加一些 cheap L1 miss，单个指标可能误导。
+
+更稳妥的结论格式：
+
+```text
+GiY 在 GC-window 内是否降低 LLC/cache misses per instruction？
+GiY 是否降低 total GC cache misses？
+GiY 的 cache miss 改善是否对应 total execution / GC overhead 改善？
+```
+
+### 当前结论
+
+现在能说的是：
+
+```text
+GiY 在部分 workspace/benchmark 下表现出更好的总时间，
+但还不能声称它已经被硬件 counter 证明降低了 cache miss rate。
+```
+
+下一步最应该做的是：
+
+```text
+打开 perf_event 权限，
+先跑 GC-window PMU + whole-program perf stat 的小矩阵实验。
+```
+
+## 2026-05-16 当前机器 cache miss counter 可用性确认
+
+检查命令：
+
+```text
+cat /proc/sys/kernel/perf_event_paranoid
+command -v perf
+perf --version
+perf stat -e cache-references,cache-misses,instructions,cycles -- true
+```
+
+结果：
+
+```text
+perf_event_paranoid = 4
+perf path = /usr/bin/perf
+perf version = 6.8.12
+perf stat hardware counters failed with permission error
+```
+
+`perf stat` 报错说明：
+
+```text
+Access to performance monitoring and observability operations is limited.
+perf_event_paranoid setting is 4.
+```
+
+结论：
+
+```text
+当前机器安装了 perf，CPU/内核也应支持 performance counter。
+但是当前普通用户权限下不能测 cache-references / cache-misses / instructions / cycles。
+所以当前状态下不能直接测 cache miss rate。
+```
+
+要启用测量，需要管理员权限执行其中一种方式：
+
+```text
+sudo sysctl kernel.perf_event_paranoid=1
+```
+
+或者：
+
+```text
+sudo sysctl kernel.perf_event_paranoid=-1
+```
+
+之后再重新测试：
+
+```text
+perf stat -e cache-references,cache-misses,instructions,cycles -- true
+```
+
+如果这条命令成功，才可以继续做 GiY / Cheney 的 whole-program cache miss rate 和 GC-window PMU 实验。
+
+## 2026-05-16 cache miss counter 权限恢复后确认
+
+用户执行权限调整命令后重新检查。
+
+检查结果：
+
+```text
+cat /proc/sys/kernel/perf_event_paranoid
+=> 1
+
+perf stat -e cache-references,cache-misses,instructions,cycles -- true
+=> success
+```
+
+`perf stat` 已经可以读取：
+
+```text
+cache-references
+cache-misses
+instructions
+cycles
+```
+
+一次测试输出示例：
+
+```text
+cache-references: 17251
+cache-misses:     5803
+miss rate:        33.64%
+instructions:     804875
+cycles:           919150
+```
+
+更细粒度事件也可以读取：
+
+```text
+L1-dcache-loads
+L1-dcache-load-misses
+LLC-loads
+LLC-load-misses
+LLC-stores
+LLC-store-misses
+```
+
+注意：
+
+```text
+把太多硬件事件放在同一次 perf stat 里时，部分事件可能显示 <not counted>。
+单独或分组测量时 LLC-stores / LLC-store-misses 可以读取。
+```
+
+VM 内部 GC-window PMU 也已经确认可用。
+
+短测试：
+
+```text
+cd build.debug/benchmarks
+taskset -c 0 ../ejsvm giy_gc_probe.sbc
+```
+
+当前 `../ejsvm` 是之前 benchmark 后留下的 `cache_cheney CACHE_SIZE_KB=896` 构建。
+
+输出确认：
+
+```text
+PMU-sampled GC:      5 / 5
+cache-misses:        2941
+cache-references:    50164
+cache-miss rate:     5.86%
+instructions:        7642217
+cache MPKI:          0.385
+```
+
+结论：
+
+```text
+当前机器现在可以测量 cache miss rate。
+可以开始做 GiY / Cheney 的 whole-program perf stat 和 GC-window PMU 对照实验。
+```
+
+## 2026-05-16 GiY vs cache_cheney cache miss 分组测量计划
+
+目标：
+
+```text
+用硬件 counter 直接测量 GiY 和 cache_cheney 的 cache miss 行为。
+```
+
+这次不是 full suite 穷举，而是第一轮核心 cache-miss 矩阵。
+原因：
+
+```text
+perf 分组测量会让每个 benchmark 按 event group 重跑多次。
+如果对 13 个 benchmark、4 个 workspace、多个 event group 全量跑，
+运行时间会膨胀到非常长。
+```
+
+本轮选择更有研究价值的点：
+
+GC：
+
+```text
+cache_cheney
+giy
+```
+
+GC Local Workspace：
+
+```text
+640KB
+768KB
+896KB
+```
+
+原因：
+
+- 640KB 是 Cheney 上一轮总时间最优点。
+- 768KB 是 GiY 上一轮总时间最优点，也是 GiY / Cheney 几乎打平点。
+- 896KB 是 GiY 相对 Cheney 明显占优的点，也是接近 90% L2 的实验候选。
+
+Benchmark：
+
+```text
+CD
+Havlak
+Richards
+Storage
+```
+
+原因：
+
+- CD：高分配量，GiY/Cheney 差异明显。
+- Havlak：GiY 在多个 size 下输给 Cheney，是必须解释的反例。
+- Richards：GiY 在 896KB 下明显赢 Cheney，是必须解释的正例。
+- Storage：GiY 多个 size 下表现较好，能观察 allocation-heavy workload 的 cache 行为。
+
+Event groups：
+
+```text
+generic:
+  cycles
+  instructions
+  cache-references
+  cache-misses
+
+l1d_load:
+  L1-dcache-loads
+  L1-dcache-load-misses
+
+llc_load:
+  LLC-loads
+  LLC-load-misses
+```
+
+暂时不把 LLC store 放进第一轮默认矩阵。
+原因：
+
+```text
+当前研究问题首先是 GiY 是否降低 cache miss rate，
+最直接证据是 generic cache miss、L1D load miss、LLC load miss。
+LLC store 可以作为第二轮补充实验，尤其在 GiYOL / NT store 研究里更重要。
+```
+
+同时，每个 benchmark 输出里的 GC-window PMU 也会被 parser 提取：
+
+```text
+GC-window cache-misses
+GC-window cache-references
+GC-window cache-miss rate
+GC-window instructions
+GC-window cache MPKI
+```
+
+新增脚本：
+
+```text
+tools/run_gc_cache_miss_benchmarks.sh
+tools/parse_gc_cache_miss_benchmarks.py
+```
+
+预期输出目录：
+
+```text
+build.debug/benchmarks/out_gc_cache_miss_YYYYMMDD_HHMMSS/
+```
+
+重要判断标准：
+
+```text
+不能只看 miss rate。
+需要同时看：
+
+- total cache misses
+- cache miss rate
+- cache MPKI
+- GC-window cache miss rate
+- GC-window cache MPKI
+- total execution time
+- GC overhead
+- minor GC count
+```
+
+因为 miss rate 降低但 total misses 或 runtime 变差，不一定说明设计更好。
+
+## 2026-05-17 GiY vs cache_cheney cache miss 分组测量结果
+
+输出目录：
+
+```text
+build.debug/benchmarks/out_gc_cache_miss_20260516_235434
+```
+
+生成文件：
+
+```text
+build.debug/benchmarks/out_gc_cache_miss_20260516_235434/summary.csv
+build.debug/benchmarks/out_gc_cache_miss_20260516_235434/summary.md
+build.debug/benchmarks/out_gc_cache_miss_20260516_235434/compare_giy_vs_cache_cheney_cache_miss.csv
+build.debug/benchmarks/out_gc_cache_miss_20260516_235434/compare_giy_vs_cache_cheney_gc_pmu.csv
+build.debug/benchmarks/out_gc_cache_miss_20260516_235434/compare_giy_vs_cache_cheney_cache_miss.md
+```
+
+执行情况：
+
+- GC：`cache_cheney`, `giy`
+- GC Local Workspace：`640KB`, `768KB`, `896KB`
+- benchmark：`CD`, `Havlak`, `Richards`, `Storage`
+- event group：`generic`, `l1d_load`, `llc_load`
+- 共 6 次 build + 72 次 perf benchmark run = 78 个 status
+- 所有 status 都是 0
+- 没有 `<not counted>` 事件
+
+### Whole-program perf aggregate
+
+| Size | Group | Cheney miss rate | GiY miss rate | GiY-Cheney(pp) | Cheney misses | GiY misses | GiY misses vs Cheney | Cheney time(s) | GiY time(s) |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 640 | generic | 9.599% | 14.441% | +4.842 | 857015038 | 1095250408 | +27.798% | 3341.926 | 3421.599 |
+| 640 | l1d_load | 2.127% | 2.468% | +0.341 | 211048143662 | 253996419055 | +20.350% | 3307.465 | 3430.637 |
+| 640 | llc_load | 2.573% | 7.161% | +4.588 | 65672367 | 122442021 | +86.444% | 3343.208 | 3439.512 |
+| 768 | generic | 8.971% | 12.499% | +3.529 | 857253830 | 1060551846 | +23.715% | 3328.244 | 3440.045 |
+| 768 | l1d_load | 2.146% | 2.435% | +0.289 | 213466300586 | 250909383583 | +17.541% | 3326.590 | 3395.228 |
+| 768 | llc_load | 2.476% | 5.787% | +3.311 | 60232242 | 110838263 | +84.018% | 3354.135 | 3385.968 |
+| 896 | generic | 8.265% | 11.854% | +3.589 | 823855257 | 1012451244 | +22.892% | 3345.085 | 3444.052 |
+| 896 | l1d_load | 2.174% | 2.543% | +0.369 | 216793173785 | 264420870745 | +21.969% | 3346.821 | 3434.163 |
+| 896 | llc_load | 2.742% | 6.677% | +3.935 | 59614883 | 132238801 | +121.822% | 3352.300 | 3455.762 |
+
+直接结论：
+
+```text
+在这个核心矩阵里，GiY 没有降低 whole-program cache miss rate。
+同 size 比较时，GiY 的 generic / L1D load / LLC load miss rate 全部高于 cache_cheney。
+```
+
+尤其是 LLC load：
+
+```text
+640KB: GiY LLC-load miss rate 7.161%，Cheney 2.573%
+768KB: GiY LLC-load miss rate 5.787%，Cheney 2.476%
+896KB: GiY LLC-load miss rate 6.677%，Cheney 2.742%
+```
+
+这说明当前 GiY 的 locality 并没有比 Cheney 更好。
+
+### GC-window PMU aggregate
+
+这些数据来自 generic run 中 VM 内部的 GC-window PMU。
+
+| Size | Cheney GC miss rate | GiY GC miss rate | GiY-Cheney(pp) | Cheney GC misses | GiY GC misses | GiY misses vs Cheney | Cheney GC MPKI | GiY GC MPKI | Cheney minor GC | GiY minor GC |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 640 | 0.657% | 1.882% | +1.226 | 32410056 | 61105682 | +88.539% | 0.058 | 0.114 | 676486 | 767776 |
+| 768 | 0.777% | 1.609% | +0.831 | 34227935 | 55281715 | +61.511% | 0.069 | 0.116 | 525037 | 578458 |
+| 896 | 0.865% | 1.701% | +0.836 | 36637133 | 53902698 | +47.126% | 0.077 | 0.117 | 429837 | 464136 |
+
+直接结论：
+
+```text
+GiY 也没有降低 GC-window cache miss rate。
+同 size 比较时，GiY 的 GC-window misses、miss rate、MPKI 都高于 cache_cheney。
+```
+
+这点非常关键。
+因为如果 GiY 的设计目标是让 GC 工作集更 cache-local，那么最应该改善的是 GC-window PMU。
+但当前测量结果没有支持这个假设。
+
+### 重要细节
+
+GiY 不是在所有单个 benchmark 上都更差。
+例如 `Richards` 在部分 size 上，GiY 的 whole-program generic cache miss rate 低于 Cheney：
+
+```text
+640KB Richards:
+  Cheney generic miss rate = 25.47%
+  GiY generic miss rate    = 9.51%
+
+768KB Richards:
+  Cheney generic miss rate = 26.01%
+  GiY generic miss rate    = 8.44%
+```
+
+但是聚合后 GiY 仍然更差。
+主要原因是 `CD / Havlak / Storage` 等高分配 workload 上，GiY 的 miss count 和 miss rate 明显更高。
+
+因此更精确的说法是：
+
+```text
+当前 GiY 可能改善某些 workload 的 locality，
+但在这个核心矩阵的总体结果里，它没有降低 cache miss rate。
+```
+
+### 可能解释
+
+当前 GiY 比 Cheney 有额外的空间和访问成本：
+
+- reserve stack；
+- FT slot set；
+- reserve-first / materialize-later 的额外 traversal；
+- 普通 young 可分配区比 Cheney 小约 32KB；
+- minor GC 次数更多；
+- reserve 阶段访问对象图的顺序可能不如 Cheney 的直接复制/scavenge 顺序线性。
+
+从结果看：
+
+```text
+GiY 有时减少 references / LLC loads，
+但 misses 和 miss rate 反而更高。
+```
+
+这意味着：
+
+```text
+GiY 访问次数可能减少了，
+但访问更不容易命中 cache。
+```
+
+### 当前结论
+
+当前不能说：
+
+```text
+GiY 降低了 cache miss rate。
+```
+
+当前应该说：
+
+```text
+在 2026-05-17 的核心 cache-miss 矩阵实验中，
+GiY 没有降低 whole-program 或 GC-window cache miss rate。
+相反，在 640/768/896KB 三个同 size 对照下，
+GiY 的 miss rate、miss count、GC-window MPKI 大多高于 cache_cheney。
+```
+
+这并不否定 GiY 的所有价值。
+它说明当前实现/参数下，GiY 的性能差异不能用“cache miss rate 更低”来解释。
+
+下一步建议：
+
+```text
+1. 对 Richards 单独多轮重复，因为它是 GiY 可能改善 locality 的正例。
+2. 对 Havlak/CD 单独分析，因为它们是 GiY cache miss 明显更差的反例。
+3. 如果要继续 GiYOL，重点看 NT store 是否能降低 LLC pollution，而不是假设 GiY baseline 已经降低 miss。
+4. 可以补跑 LLC-store group，尤其给 GiYOL 做 store-side 分析。
+```
+
+## 2026-05-17 perf cache counter 分组含义
+
+这次实验里分成几组：
+
+```text
+generic cache counters
+L1 data cache
+LLC loads
+LLC stores
+```
+
+它们不是同一个指标的不同名字。
+它们观察的是 cache hierarchy 的不同层次和不同访问方向。
+
+### generic cache counters
+
+事件：
+
+```text
+cache-references
+cache-misses
+```
+
+含义：
+
+```text
+Linux perf 提供的通用硬件 cache 事件。
+它们是一个整体性的 cache 参考/未命中指标。
+```
+
+优点：
+
+- 简单；
+- 跨机器比较容易写脚本；
+- 适合做 whole-program 的粗粒度观察。
+
+缺点：
+
+- 语义依赖 CPU/内核映射；
+- 在 Intel 上通常更接近 LLC / last-level cache 行为，但不能简单等同于精确的 L1 或 L2；
+- 不区分 load 和 store；
+- 不适合解释具体是哪一级 cache 出问题。
+
+适合回答：
+
+```text
+这个程序整体 cache miss 是否变多？
+整体 cache miss rate 是否变差？
+```
+
+不适合回答：
+
+```text
+到底是 L1 变差、LLC 变差，还是 store 造成污染？
+```
+
+### L1 data cache
+
+事件：
+
+```text
+L1-dcache-loads
+L1-dcache-load-misses
+```
+
+含义：
+
+```text
+数据 load 在 L1 data cache 层级上的访问和 miss。
+```
+
+L1D 是离 core 最近的数据 cache。
+它容量小，但命中很快。
+
+适合回答：
+
+```text
+程序访问的数据是否在最近的 L1 data cache 里？
+对象扫描 / reserve / traversal 是否有很好的局部性？
+```
+
+如果 L1D miss rate 高，通常说明：
+
+- 访问数据分散；
+- working set 超过 L1D；
+- pointer chasing 多；
+- 对象布局不够连续；
+- 遍历顺序对 cache 不友好。
+
+注意：
+
+```text
+L1D miss 不一定非常严重。
+如果数据在 L2 或 L3 命中，代价仍然远低于 DRAM。
+```
+
+所以 L1D miss 要和 LLC miss 一起看。
+
+### LLC loads
+
+事件：
+
+```text
+LLC-loads
+LLC-load-misses
+```
+
+LLC = Last Level Cache。
+在当前机器上就是共享 L3 cache。
+
+含义：
+
+```text
+load 请求到达 LLC 层级，以及在 LLC 里 miss。
+```
+
+LLC-load-miss 通常比 L1D miss 更严重。
+因为如果 L3 也 miss，数据大概率要去更远的 memory hierarchy，例如 DRAM。
+
+适合回答：
+
+```text
+程序是否产生更多昂贵的 read-side cache miss？
+GiY 的对象图访问是否让数据逃出 cache hierarchy？
+```
+
+对 GiY / Cheney 很重要：
+
+```text
+如果 GiY 的目标是让 GC local workspace 留在 cache，
+那么 GC-window 的 LLC-load-miss 或 cache MPKI 应该下降。
+```
+
+当前结果中，GiY 的 LLC-load miss rate 比 Cheney 高，
+所以当前不能说 GiY 降低了 cache miss rate。
+
+### LLC stores
+
+事件：
+
+```text
+LLC-stores
+LLC-store-misses
+```
+
+含义：
+
+```text
+store/write 请求在 LLC 层级上的行为。
+```
+
+这和 loads 不一样。
+store 相关事件更适合观察：
+
+- 写入 old 区是否污染 LLC；
+- copy/materialize 是否产生大量写流量；
+- non-temporal store 是否减少 cache pollution；
+- 写分配 write-allocate 是否带来额外 cache line traffic。
+
+对 GiYOL 特别重要。
+
+原因：
+
+```text
+GiYOL 的 NT store 设计重点不是普通 read locality，
+而是减少 copy-to-old 时写入大量 old objects 对 cache 的污染。
+```
+
+所以如果要证明 GiYOL 的价值，
+LLC-store / LLC-store-miss / write bandwidth 这类指标会比单纯 L1D load 更相关。
+
+### 为什么不能把这些 miss rate 直接互相比大小
+
+不同 group 的 denominator 不一样：
+
+```text
+generic:
+  cache-misses / cache-references
+
+L1D:
+  L1-dcache-load-misses / L1-dcache-loads
+
+LLC load:
+  LLC-load-misses / LLC-loads
+
+LLC store:
+  LLC-store-misses / LLC-stores
+```
+
+所以不能说：
+
+```text
+L1D miss rate 2% 比 LLC miss rate 6% 更好或更差。
+```
+
+它们的意义不同。
+
+正确比较方式是：
+
+```text
+同一个 event group 内，
+比较 GiY vs Cheney；
+或者比较同一个 GC 在不同 workspace size 下的变化。
+```
+
+例如：
+
+```text
+GiY 768KB LLC-load miss rate vs Cheney 768KB LLC-load miss rate
+GiY 640KB generic miss rate vs GiY 896KB generic miss rate
+```
+
+### 对本研究最有价值的指标
+
+当前研究问题：
+
+```text
+GiY 是否真的降低 cache miss rate？
+```
+
+最重要的是：
+
+```text
+1. GC-window cache miss rate / GC-window MPKI
+2. whole-program LLC-load-miss rate
+3. whole-program generic cache MPKI
+4. L1D load miss rate
+```
+
+如果进入 GiYOL / NT store 研究，还应该补：
+
+```text
+LLC-stores
+LLC-store-misses
+store-side bandwidth
+```
+
+当前结论：
+
+```text
+generic counters 看整体。
+L1D 看近端数据局部性。
+LLC loads 看昂贵 read-side miss。
+LLC stores 看写入 old 区 / NT store / cache pollution。
+```
+
+## 2026-05-17 cache miss 调查报告总结
+
+独立报告文件：
+
+```text
+build.debug/benchmarks/out_gc_cache_miss_20260516_235434/cache_miss_investigation_report.md
+```
+
+报告数据源：
+
+```text
+build.debug/benchmarks/out_gc_cache_miss_20260516_235434/summary.csv
+```
+
+实验范围：
+
+```text
+GC:
+  cache_cheney
+  giy
+
+GC Local Workspace:
+  640KB
+  768KB
+  896KB
+
+Benchmarks:
+  CD
+  Havlak
+  Richards
+  Storage
+
+Perf groups:
+  generic
+  l1d_load
+  llc_load
+```
+
+总体结论：
+
+```text
+当前 GiY 没有降低 cache miss rate。
+在这个核心矩阵里，GiY 的 whole-program generic cache miss rate、
+L1D-load miss rate、LLC-load miss rate、GC-window miss rate
+都高于 cache_cheney。
+```
+
+Whole-program aggregate 关键数字：
+
+```text
+640KB:
+  generic:  Cheney 9.599%, GiY 14.441%
+  L1D:      Cheney 2.127%, GiY 2.468%
+  LLC-load: Cheney 2.573%, GiY 7.161%
+
+768KB:
+  generic:  Cheney 8.971%, GiY 12.499%
+  L1D:      Cheney 2.146%, GiY 2.435%
+  LLC-load: Cheney 2.476%, GiY 5.787%
+
+896KB:
+  generic:  Cheney 8.265%, GiY 11.854%
+  L1D:      Cheney 2.174%, GiY 2.543%
+  LLC-load: Cheney 2.742%, GiY 6.677%
+```
+
+GC-window PMU 关键数字：
+
+```text
+640KB:
+  Cheney GC miss rate = 0.657%, MPKI = 0.058
+  GiY    GC miss rate = 1.882%, MPKI = 0.114
+
+768KB:
+  Cheney GC miss rate = 0.777%, MPKI = 0.069
+  GiY    GC miss rate = 1.609%, MPKI = 0.116
+
+896KB:
+  Cheney GC miss rate = 0.865%, MPKI = 0.077
+  GiY    GC miss rate = 1.701%, MPKI = 0.117
+```
+
+解释：
+
+```text
+如果 GiY 的核心效果真的是“让 GC 工作集更 cache-local”，
+最应该改善的是 GC-window PMU。
+但当前数据里，GiY 的 GC-window miss rate、miss count、MPKI 都更高。
+所以当前实现不能用“cache miss rate 更低”解释 GiY 的性能。
+```
+
+更细的观察：
+
+- GiY 的 generic / LLC references 有时比 Cheney 少，但 misses 反而更多。
+- 这意味着 GiY 不是单纯“访问更多”导致差，而是剩下的访问更不容易命中 cache。
+- `Richards` 是重要例外：在 640KB / 768KB 下，GiY 的 whole-program generic miss rate 明显低于 Cheney。
+- 但是 `CD`、`Havlak`、`Storage` 多数情况下对 GiY 不利，聚合后压过了 Richards 的正例。
+- `Havlak` 是最强反例：GiY 在 time 和 miss rate 上都明显更差。
+- `LLC-load` 是最危险信号：GiY aggregate LLC-load misses 比 Cheney 高约 84% 到 122%。
+
+可能原因：
+
+```text
+1. GiY 需要 reserve stack / FT slot set，ordinary young 区更小。
+2. 同 total workspace 下，GiY minor GC 次数更多。
+3. reserve-first traversal 带来额外 pointer chasing。
+4. Cheney immediate copying/scavenge 在这些 workload 上可能更线性。
+5. workspace 变大虽然减少 GC 次数，但不必然降低 LLC miss rate。
+```
+
+当前可声明：
+
+```text
+在 2026-05-17 的核心 cache-miss 实验中，
+GiY 没有降低 whole-program 或 GC-window cache miss rate。
+硬件 counter 结果反而显示 GiY 的 locality 比 cache_cheney 更差。
+```
+
+当前不能声明：
+
+```text
+GiY generally reduces cache miss rate.
+GiY 的性能差异来自更低 cache miss rate。
+当前一轮数据已经足够做 publication-level final claim。
+```
+
+后续建议：
+
+```text
+1. Richards 单独多轮重复，因为它是正例。
+2. Havlak/CD 单独多轮重复，因为它们是反例。
+3. 给 GiY 增加 phase-level PMU：reserve roots、reserve RS、young trace、materialize、patch。
+4. 给 GiYOL 补 LLC-store group，分析 NT store 是否减少写污染。
+5. 区分 total-workspace-equal 与 ordinary-young-equal 两种公平性实验。
+```
+
+### perf stat 中 `<not counted>` 的含义
+
+现象：
+
+```text
+一次 perf stat 里同时放太多硬件事件时，
+某些事件可能显示：
+
+<not counted>
+```
+
+这不是说事件发生次数是 0。
+它的意思是：
+
+```text
+这次运行中 perf 没有成功把这个 event 放到硬件 PMU counter 上计数。
+```
+
+原因通常有几个：
+
+1. CPU 的硬件 PMU counter 数量有限。
+
+   一颗 core 同一时间只能硬件计数有限数量的 event。
+   如果一次要求：
+
+   ```text
+   L1-dcache-loads
+   L1-dcache-load-misses
+   LLC-loads
+   LLC-load-misses
+   LLC-stores
+   LLC-store-misses
+   ...
+   ```
+
+   event 数量可能超过当前可用 counter。
+
+2. 某些 event 之间有硬件调度约束。
+
+   不是所有 event 都可以任意组合在同一轮里同时计数。
+   某些 event 只能放在特定 counter，或者和某些 event 组合时无法一起调度。
+
+3. NMI watchdog 可能占用一个 PMU counter。
+
+   当前机器：
+
+   ```text
+   /proc/sys/kernel/nmi_watchdog = 1
+   ```
+
+   perf 输出也提示：
+
+   ```text
+   Some events weren't counted. Try disabling the NMI watchdog.
+   ```
+
+   这说明 NMI watchdog 可能减少了可用于 perf 的硬件 counter 数量。
+
+4. perf multiplexing / event scheduling。
+
+   当 event 多于硬件 counter 时，perf 有时会 multiplex：
+
+   ```text
+   一段时间计 event A/B/C，
+   另一段时间计 event D/E/F，
+   最后按运行比例 scale。
+   ```
+
+   这种情况下 perf 输出旁边可能有百分比，表示这个 event 实际被计数的时间比例。
+   如果事件完全没有被调度，就可能显示 `<not counted>`。
+
+实验设计上的含义：
+
+```text
+<not counted> 的数据不能用。
+不能把它当成 0。
+也不应该把有大量 multiplex 的结果和正常完整计数结果直接比较。
+```
+
+当前建议：
+
+把 perf stat 分成几组测，而不是一次测所有事件。
+
+第一组：generic cache counters
+
+```text
+cycles
+instructions
+cache-references
+cache-misses
+```
+
+第二组：L1 data cache
+
+```text
+L1-dcache-loads
+L1-dcache-load-misses
+```
+
+第三组：LLC loads
+
+```text
+LLC-loads
+LLC-load-misses
+```
+
+第四组：LLC stores
+
+```text
+LLC-stores
+LLC-store-misses
+```
+
+这样每组 event 数量少，硬件 counter 压力低，结果更可信。
+
+如果需要一次测更多 event，可以考虑暂时关闭 NMI watchdog：
+
+```text
+sudo sh -c 'echo 0 > /proc/sys/kernel/nmi_watchdog'
+```
+
+实验结束后恢复：
+
+```text
+sudo sh -c 'echo 1 > /proc/sys/kernel/nmi_watchdog'
+```
+
+但当前不一定需要这么做。
+对 GiY / Cheney 实验来说，分组测量已经足够。
+
+## 2026-05-17 GiY cache miss 反而更差的代码级原因分析
+
+用户问题：重新分析代码，解释为什么当前 GiY 的缓存反而更不容易命中，并给出最可能理由。
+
+关键实验背景：
+
+- cache miss 实验目录：`build.debug/benchmarks/out_gc_cache_miss_20260516_235434`
+- 报告文件：`build.debug/benchmarks/out_gc_cache_miss_20260516_235434/cache_miss_investigation_report.md`
+- 同样 workspace 下，GiY 的 whole-program generic / L1D-load / LLC-load / GC-window PMU miss rate 都高于 cache_cheney。
+- 例如 aggregate：
+  - 640KB generic: Cheney 9.599%, GiY 14.441%
+  - 768KB generic: Cheney 8.971%, GiY 12.499%
+  - 896KB generic: Cheney 8.265%, GiY 11.854%
+  - 768KB LLC-load: Cheney 2.476%, GiY 5.787%
+  - 768KB GC-window: Cheney 0.777%, GiY 1.609%
+
+代码级最可能原因：
+
+1. GiY 的 JSObject 扫描比 Cheney 更保守，可能扫描更多字段。
+
+   - `ejsvm/GiY.cc:1182-1208` 的 `giy_scan_jsobject_conservative()` 会根据 object header size 扫描 `JSObject::eprop` 后面的全部 embedded slot。
+   - `ejsvm/GiY.cc:1211-1227` 对 SIMPLE_OBJECT / ARRAY / FUNCTION / BUILTIN / BOXED_* 等都走这个 conservative scanner。
+   - Cheney 则走 `process_node<CacheCheney_Tracer>()`，核心扫描逻辑在 `ejsvm/gc-visitor-inl.h:88-148`，会根据 `Shape` / `PropertyMap` 的 `n_special_props`, `n_embedded_slots`, `n_props`, extension array 等信息只扫描有意义的字段。
+   - 因此 GiY 可能读取更多无效、非指针、空洞或特殊字段，增加 L1D / LLC load 压力。这是目前最强嫌疑之一。
+
+2. GiY 把 reserve 和 copy 分开，并且用 LIFO stack，导致 materialization 顺序不如 Cheney 线性。
+
+   - `ejsvm/GiY.cc:1237-1264` 的 `copy_for_minor()` 只是 reserve old destination、设置 forwarding pointer、把 young payload push 到 `g_gc_stack`，没有立即复制。
+   - `ejsvm/GiY.cc:2474-2551` 的 `giy_traverse_stack_and_copy()` 从 stack pop，所以遍历顺序是 DFS/LIFO 风格。
+   - old destination 地址按发现顺序分配，但实际 copy 按 pop 顺序发生，可能在 old reserved 区域内前后跳动。
+   - Cheney 在 `ejsvm/cache_dram_manager.cc:276-328` 中发现对象时立即 `memcpy` 到 `dram_space.free`，随后 `ejsvm/cache_dram_manager.cc:946-959` 从 `scan_start` 到 `dram_space.free` 线性 scavenge。这对硬件预取更友好。
+
+3. GiY minor GC phase 更多，会重复访问 roots / function table / remembered set。
+
+   - `ejsvm/GiY.cc:2852-2924` 的 phase 包括 `scan_roots_reserve`, `function_table_reserve`, `remembered_set_reserve`, `young_traverse_copy`, allocation-site update, `scan_roots_patch`, `function_table_patch`, `remembered_set_patch`。
+   - Cheney 的对应路径在 `ejsvm/cache_dram_manager.cc:855-878`，基本是 scan roots / function table / remembered set，然后线性 scavenge。
+   - GiY 的 reserve + patch 拆分让同一批 root/RSet/FT slot 更容易被重复读取和写回，扩大 GC-window 的 cache 工作集。
+
+4. 同样 total workspace 下，GiY 的普通 young allocation area 更小，minor GC 次数更多。
+
+   - `ejsvm/GiY.cc:644-758` 中，GiY 从 `cache_space.end` 预留 GC Local Workspace：stack = young/8，FT slot set = young/64 且至少 32KB，GiYOL 还有 staging/batch。
+   - `cache_space.end = cursor` 会减少真正可用于普通 young allocation 的空间。
+   - Cheney 也有 FT slot set，但在 `ejsvm/cache_dram_manager.cc:548-575` 只预留 FT slot set，结构更少。
+   - 实验中 GiY 的 minor GC 数通常高于 Cheney，例如 aggregate 768KB: Cheney 525037 次，GiY 578458 次；Havlak 768 generic: Cheney 269900 次，GiY 298950 次。
+
+5. GiY remembered set 为了 patch 存了 value，并且当前默认没有开启 fast index，mutator write barrier 可能更重。
+
+   - `ejsvm/giy_rset.cc:122-160` 中，GiY RSet 同时存 `buffer` 和 `values`，还维护 hash table。
+   - `ejsvm/giy_rset.cc:240-310` 的 write barrier 在 value 不再指向 young 时，也会尝试 `rememberset_update_existing(..., 0)` 清除旧 value。
+   - `ejsvm/giy_rset.cc:18-20` 默认 `GIY_RSET_INDEX_FAST=0`，`ejsvm/giy_rset.cc:49-110` 可能退化为线性扫描已有 RSet entry。
+   - 这个影响主要体现在 whole-program perf 中；GC-window PMU 不包含大部分 mutator write barrier 时间。
+
+6. 当前 GiY 的大部分 copy 没有真正得到 NT-store 优势。
+
+   - `ejsvm/GiY.cc:88-95` 设置 `GIY_NT_COPY_MIN_BYTES = 256`。
+   - `ejsvm/GiY.cc:1864-1874` 中，小于等于阈值的对象走普通 `memcpy`。
+   - Havlak / Richards 的平均对象很小，例如 Havlak 约 52.9B、Richards 约 8.9B，所以当前 GiY 大多数对象仍是普通 memcpy，不会自动带来 streaming-store 的 cache 好处。
+
+当前排序：
+
+1. 最可能：GiY conservative JSObject scanner 扫描过多 slot。
+2. 很可能：reserve-first + LIFO traversal 破坏 old-space copy/scavenge 的线性 locality。
+3. 很可能：reserve/patch 多阶段重复访问 roots/RSet/FT。
+4. 很可能：同样 total workspace 下 GiY 普通 young 更小，minor GC 更多。
+5. 影响 whole-program 的重要因素：GiY RSet value tracking + 未启用 fast index。
+6. 次要但需要测量：NT-store benefit 没发挥，LLC-store 还没完整测。
+
+建议验证：
+
+- A/B 实验 1：让 GiY 的 JSObject 扫描临时改成与 Cheney 相同的 precise `process_node` 路径，确认 L1D/LLC miss 是否下降。
+- A/B 实验 2：把 GiY stack 的 LIFO 改成 FIFO，或者按 old destination 地址顺序 materialize，测试 traversal/copy order 是否是主要问题。
+- A/B 实验 3：开启 `GIY_RSET_INDEX_FAST=true`，重点重跑 Havlak/CD 的 whole-program perf。
+- A/B 实验 4：给 GiY 各 phase 分别加 PMU window，拆开 reserve roots、reserve RSet、young traverse/copy、patch roots/RSet/FT。
+- A/B 实验 5：做 ordinary-young-equal 和 total-workspace-equal 两套实验，避免把 workspace overhead 和算法效果混在一起。
+
+## 2026-05-17 为什么 GiY 的 JSObject scanner 和 Cheney 不一样
+
+用户问题：为什么当前 GiY 的 JSObject 扫描会和 CheneyGC 不一样？为什么不能一样？
+
+结论：
+
+- 理论上可以做成“语义等价”的 precise scanner。
+- 但当前不能直接复用 Cheney 的 `process_node<Tracer>()` 路径，因为 GiY 的 forwarding 语义和 Cheney 不一样。
+- Cheney 是发现 young object 后立即复制；GiY 是先 reserve old 地址、设置 forwarding pointer，之后才 copy/materialize。
+- 因此 Cheney 的 scanner 可以安全读 forwarded/copied metadata；GiY 的 reserve phase 直接使用同一套 scanner，有机会读到尚未 materialize 的 old 地址，或者违反 GiY 避免 old-space read 的设计。
+
+具体代码：
+
+- Cheney：
+  - `ejsvm/cache_dram_manager.cc:276-328` 中，`CacheCheney_Tracer::forward()` 调用 `copy_to_dram()`，立刻 `memcpy`。
+  - 所以 `PROCESS_EDGE(p->shape)` 后，shape 如果被 forward，目标 old object 已经有真实内容。
+  - `ejsvm/gc-visitor-inl.h:88-148` 的 precise JSObject scanner 后续读取 `Shape` / `PropertyMap` 元数据是安全的。
+
+- GiY：
+  - `ejsvm/GiY.cc:1237-1264` 中，`copy_for_minor()` 只 reserve old destination、设置 forwarding pointer、push stack，不 copy。
+  - `ejsvm/GiY.cc:1266-1328` 的 `GiYReserveTracer` 在 slot 本身在 young 时会 patch 该 slot 到 forwarding address。
+  - `ejsvm/GiY.cc:2474-2551` 中，真正 copy 发生在之后的 `giy_traverse_stack_and_copy()`。
+  - 因此如果直接用 `gc-visitor-inl.h:88-148` 的 precise scanner，`PROCESS_EDGE(p->shape)` 之后再读 `p->shape->pm` 等信息，就可能读到一个只有地址、还没内容的 old destination。
+
+为什么 GiY 当前用了 conservative scanner：
+
+- `ejsvm/GiY.cc:1182-1208` 的 `giy_scan_jsobject_conservative()` 只处理 `p->shape` 这条边，然后根据 object header size 扫描 object 内部的 eprop slot。
+- 它不依赖 `Shape::n_embedded_slots`、`PropertyMap::n_special_props`、`PropertyMap::n_props` 等 metadata。
+- 这样做比较保守，能绕开“reserve phase 读 metadata”这件事。
+- 代价是它可能扫描比 Cheney 更多的 slot，造成额外 L1D/LLC load miss。
+
+重要补充：
+
+- “不能一样”不是永久不能一样，而是不能直接把 Cheney 的 precise `process_node` 原样搬给 GiY。
+- 如果要让 GiY 也 precise，应该写一个 GiY 专用 precise scanner：
+  - 先保存 source object 的原始 `Shape *source_shape`，不要在读取 metadata 前用 patched old forwarding address。
+  - 确保读取的是已经有效的 young/init metadata，或者先 materialize metadata。
+  - 避免在 old guard active 时读取 old-space metadata。
+  - 再根据 `source_shape` / `PropertyMap` 精确决定要扫描哪些 eprop slot。
+- 这个 A/B 实验值得做：如果改成 GiY-safe precise scanner 后 L1D/LLC miss 明显下降，就说明当前 conservative scanner 是 cache miss 变差的主要来源之一。
+
+### 更正和补充：为什么 scanner 必须读 Shape / PropertyMap
+
+需要修正一个细节：
+
+- 当前构建使用 `THREADED`，`ejsvm/gc-visitor-inl.h:90-95` 中 precise scanner 会先执行 `Shape *os = p->shape`，再执行 `PROCESS_EDGE(p->shape)`。
+- 所以在当前构建里，问题不只是“`PROCESS_EDGE(p->shape)` 后 `p->shape` 被改成 forwarding address，随后马上读错地址”。
+- 更根本的问题是：precise JSObject scanner 本身必须解引用 `Shape` / `PropertyMap` metadata，而这些 metadata 可能在 GiY reserve phase 中处于“不应该读 old space”或“尚未 materialize”的语义风险里。
+
+为什么 precise scanner 需要读这些 metadata：
+
+- `ejsvm/types.h:340-346` 的 `JSObject` 只有：
+  - `Shape *shape`
+  - `JSValue eprop[]`
+- 单靠 object header size 只能知道 eprop 数组占了多少字节，不能知道哪些 slot 是真实属性、哪些是 special prop、有没有 extension array、extension array 有多长。
+- `ejsvm/types.h:314-324` 的 `Shape` 记录：
+  - `pm`
+  - `n_embedded_slots`
+  - `n_extension_slots`
+- `ejsvm/types.h:260-277` 的 `PropertyMap` 记录：
+  - `n_props`
+  - `n_special_props`
+  - `__proto__`
+  - transition/hash metadata
+- 因此 `ejsvm/gc-visitor-inl.h:101-110` 需要读：
+  - `os->n_extension_slots`
+  - `os->n_embedded_slots`
+  - `os->pm->n_special_props`
+  - `os->pm->n_props`
+- 这些信息决定 precise scanner 到底扫描哪些 `eprop` slot。
+
+这个问题如何在 GiY 里产生：
+
+1. 原来的 generic scanner 是为普通 GC/Cheney 语义写的。
+   - Cheney forward 时立即 copy。
+   - forwarding pointer 指向的 old object 已经有内容。
+   - 因此 scanner 读 forwarded/copy 后的 metadata 通常是安全的。
+
+2. GiY 改变了 forwarding 的含义。
+   - `ejsvm/GiY.cc:1237-1264` 的 `copy_for_minor()` 只 reserve old destination，不立即 copy。
+   - forwarding pointer 在 GiY 中可能只表示“将来会在这里 materialize”，不表示“这里现在已经有完整对象内容”。
+
+3. precise scanner 不是单纯枚举边，它会边扫描边读 metadata。
+   - 对 JSObject，它必须读 shape/property-map metadata 来决定扫描范围。
+   - 如果这些 metadata 在 old/DRAM，GiY 的 old-guard 设计会认为这是不该发生的 old read。
+   - 如果 scanner 在某些配置或路径上拿到的是尚未 materialize 的 forwarded metadata，就会读到无效 old destination。
+
+4. 所以当前 GiY 选择了 conservative scanner。
+   - `ejsvm/GiY.cc:1182-1208` 不依赖 `Shape` / `PropertyMap` 来决定 slot 范围。
+   - 它只处理 `p->shape` 这条边，然后按 object header size 扫描全部 `eprop` slot。
+   - 这样避免了在 reserve phase 依赖 metadata 的风险。
+   - 代价是扫描过多 slot，可能造成更多 cache miss。
+
+更准确的说法：
+
+- 不是 JSObject scanner 绝对不能和 Cheney 一样。
+- 而是不能直接复用 Cheney/generic scanner，因为它默认“forward 后对象内容可读”以及“读 metadata 没问题”。
+- GiY 可以实现一个自己的 precise scanner，但必须显式保证：
+  - metadata 来源是 source young object 或 init space，不能是不完整 old destination；
+  - 不违反 GiY old-space read guard；
+  - 读取 `Shape` / `PropertyMap` 前不会被 reserve tracer 的 patch 语义污染；
+  - 然后再按 `Shape` / `PropertyMap` 精确扫描 slot。
+
+### 再次更正：当前 giy/cache_cheney 构建没有 THREADED
+
+上面关于 `THREADED` 的细节需要更正：
+
+- `ejsvm/common.mk:444-458` 中：
+  - `OPT_GC=cache_cheney` 定义 `CACHE_CHENEY` 和 `USE_REMEMBERED_SET`
+  - `OPT_GC=giy` 定义 `CACHE_CHENEY`, `USE_REMEMBERED_SET`, `USE_GIY_MINOR`
+  - `OPT_GC=giyol` 定义 `CACHE_CHENEY`, `USE_REMEMBERED_SET`, `USE_GIY_MINOR`, `USE_GIYOL`
+  - 这些都没有定义 `THREADED`
+- 因此当前 GiY / Cheney 使用 `gc-visitor-inl.h:97-99` 的 `#ifndef THREADED` 路径。
+
+这让问题更直接：
+
+```text
+generic precise scanner:
+
+PROCESS_EDGE(p->shape)
+Shape *os = p->shape
+read os->n_extension_slots
+read os->n_embedded_slots
+read os->pm->n_special_props
+read os->pm->n_props
+```
+
+在 Cheney 中：
+
+```text
+PROCESS_EDGE(p->shape)
+-> 如果 shape 在 young，就立刻 copy shape 到 old
+-> p->shape 改成 old address
+-> old address 已经有真实 Shape 内容
+-> 继续读 os->... 是安全的
+```
+
+在 GiY 中：
+
+```text
+PROCESS_EDGE(p->shape)
+-> 如果 shape 在 young，只 reserve old address
+-> p->shape 可能被改成 old forwarding address
+-> 但这个 old address 的 Shape 内容还没 copy/materialize
+-> Shape *os = p->shape
+-> 继续读 os->... 就可能读到尚未 materialize 的地址
+```
+
+所以当前 GiY 使用 `giy_scan_jsobject_conservative()` 的直接原因更清楚：
+
+- 避免 precise scanner 在 `PROCESS_EDGE(p->shape)` 后马上依赖 `p->shape` 的 metadata。
+- 避免读取尚未 materialize 的 old destination。
+- 代价是只能按 object size 扫描全部 eprop slot，因此 cache miss 可能更高。
+
+## 2026-05-17 简化解释：eprop / Shape / PropertyMap / GC scanner 的机制
+
+用户反馈：前面的解释太复杂，需要更清楚说明 eprop 是什么、现在是什么机制、shape 是什么、为什么会被这样处理、流程是什么。并再次要求所有内容记录到 AIlog。
+
+核心概念：
+
+1. `eprop` 是 JSObject 里面真正存属性值的数组。
+
+   - 代码：`ejsvm/types.h:340-346`
+   - `JSObject` 结构基本是：
+
+     ```c
+     struct jsobject_cell {
+       Shape *shape;
+       JSValue eprop[];
+     };
+     ```
+
+   - 可以理解为：
+
+     ```text
+     JSObject = 一个 shape 指针 + 一排属性值格子 eprop[0], eprop[1], ...
+     ```
+
+   - 对象创建时，`ejsvm/object.c:398-410` 根据 `shape->n_embedded_slots` 分配这么多 eprop slot，并初始化为 `JS_EMPTY`。
+
+2. `Shape` 是这个对象的布局说明。
+
+   - 代码：`ejsvm/types.h:314-338`
+   - 它记录：
+     - `pm`: 指向 PropertyMap
+     - `n_embedded_slots`: 对象内部有多少个 eprop slot
+     - `n_extension_slots`: 是否有外部 extension array
+   - 可以理解为：
+
+     ```text
+     Shape 告诉 VM：这个对象有几个内部格子，最后一个格子是不是指向外部扩展数组。
+     ```
+
+3. `PropertyMap` 是属性名到格子编号的地图。
+
+   - 代码：`ejsvm/types.h:260-277`
+   - 它记录：
+     - `map`: property name -> index 或 transition
+     - `n_props`: 总属性数量
+     - `n_special_props`: 前面多少个 slot 是 VM 内部特殊字段
+     - `__proto__`
+   - 可以理解为：
+
+     ```text
+     PropertyMap 告诉 VM：属性名 x 应该存在 eprop[几号]。
+     ```
+
+普通属性读写流程：
+
+1. 读属性时，`ejsvm/object.c:293-324` 通过 `prop_index()` 查 PropertyMap，得到 index。
+2. 然后 `object_get_prop(obj, index)` 到 `eprop[index]` 读值。
+3. 写属性时，`ejsvm/object.c:129-284` 如果属性不存在，会创建/查找新的 PropertyMap 和 Shape。
+4. 如果当前对象内部 eprop 不够，会通过 `object_grow_shape()` 扩展，代码在 `ejsvm/object.c:828-864`。
+5. `ejsvm/types.h:359-371` 的 `object_get_prop_address()` 决定：
+   - 如果 index 在 embedded 范围内，返回 `&p->eprop[index]`
+   - 如果超出 embedded 范围，就从 `p->eprop[n_embedded - 1]` 找 extension array
+
+为什么 GC scanner 要处理 shape：
+
+- 因为 `p->shape` 本身也是 heap object 指针。
+- 如果 shape 在 young 区，minor GC 后 young 会被清空。
+- 所以 GC 必须把 shape 也 forward/copy 到 old，并把 `p->shape` 改成新地址。
+- 否则对象的 layout 说明书就丢了。
+
+为什么 GC scanner 要读 Shape / PropertyMap：
+
+- GC 不能盲目扫描全部 eprop，否则会把非指针、内部字段、空 slot 都当作候选指针处理，增加成本。
+- precise scanner 要知道：
+  - 哪些 slot 是 special prop
+  - 哪些 slot 是普通属性
+  - embedded slot 有多少
+  - extension array 有没有、有多长
+- 这些信息只能从 Shape / PropertyMap 读。
+- 代码：`ejsvm/gc-visitor-inl.h:94-110`
+
+Cheney 的正常流程：
+
+```text
+扫描 JSObject
+-> PROCESS_EDGE(p->shape)
+-> 如果 shape 在 young，立刻 copy shape 到 old
+-> p->shape 改成 old 地址
+-> 这个 old 地址里已经有真实 Shape 内容
+-> 读 Shape / PropertyMap，决定扫描哪些 eprop
+-> 扫描真正需要扫描的 eprop slot
+```
+
+这对 Cheney 是安全的，因为 Cheney 的 forward = 已经 copy 完。
+
+GiY 如果直接照抄 Cheney scanner，会出现的问题：
+
+```text
+扫描 JSObject
+-> PROCESS_EDGE(p->shape)
+-> 如果 shape 在 young，GiY 只 reserve old 地址
+-> p->shape 可能改成 reserved old 地址
+-> 但这个 reserved old 地址还没有真实 Shape 内容
+-> scanner 继续读 p->shape->n_embedded_slots / p->shape->pm
+-> 可能读到还没 materialize 的地址
+```
+
+这就是问题发生的真正原因：
+
+```text
+Cheney 的 forward = 复制完成的新对象
+GiY 的 forward = 只是预定的新地址
+```
+
+所以 GiY 当前用了 conservative scanner：
+
+- 代码：`ejsvm/GiY.cc:1182-1208`
+- 它只做：
+
+  ```text
+  处理 p->shape 这条边
+  不读 Shape / PropertyMap 来判断精确范围
+  直接根据 object header size 扫描所有 eprop slot
+  ```
+
+- 好处：避免读尚未 materialize 的 Shape / PropertyMap。
+- 坏处：会多扫描很多 eprop slot，可能增加 cache miss。
+
+最简单总结：
+
+```text
+eprop = 对象里放属性值的格子。
+Shape = 说明这些格子怎么布局。
+PropertyMap = 说明属性名对应哪个格子。
+Cheney 可以先搬 shape 再看说明书，因为它立刻复制。
+GiY 只是先预约新地址，还没复制，所以不能直接看新地址里的说明书。
+因此 GiY 现在选择不看说明书，直接把全部格子扫一遍。
+这安全，但更慢、更容易 cache miss。
+```
+
+## 2026-05-17 符合 GiY 的 JSObject scanner 修复方案思考
+
+用户问题：应该用什么方法解决 GiY 当前 JSObject conservative scanner 导致 cache miss 变差的问题？需要详细思考符合 GiY 的解决方案。
+
+目标：
+
+1. 不把 GiY 退化成 Cheney。
+2. 保留 GiY 的 reserve-first / later-materialize 思想。
+3. GC core 尽量不读 old/DRAM metadata。
+4. 让 JSObject 扫描尽量恢复 precise，减少无意义 eprop 扫描。
+5. 出现不确定情况时必须安全 fallback，不能牺牲正确性。
+
+不推荐方案：在 scanner 里每次强制 materialize shape。
+
+- GiY 已经有 `giy_materialize_shape()` 和 `giy_materialize_property_map()`，代码在 `ejsvm/GiY.cc:965-989`。
+- 它们会调用 `copy_for_minor()` 后立刻 `giy_traverse_stack_and_copy()`。
+- 如果在每个 JSObject scanner 里都这样做，会破坏 GiY 的 reserve-first / batch materialization 思路。
+- 这会让 traversal/copy 顺序更混乱，也可能增加 GC core cache pressure。
+- 所以它可以作为特殊情况工具，但不应该是主 scanner 的常规路径。
+
+短期 A/B 方案：GiY-safe precise scanner + fallback。
+
+核心思想：
+
+```text
+先保存 source object 的原始 shape 指针。
+然后照常 reserve p->shape。
+如果原始 shape 和 pm 是 young/init 等可安全读取的 metadata，就 precise scan。
+如果 metadata 在 old/DRAM 或不确定，就 fallback 到当前 conservative scan。
+```
+
+伪代码：
+
+```c
+Shape *source_shape = p->shape;
+giy_process_edge<Tracer>(p->shape);  // reserve shape, may patch p->shape
+
+if (!shape_metadata_is_gc_local_readable(source_shape))
+  goto conservative_fallback;
+
+PropertyMap *pm = source_shape->pm;
+if (!pm_metadata_is_gc_local_readable(pm))
+  goto conservative_fallback;
+
+// Now use source_shape/source_pm scalar fields:
+n_embedded = source_shape->n_embedded_slots;
+n_extension = source_shape->n_extension_slots;
+n_special = pm->n_special_props;
+n_props = pm->n_props;
+
+scan_special_fields_by_cell_type(type, p);
+scan_regular_eprop_precisely(p, n_special, n_embedded, n_extension, n_props);
+return;
+
+conservative_fallback:
+  scan_all_eprop_by_object_size(p);
+```
+
+优点：
+
+- 实现小，适合做 A/B 实验。
+- 可以直接验证“减少 eprop over-scan 是否降低 L1D/LLC miss”。
+- 不改变 GiY 的 copy/materialize 策略。
+
+缺点：
+
+- 如果大多数 Shape / PropertyMap 已经在 old/DRAM，那么 fallback 很多，收益有限。
+- 它解决的是“不要读未 materialize forwarding address”，但没有从根本上解决“old metadata 不想读”的问题。
+
+正式推荐方案：GC Local Workspace 中的 Shape Layout Cache。
+
+核心思想：
+
+```text
+不要在 GC scanner 里读 Shape / PropertyMap。
+在 GC 之前或 mutator 已经访问 shape 时，把 scanner 需要的 layout 摘要保存到 GC Local Workspace。
+GC scanner 只查这个 local layout table。
+```
+
+需要保存的不是整个 Shape / PropertyMap，而是非常小的摘要：
+
+```c
+struct GiYShapeLayout {
+  uintptr_t shape;          // key: original Shape*
+  uint16_t n_embedded_slots;
+  uint16_t n_extension_slots;
+  uint16_t n_props;
+  uint8_t  n_special_props;
+  uint8_t  valid;
+};
+```
+
+这些字段正好对应 precise scanner 需要的信息：
+
+- `n_embedded_slots`
+- `n_extension_slots`
+- `n_props`
+- `n_special_props`
+
+表放在哪里：
+
+- 放在 GC Local Workspace。
+- 和 GiY stack / FT slot set / GiYOL staging 一样，从 cache/local workspace budget 里统一切。
+- 建议先给 32KB 或 64KB 做实验。
+- 例如 2048 或 4096 个 open-addressing entry。
+
+什么时候填充：
+
+1. 对象分配时填。
+   - `ejsvm/object.c:398-410` 的 `allocate_jsobject()` 已经会读 `os->n_embedded_slots` 来决定对象大小。
+   - 这里可以顺便记录 `os` 的 layout。
+   - 这发生在 mutator/分配路径，不是在 GC core 中临时读 old metadata。
+
+2. shape 改变时填。
+   - `ejsvm/object.c:828-878` 的 `object_grow_shape()` 会把 `p->shape = os`。
+   - 这里也应该记录新 shape 的 layout。
+
+3. 新 shape 创建时也可以填。
+   - `ejsvm/object.c:768-822` 的 `new_object_shape()` 知道 `pm`, `num_embedded`, `num_extension`。
+   - 这里最容易拿到 layout 信息。
+
+4. GC 结束后清空。
+   - 一个 minor GC 结束后 young 区被清空。
+   - 下一轮 mutator allocation 会重新记录本轮 young objects 用到的 shape layout。
+
+GC scanner 如何使用：
+
+```text
+扫描 JSObject p:
+
+1. source_shape = p->shape
+2. giy_process_edge(p->shape)   // 保留 GiY reserve 行为
+3. 在 Shape Layout Cache 中 lookup source_shape
+4. 如果命中：
+     用 layout precise scan
+   如果 miss：
+     fallback 到 conservative scan
+```
+
+precise scan 的内容：
+
+- 对 `Array`：
+  - 扫 `array_body`
+  - 扫 `array_length`
+  - 跳过 `array_size`
+  - 再扫普通属性区
+- 对 `Function`：
+  - 扫 `function_environment`
+  - 跳过 `function_table_entry`
+  - 再扫普通属性区
+- 对 `Builtin`：
+  - special fields 是 C function pointer / nargs，基本跳过
+  - 再扫普通属性区
+- 对 `BoxedNumber` / `BoxedString`：
+  - 扫 value slot
+  - 再扫普通属性区
+- 对 `BoxedBoolean`：
+  - value 是 boolean，不需要当 heap edge 扫
+  - 再扫普通属性区
+- 对普通对象：
+  - 从 `n_special_props` 到 `actual_embedded` 扫普通属性
+  - 如有 extension array，处理 extension array pointer/array
+
+为什么这个方案符合 GiY：
+
+- GC core 不需要读 old Shape / PropertyMap。
+- 不需要为了 scanner 立刻 materialize shape。
+- 保留 reserve-first。
+- 高频访问的 layout 摘要在 GC Local Workspace，符合“高频 GC 数据在 local workspace”的设计。
+- 如果 layout cache miss，fallback conservative，正确性仍然安全。
+
+风险和注意点：
+
+- 需要防止 layout table 太小。太小时 miss 多，性能退回 conservative。
+- 需要记录 shape 改变路径，否则对象分配后新增属性导致 shape 更新，table 里没有新 shape，会 fallback。
+- 需要 whole-program benchmark，因为把一部分工作移动到 mutator allocation/property update 路径。
+- 需要 GC-window benchmark，因为目标是降低 GC core 的 L1D/LLC miss。
+- 需要比较三组：
+  1. 当前 GiY conservative scanner
+  2. GiY-safe precise scanner + fallback
+  3. GiY shape layout cache + precise scanner
+
+最终推荐：
+
+```text
+第一步：做 GiY-safe precise scanner + fallback，快速验证方向。
+第二步：做 GC Local Workspace Shape Layout Cache，作为正式设计。
+第三步：用 phase-level PMU 和 cache miss benchmark 验证：
+        JSObject scan 是否减少 L1D/LLC miss，
+        GC-window miss rate 是否接近或超过 Cheney。
+```
+
+## 2026-05-17 shape 是不是对象、为什么扫描 JSObject 需要 shape、其他语言怎么处理
+
+用户问题：
+
+- 当前说的 shape 本身是不是一个对象？
+- 扫描对象时是不是无论如何都免不了先知道它的 shape？
+- shape 产生的意义是什么？
+- 别的语言/VM 怎么处理这个问题？
+
+结论：
+
+1. 在当前 VM 里，`Shape` 是 GC 管理的 heap object，但它不是用户层的 JSObject。
+
+   - 代码：`ejsvm/object.c:768-787`
+   - `new_object_shape()` 里通过：
+
+     ```c
+     s = (Shape *) gc_malloc(ctx, sizeof(Shape), CELLT_SHAPE);
+     ```
+
+   - 所以 Shape 会参与 GC，会被复制/forward/扫描。
+   - 但它不是 JavaScript 程序能直接访问的普通对象，而是 VM 内部 metadata object。
+
+2. 精确扫描 JSObject 时，基本免不了要知道 layout metadata。
+
+   - 对当前 VM 来说，这个 metadata 就是 `Shape` + `PropertyMap`。
+   - `JSObject` 本体只有 `Shape *shape` 和 `JSValue eprop[]`，代码在 `ejsvm/types.h:340-346`。
+   - 没有 Shape/PropertyMap，就只能知道“这里有一排 eprop slot”，但不知道哪些 slot 该扫、哪些不该扫。
+   - 所以 precise scanner 在 `ejsvm/gc-visitor-inl.h:94-110` 需要读 `shape` 和 `shape->pm`。
+
+3. 但“不一定必须在 GC 扫描当下直接读 Shape 对象本体”。
+
+   - 必须知道 layout 信息。
+   - 不一定必须每次从 Shape / PropertyMap heap object 里读。
+   - 可以把 layout 摘要提前缓存到 GC Local Workspace。
+   - GiY 的正式方案应该利用这一点。
+
+shape 的意义：
+
+```text
+JS 对象是动态的，属性可以不断增加/改变。
+如果每个对象自己保存完整的 property name -> slot 映射，会很慢、很浪费。
+所以多个结构相同的对象共享一个 Shape / PropertyMap。
+```
+
+Shape / PropertyMap 带来的好处：
+
+- 共享对象布局，节省内存。
+- 让 `obj.x` 可以变成 “查 shape/map -> 得到固定 index -> 读 eprop[index]”。
+- 支持 inline cache。
+- 支持属性新增时从旧 shape transition 到新 shape。
+- 让 GC precise scanner 知道哪些 slot 需要扫描。
+
+和 GiY 问题的关系：
+
+- Cheney 的 `Shape` 是 heap object，但 Cheney 处理它时会立刻 copy。
+- GiY 的 `Shape` 也是 heap object，但 GiY forward 只 reserve 地址，不立即 materialize。
+- 所以 GiY 如果直接照 Cheney scanner 读 `p->shape->...`，可能读到还没 materialize 的 reserved old address。
+- 因此 GiY 需要：
+  - 要么 fallback conservative scan；
+  - 要么用 GC Local Workspace 里的 layout cache；
+  - 不应该在主路径上每次强制 materialize shape。
+
+其他语言/VM 的对应概念：
+
+- Java / JVM：
+  - 每个对象 header 有 `klass` 指针。
+  - `klass` metadata 记录对象有哪些引用字段。
+  - GC 根据 class metadata / oop map 精确扫描。
+
+- .NET CLR：
+  - 对象有 MethodTable / EEType 指针。
+  - runtime metadata 记录字段布局和引用字段。
+  - GC 用这些 metadata 扫描对象。
+
+- Go：
+  - 每个类型有 type descriptor。
+  - descriptor 里有 pointer bitmap / GC program。
+  - GC 根据 bitmap 知道对象哪些 word 是指针。
+
+- JavaScript VMs：
+  - V8 叫 Map。
+  - JavaScriptCore 叫 Structure。
+  - SpiderMonkey 有 Shape / BaseShape / ObjectGroup 等历史结构。
+  - 它们都用类似 hidden class / shape 的 metadata 描述动态对象布局。
+
+- Python / Ruby：
+  - 对象有 type/class 指针。
+  - GC 根据类型对应的 traverse function 扫描引用字段。
+  - 动态对象属性通常在 dict/ivar table 等结构里，GC 扫那些容器。
+
+- C / C++：
+  - 普通 C/C++ 没有精确移动 GC。
+  - C++ 的 vptr 是为虚函数服务，不是 GC layout metadata。
+  - 如果要精确 GC，也需要额外 type descriptor 或保守扫描。
+
+最简单总结：
+
+```text
+Shape 在这个 VM 里确实是一个 GC 管理的内部对象。
+扫描 JSObject 要么需要读取 Shape/PropertyMap，
+要么需要某种等价的 layout 信息。
+Shape 的意义是给动态 JS 对象提供共享布局和快速属性访问。
+别的语言也都有类似东西，只是名字不同：
+Java 叫 klass，.NET 叫 MethodTable，Go 叫 type descriptor，V8 叫 Map。
+GiY 的特殊问题是：它的 forwarding 只是 reserve，不是马上 copy。
+所以 GiY 最好不要在 GC core 里直接依赖 Shape 本体，
+而应该把 Shape layout 摘要放进 GC Local Workspace。
+```
+
+## 2026-05-17 师兄 DPU WRAM/MRAM generational GC 代码思想分析
+
+用户贴了一份师兄写的 DPU allocator / GC 代码，要求解释思想。
+
+代码在本地有相近版本：
+
+- `miniproject-qiancheng-pimgc/yoshitsune/runtime_c/mydpulib_latest/mydpulib/allocator/generational_wram_major_is_compact/generational_wram.c`
+- 用户贴出的版本和本地多个 variant 略有差异，但核心思想一致。
+
+核心结论：
+
+```text
+这是一套面向 DPU 的分代 GC。
+WRAM 是 fast local memory，用作 young generation。
+MRAM 是 slow large memory，用作 old generation。
+minor GC 的核心思想是：
+  先给 live young object 在 MRAM old 里 reserve 目标地址；
+  在 WRAM young 上继续扫描对象并把 child pointer 改成目标 MRAM pointer；
+  等对象内部指针都更新好以后，再一次性 mram_write 整个对象到 MRAM。
+```
+
+这和当前 GiY 的思想非常接近：
+
+```text
+forward/copy_for_minor 不是马上真正复制内容，
+而是先 reserve old address + 设置 forwarding/gc_ptr + 入栈。
+真正的数据写入发生在对象 child pointer 都处理完之后。
+```
+
+重要结构：
+
+1. heap 分区。
+
+   - `HEAP_RS_SIZE = 4096`
+   - `HEAP_YOUNG_SIZE = 28KB`
+   - `HEAP_WRAM_SIZE = Allocator + RS + Young`
+   - `HEAP_OLD_SIZE = HEAP_MRAM_SIZE - Allocator`
+
+   含义：
+
+   ```text
+   WRAM:
+     Allocator metadata
+     remembered set
+     young objects
+
+   MRAM:
+     allocator snapshot
+     old objects
+   ```
+
+2. pointer tagging。
+
+   - `get_is_wram_ptr(ptr)` 判断 `ptr % 2 != 0`。
+   - young/WRAM pointer 用低 bit 标记。
+   - old/MRAM pointer 不带这个标记。
+
+   含义：
+
+   ```text
+   只要看到奇数 pointer，就知道它指向 WRAM young。
+   minor GC 只需要处理这些 young pointer。
+   ```
+
+3. object header。
+
+   每个对象 header 中至少有：
+
+   - `gc_ptr`: minor GC 中的 forwarding pointer / reserved old destination
+   - `class_table_index`: 指向 class metadata
+   - `size`: payload 大小
+
+   `gc_ptr != 0` 表示对象已经被发现并 reserve 过 old 位置。
+
+minor GC 流程：
+
+1. 从 exported_ref 扫 root。
+
+   CPU / host 可见的 exported reference 如果指向 WRAM young，就调用 `copy_for_minor()`，把它改成 MRAM old pointer。
+
+2. 扫 Java stack。
+
+   stack frame 用 bitmap 判断哪些 slot 是 pointer。
+   如果 slot 里是 WRAM young pointer，就调用 `copy_for_minor()`，并把 stack slot 改成 MRAM old pointer。
+
+3. 扫 remembered set。
+
+   old object 写入 young reference 时，write barrier 把 old field address 放进 RS。
+   minor GC 不扫描整个 MRAM old，只扫描 RS 记录的 old fields。
+   如果 old field 指向 WRAM young，就把它改成 `copy_for_minor()` 返回的 MRAM pointer。
+
+4. traverse stack。
+
+   `copy_for_minor()` 第一次发现对象时，只做：
+
+   ```text
+   reserve old address
+   header->gc_ptr = reserved old data pointer
+   push young header 到 GC stack
+   return old pointer
+   ```
+
+   `traverse_stack()` 之后弹出 young object：
+
+   ```text
+   读 class metadata / bitmap
+   扫描所有 reference fields
+   如果 child 是 young:
+      reserve child old address
+      push child young header
+      把当前对象字段改成 child 的 MRAM pointer
+   所有 child pointer 更新完以后:
+      mram_write 整个对象到 MRAM old destination
+   ```
+
+这段代码最重要的思想：
+
+```text
+不是先 copy 再修指针；
+而是先修 young source object 里的指针，
+再把已经修好的对象整体写入 old。
+```
+
+这样做的动机：
+
+1. 减少 MRAM 随机写。
+
+   MRAM 访问慢。若先把对象 copy 到 MRAM，再扫描 child，之后还要回头修改 MRAM 中的字段，会产生很多 MRAM random writes。
+
+   当前设计是在 WRAM young 里修字段，最后一次性顺序写整对象到 MRAM。
+
+2. WRAM 是 fast local memory。
+
+   GC traversal 尽量在 WRAM 中读写 young object。
+   MRAM 只用于：
+
+   - root/old field 必要读写
+   - 最后 promotion 的 `mram_write`
+   - class table / stack map metadata 读取
+
+3. 保留分代 GC 优势。
+
+   minor GC 不扫描整个 old/MRAM。
+   old-to-young references 依赖 remembered set。
+
+4. 支持多 tasklet 并行。
+
+   - 每个 tasklet 有自己的 `gc_stack[me()]`
+   - 有 shared stack 可 work stealing
+   - `gc_working_flag[]` + `gc_end_flag` 判断全局结束
+   - old allocation 需要 mutex 保护
+   - RS 扫描也用 index/mutex 分配任务
+
+和 Cheney 的区别：
+
+```text
+Cheney:
+  copy object to to-space / old
+  再扫描 copied object
+  需要在 copied object 上修 child pointer
+
+师兄这份代码:
+  reserve old destination
+  扫描 WRAM source object
+  在 WRAM source object 上修 child pointer
+  最后一次性写到 MRAM
+```
+
+和当前 GiY 的关系：
+
+```text
+这份代码的思想非常接近 GiY：
+  reserve first
+  scan/update in young/local memory
+  materialize/copy to old later
+```
+
+区别在于：
+
+- 师兄代码是 Java-like 对象模型。
+  - `class_table_index` + class bitmap 就能精确知道哪些字段是引用。
+  - 因此没有 JS `Shape / PropertyMap / eprop` 的复杂问题。
+
+- 当前 eJS / GiY 是 JavaScript 对象模型。
+  - JSObject 的字段布局需要 Shape / PropertyMap。
+  - Shape 本身也是 heap object。
+  - 所以 GiY 在 JSObject scanner 上遇到了“不能直接像 Cheney 一样读 shape metadata”的问题。
+
+最简单总结：
+
+```text
+师兄这份代码的核心是：
+利用 WRAM 快、MRAM 慢的硬件特性，
+把 young 放在 WRAM，把 old 放在 MRAM。
+minor GC 时不立刻把对象完全搬到 MRAM 后再修改，
+而是先在 MRAM 预约位置，
+在 WRAM 上把对象内部 young 指针全部修成 MRAM 指针，
+最后一次性写整个对象到 MRAM。
+
+这就是一种 DPU 版的 GiY / reserve-first promotion 思想。
+```
+
+## 2026-05-17 当前 eJS GiY 和师兄 DPU 代码的差异及原因
+
+用户问题：详细说明当前 GiY 和师兄代码的区别到底是什么，为什么会产生这样的区别。
+
+总体判断：
+
+```text
+两者的核心思想相同：
+  reserve old destination first
+  scan/update young/local source object
+  materialize/copy to old later
+
+但是两者面对的运行环境和对象模型不同，
+所以工程形态差异很大。
+```
+
+最本质的区别有两个：
+
+1. 硬件/内存层次不同。
+
+   - 师兄代码：
+     - DPU 环境。
+     - WRAM 是真实的 fast local memory。
+     - MRAM 是真实的 slow large memory。
+     - young 放 WRAM，old 放 MRAM。
+     - 主要目标是减少 MRAM random access，尤其是 MRAM random writes。
+
+   - 当前 eJS GiY：
+     - CPU 环境。
+     - 没有真正显式控制的 WRAM/MRAM。
+     - 用 cache-space / GC Local Workspace 模拟“希望留在 cache 的区域”。
+     - old 在 DRAM。
+     - 主要目标是减少 cache miss / old-space cache pollution。
+
+   产生原因：
+
+   ```text
+   师兄代码面对的是物理分离的 WRAM/MRAM；
+   当前 GiY 面对的是 CPU cache/DRAM 层次，cache 不是软件可直接分配的地址空间。
+   所以师兄可以明确说“这个对象在 WRAM/这个对象在 MRAM”，
+   当前 GiY 只能通过 workspace size、访问局部性、NT-store 等手段影响 cache 行为。
+   ```
+
+2. 对象模型不同。
+
+   - 师兄代码：
+     - Java-like / static class model。
+     - object header 里有 `class_table_index`。
+     - class table 里有 field bitmap。
+     - GC 扫描对象时，直接通过 class bitmap 知道哪些字段是 reference。
+
+   - 当前 eJS GiY：
+     - JavaScript dynamic object model。
+     - `JSObject = Shape* + eprop[]`。
+     - 字段布局由 `Shape / PropertyMap` 决定。
+     - Shape 本身也是 GC-managed heap object。
+     - GC 要 precise scan JSObject，就需要 Shape/PropertyMap layout 信息。
+
+   产生原因：
+
+   ```text
+   Java 对象布局基本由 class 决定，稳定、静态、容易用 bitmap 表示。
+   JavaScript 对象属性可以动态增加/转变，多个对象通过 hidden class / Shape 共享布局。
+   所以 eJS GiY 多了 Shape / PropertyMap / eprop 问题。
+   ```
+
+具体差异：
+
+1. Young / Old 的边界判断不同。
+
+   - 师兄代码：
+     - `get_is_wram_ptr(ptr)` 用低 bit 判断。
+     - WRAM pointer 是奇数。
+     - MRAM pointer 是普通地址。
+
+   - 当前 GiY：
+     - 用地址范围判断：`in_young_space`, `in_dram_space`, `in_init_space`。
+     - JSValue 还带 PTag，需要 `clear_ptag()` / `put_ptag()`。
+
+   原因：
+
+   ```text
+   DPU 代码自己定义 WRAM/MRAM pointer representation。
+   eJS 已经有 JSValue tagging 和 VM heap spaces，必须和现有表示兼容。
+   ```
+
+2. Local workspace 的含义不同。
+
+   - 师兄代码：
+     - WRAM 里明确放：
+       - Allocator
+       - remembered set
+       - young objects
+     - 代码中 `HEAP_WRAM_SIZE = Allocator + RS + Young`。
+
+   - 当前 GiY：
+     - GC Local Workspace 是从 cache-space 中切出来的逻辑区域。
+     - 放：
+       - `g_gc_stack`
+       - FT slot set
+       - GiYOL staging buffer
+       - GiYOL reserve-order batch
+       - RSet/hash 等其他 local metadata
+     - `ejsvm/GiY.cc:644-758` 会从 `cache_space.end` 往下切空间。
+
+   原因：
+
+   ```text
+   WRAM 是真实 local memory，能明确划分。
+   CPU cache 不是 malloc 可指定的物理区域，只能用 cache-space/workspace 近似控制工作集。
+   ```
+
+3. `copy_for_minor()` 的含义相似，但 materialization 位置不同。
+
+   - 师兄代码：
+     - `copy_for_minor()` / `get_object_copy_handle()`：
+       - reserve MRAM old destination
+       - 写 `header->gc_ptr`
+       - push young header
+       - 返回 MRAM pointer
+     - `traverse_stack()`：
+       - 在 WRAM source object 上修 child pointer
+       - 最后 `mram_write()` 整个对象到 MRAM。
+
+   - 当前 GiY：
+     - `copy_for_minor()`：
+       - reserve DRAM old destination
+       - 写 `forwarding_pointer`
+       - push young payload
+       - 不复制
+     - `giy_traverse_stack_and_copy()`：
+       - scan young source object
+       - patch young in-object slots
+       - 调用 `giy_copy_live_object()` 把对象 materialize 到 old。
+
+   原因：
+
+   ```text
+   两者都想避免“copy 到 old 后再回头修改 old 字段”。
+   师兄代码最后用 mram_write，一次性把修好的 WRAM object 写到 MRAM。
+   当前 GiY 用 memcpy/NT-store，把修好的 young object materialize 到 DRAM old。
+   ```
+
+4. Root / remembered set patch 的阶段不同。
+
+   - 师兄代码：
+     - 扫 exported_ref / stack / RS 时，遇到 young pointer 立刻把 slot 改成 MRAM pointer。
+     - root/RS patch 基本和 reserve 同时完成。
+
+   - 当前 GiY：
+     - minor GC 分成 reserve 和 patch：
+       - scan_roots_reserve
+       - function_table_reserve
+       - remembered_set_reserve
+       - young_traverse_copy
+       - scan_roots_patch
+       - function_table_patch
+       - remembered_set_patch
+     - 代码在 `ejsvm/GiY.cc:2852-2924`。
+
+   原因：
+
+   ```text
+   eJS 的 root/slot 类型更多：
+     JSValue tagged slot
+     void* pointer slot
+     function frame
+     function table
+     remembered set values
+     weak hidden-class metadata
+   直接在 reserve 阶段全部 patch 更容易破坏语义。
+   所以当前 GiY 更保守地拆成 reserve phase 和 patch phase。
+   ```
+
+5. 对象扫描方式不同。
+
+   - 师兄代码：
+     - 通过 `class_table_index` 取 class metadata。
+     - 用 field bitmap 判断 reference field。
+     - bitmap bit = 1 才扫描该字段。
+
+   - 当前 GiY：
+     - 对普通非 JSObject 类型可以用 generic `process_node`。
+     - 对 JSObject 当前用了 conservative scanner：
+       - 处理 `p->shape`
+       - 按 object size 扫所有 `eprop`
+     - 代码在 `ejsvm/GiY.cc:1182-1208`。
+
+   原因：
+
+   ```text
+   师兄代码的 layout metadata 是 class table，基本静态，不是每个对象图里的普通 movable object。
+   eJS 的 layout metadata 是 Shape/PropertyMap，而且 Shape 也是 heap object。
+   GiY reserve 后 shape 可能只是 reserved old address，还没有 materialize。
+   所以不能直接照 Cheney/generic precise scanner 读 shape metadata。
+   ```
+
+6. remembered set 的复杂度不同。
+
+   - 师兄代码：
+     - RS 主要记录 old field address。
+     - minor GC 扫 RS 时读 old field 当前值，如果是 WRAM pointer，就 copy/update。
+
+   - 当前 GiY：
+     - GiY RSet 存 slot address 和 last written value。
+     - 因为 GiY reserve phase 需要在不随便读 old slot 的情况下知道 old->young edge。
+
+   原因：
+
+   ```text
+   师兄代码的目标是减少 MRAM 访问，但仍可在 RS scan 时读 MRAM old field。
+   当前 GiY 更强调 GC core 避免 old-space read，因此 RSet 需要保存 value。
+   这让当前 GiY RSet 更复杂，也可能增加 whole-program overhead。
+   ```
+
+7. 并行模型不同。
+
+   - 师兄代码：
+     - DPU 上多 tasklet 并行。
+     - 每个 tasklet 有自己的 `gc_stack[me()]`。
+     - shared stack 做 work stealing。
+     - 用 mutex / barrier / `gc_working_flag` / `gc_end_flag` 判断结束。
+
+   - 当前 eJS GiY：
+     - 当前路径基本是单线程 collector。
+     - 没有 tasklet work stealing。
+
+   原因：
+
+   ```text
+   DPU 程序天然多 tasklet，必须设计并行 GC 协作。
+   eJS 当前运行在 CPU VM 上，研究重点是 cache locality / old-space access，不是多 tasklet 调度。
+   ```
+
+8. 大对象与直接 old allocation。
+
+   - 用户贴出的师兄版本中，大对象超过阈值会直接 old allocation。
+   - 当前 GiY/eJS 主要关注 young survivor promotion，GiYOL 另外区分小对象 staging / 大对象直接 copy 或 NT-store。
+
+   原因：
+
+   ```text
+   DPU WRAM 很小，大对象放 WRAM young 不划算。
+   当前 GiY 的问题更多是 CPU cache/DRAM copy 策略，因此大对象策略体现在 GiYOL batching / NT-store 上。
+   ```
+
+一句话总结：
+
+```text
+两者的思想源头一样：
+  不要先把对象复制到 old 再反复修改 old；
+  而是先 reserve old 地址，
+  在 young/local memory 中完成指针修正，
+  最后再 materialize 到 old。
+
+差异来自两个事实：
+  师兄代码是 DPU + Java-like static class bitmap；
+  当前 GiY 是 CPU cache/DRAM + JavaScript dynamic Shape/PropertyMap。
+
+所以师兄代码可以用 class bitmap 精确扫描对象，
+当前 GiY 必须处理 JSObject 的 Shape/eprop/PropertyMap 问题；
+这就是当前 GiY 比师兄代码复杂很多的根本原因。
+```
+
+## 2026-05-17 Java 和 JavaScript 类型/对象布局差异
+
+用户问题：具体说明 Java 和 JavaScript 的类型到底有什么区别。
+
+核心结论：
+
+```text
+Java 的对象布局主要由 class 决定，比较静态。
+JavaScript 的对象布局由运行时 shape/hidden class 决定，可能动态变化。
+
+所以 Java GC 可以通过 class metadata / bitmap 精确知道对象哪些字段是引用；
+JavaScript GC 需要通过 Shape / PropertyMap / Map / Structure 等运行时 metadata 判断对象布局。
+```
+
+Java 的类型特点：
+
+1. 变量有声明类型。
+
+   ```java
+   Person p;
+   int x;
+   String s;
+   ```
+
+2. class 定义字段。
+
+   ```java
+   class Person {
+     int age;
+     String name;
+     Address address;
+   }
+   ```
+
+   对这个 class 的所有 `Person` 对象来说，字段集合基本固定：
+
+   ```text
+   age
+   name
+   address
+   ```
+
+3. 对象运行时有 class/klass 指针。
+
+   GC 可以通过 class metadata 知道：
+
+   ```text
+   age     = int，不是引用
+   name    = reference
+   address = reference
+   ```
+
+4. Java 对象不能随便新增字段。
+
+   不能写：
+
+   ```java
+   p.newField = 123;
+   ```
+
+   除非 class 本来声明了这个字段。
+
+JavaScript 的类型特点：
+
+1. 变量没有固定声明类型。
+
+   ```js
+   let x = 1;
+   x = "hello";
+   x = {};
+   ```
+
+2. 对象可以动态增加/删除属性。
+
+   ```js
+   let obj = {};
+   obj.x = 1;
+   obj.y = "hello";
+   delete obj.x;
+   obj.z = {};
+   ```
+
+3. 同一个对象的布局可以不断变化。
+
+   ```text
+   {}
+   -> {x}
+   -> {x, y}
+   -> {y}
+   -> {y, z}
+   ```
+
+4. VM 为了效率会创建 Shape / Hidden Class。
+
+   JavaScript VM 不可能每次访问属性都慢慢查字典，所以会把相似对象归类成一种 layout：
+
+   ```text
+   Shape1: {}
+   Shape2: {x -> eprop[0]}
+   Shape3: {x -> eprop[0], y -> eprop[1]}
+   ```
+
+   对象里保存一个 `shape` 指针，表示当前对象采用哪个 layout。
+
+对 GC 的影响：
+
+Java:
+
+```text
+object header -> class metadata
+class metadata -> reference bitmap
+GC 根据 bitmap 精确扫描字段
+```
+
+JavaScript:
+
+```text
+JSObject -> shape
+shape -> PropertyMap
+PropertyMap -> 哪些 eprop 是属性、哪些 slot 要扫描
+GC 需要 Shape/PropertyMap 才能 precise scan
+```
+
+为什么师兄代码简单：
+
+- 师兄代码是 Java-like。
+- 对象 header 有 `class_table_index`。
+- class table 有 field bitmap。
+- GC 扫描对象时直接按 bitmap 走。
+
+为什么当前 GiY 复杂：
+
+- eJS 是 JavaScript-like。
+- JSObject 只有 `shape` 和 `eprop[]`。
+- `eprop[]` 的含义需要 Shape / PropertyMap 解释。
+- Shape 本身又是 GC 管理的 heap object。
+- GiY reserve-first 后，Shape 的 forwarding address 可能还没 materialize。
+- 所以不能像 Java 那样简单读一个稳定 class bitmap。
+
+最简单总结：
+
+```text
+Java:
+  类型和字段主要在 class 里提前确定。
+  GC 看 class bitmap 就知道哪里是 pointer。
+
+JavaScript:
+  对象属性可以运行时变化。
+  VM 用 Shape/Hidden Class 动态描述对象布局。
+  GC 要精确扫描 JSObject，就要知道当前 Shape/PropertyMap。
+
+这就是为什么师兄代码可以直接 bitmap 扫描，
+而当前 GiY 必须处理 Shape / PropertyMap / eprop。
+```
+
+## 2026-05-17 Java 扫描对象过程、Klass 指针位置、JavaScript 对象处理
+
+用户问题：
+
+- Java 扫描对象的过程是什么？
+- `Klass` / `kclass` 指针放在哪里？
+- JavaScript 到底怎么处理对象？
+
+Java / HotSpot 中对象大致结构：
+
+```text
+普通 Java object:
+
+[ mark word ]
+[ klass pointer / compressed klass pointer ]
+[ fields... ]
+
+Java array:
+
+[ mark word ]
+[ klass pointer / compressed klass pointer ]
+[ array length ]
+[ elements... ]
+```
+
+说明：
+
+- `klass pointer` 在对象 header 里，不是 Java 程序能直接看到的字段。
+- 开启 compressed class pointer 时，klass pointer 可能是 32-bit narrow klass。
+- `klass pointer` 指向 VM 内部的 `Klass` metadata。
+- 在 HotSpot 中，`Klass` metadata 通常在 Metaspace / VM metadata 区，不是普通 Java heap object。
+- Java heap 里也有 `java.lang.Class` mirror object，但对象 header 里的 klass pointer 指向的是 VM metadata，不是直接指向普通 Java 对象字段。
+
+Java GC 扫描对象的基本过程：
+
+```text
+1. GC 从 roots 找到一个 object pointer。
+2. 读取对象 header 里的 klass pointer。
+3. 通过 Klass metadata 知道：
+     - 这个对象是什么类型
+     - 对象大小是多少
+     - 哪些字段是 reference
+     - 哪些字段是 primitive
+4. 如果是普通对象：
+     按 Klass 中的 reference-field layout / oop map 扫描引用字段。
+5. 如果是 object array：
+     扫描数组元素，因为元素都是 reference。
+6. 如果是 primitive array：
+     不需要扫描元素，因为没有 reference。
+7. 如果是 moving GC：
+     对发现的 child object 做 mark/copy/forward，并更新 slot。
+```
+
+Java stack 扫描：
+
+- Java GC 不会把整个 native stack 当作对象乱扫。
+- 在 safepoint，JIT/interpreter 会提供 OopMap / stack map。
+- OopMap 告诉 GC：
+
+  ```text
+  当前 stack frame / register 里哪些位置是 object reference。
+  ```
+
+- 这和师兄代码中通过 stack bitmap 扫 Java frame 是同一类思想。
+
+Java 为什么可以这样简单：
+
+```text
+Java class 在编译/加载后，字段布局基本确定。
+对象 header 里有 Klass pointer。
+Klass metadata 里有 reference field 信息。
+所以 GC 可以通过 Klass 精确扫描。
+```
+
+师兄代码中的对应关系：
+
+```text
+HotSpot Klass pointer    <-> 师兄代码 ObjectHeader.class_table_index
+HotSpot Klass oop map    <-> 师兄代码 class table bitmap
+HotSpot stack OopMap     <-> 师兄代码 stack frame bitmap
+```
+
+区别是：
+
+```text
+HotSpot object header 里放 Klass*。
+师兄代码 object header 里放 class_table_index。
+但思想一样：对象自己带一个通向类型/布局 metadata 的入口。
+```
+
+JavaScript 对象处理：
+
+JavaScript 对象不是 class 固定字段布局。
+
+例如：
+
+```js
+let o = {};
+o.x = 1;
+o.y = {};
+delete o.x;
+o.z = "abc";
+```
+
+这个对象的属性集合可以运行时变化：
+
+```text
+{}
+{x}
+{x, y}
+{y}
+{y, z}
+```
+
+因此 JavaScript VM 通常使用 hidden class / shape / map：
+
+```text
+object -> shape/map/structure -> property layout
+```
+
+在 eJS 当前代码中：
+
+```text
+JSObject:
+  Shape *shape;
+  JSValue eprop[];
+
+Shape:
+  PropertyMap *pm;
+  n_embedded_slots;
+  n_extension_slots;
+
+PropertyMap:
+  property name -> index
+  n_props;
+  n_special_props;
+```
+
+含义：
+
+```text
+eprop 是真正存属性值的格子。
+Shape 告诉 VM 这个对象有多少格子、有没有 extension array。
+PropertyMap 告诉 VM 属性名对应哪个格子。
+```
+
+JavaScript 属性访问大致流程：
+
+```text
+读 o.x:
+
+1. 读取 o.shape。
+2. 在 shape->PropertyMap 里查 x。
+3. 得到 index。
+4. 读取 o.eprop[index]。
+```
+
+为了加速，VM 会使用 inline cache：
+
+```text
+如果上次看到的 shape 相同，
+就不用重新查 PropertyMap，
+直接读固定的 eprop[index]。
+```
+
+JavaScript GC 扫描 JSObject：
+
+```text
+1. 扫 object->shape，因为 shape 也是对象布局 metadata。
+2. 根据 shape / property map 判断哪些 eprop slot 需要扫描。
+3. 扫描这些 eprop slot 中的 heap reference。
+4. 如有 extension array，也扫描 extension array。
+```
+
+Java 和 JavaScript 最大区别：
+
+```text
+Java:
+  object header -> Klass metadata
+  Klass metadata 通常不是普通 heap object
+  字段布局稳定
+  GC 扫描直接用 Klass oop map / bitmap
+
+JavaScript:
+  JSObject -> Shape / Map metadata
+  Shape 在 eJS 里是 GC-managed heap object
+  对象布局可以运行时变化
+  GC 扫描需要动态 layout metadata
+```
+
+这对 GiY 的影响：
+
+```text
+师兄 Java-like 代码：
+  class_table_index 是稳定 metadata 入口。
+  GC 扫对象时直接拿 bitmap。
+
+当前 eJS GiY：
+  shape 是 heap object，可能在 young。
+  GiY forward shape 时只 reserve，不立即 copy。
+  如果直接读 forwarded shape，就可能读到未 materialize 的 old address。
+```
+
+所以当前 GiY 的问题不是“GC 不知道怎么扫对象”，而是：
+
+```text
+Java-like metadata 是稳定的 class bitmap。
+eJS metadata 是动态的 Shape / PropertyMap，而且 Shape 也参与 GC。
+GiY reserve-first 让这个 metadata 读取时机变得困难。
+```
+
+最简单总结：
+
+```text
+Java 对象 header 里有 Klass pointer。
+Klass 告诉 GC 哪些字段是引用。
+所以 Java GC 扫描对象时：object -> Klass -> reference bitmap。
+
+JavaScript 对象里有 shape pointer。
+Shape/PropertyMap 告诉 VM 属性怎么放在 eprop 里。
+所以 JavaScript GC 扫描对象时：object -> Shape -> PropertyMap -> eprop layout。
+
+当前 GiY 的麻烦来自：
+Shape 在 eJS 里也是 heap object，
+而 GiY 先 reserve 不立刻 materialize。
+```
+
+## 师兄代码中的 klass/class_table_index 位置，以及 JavaScript 对象生成流程
+
+结论：
+
+```text
+师兄代码里的 klass 等价物不是一个指向 young/old 对象区的指针。
+它主要表现为 ObjectHeader.class_table_index。
+这个值是“类元数据表”的索引，而不是 GC heap object pointer。
+```
+
+在师兄的 DPU runtime 中：
+
+```text
+object header:
+  gc_ptr
+  class_table_index
+  size
+
+class_table_index:
+  用来找到 class_table / class_info 里的类布局信息。
+  class_table / class_info 定义在 MRAM metadata 区。
+  它们不是 young 区对象，也不是 old 区对象。
+```
+
+相关代码：
+
+```text
+mydpulib/mram.c:
+  __class_table / __class_info 是 __mram_noinit 的全局 metadata。
+  class_table = __class_table;
+  class_info = __class_info;
+
+generational_wram_major_is_compact/generational_wram.c:
+  GC 扫描对象时读 header->class_table_index。
+  然后通过 class_table[class_table_index] 找字段数量和 reference bitmap。
+```
+
+如果开启 `CACHE_CLASS_TABLE`：
+
+```text
+class table 的一小份布局缓存会被 mram_read 到 WRAM。
+扫描时使用 wram_class_table。
+但是这仍然是 metadata cache，不是 young generation 对象。
+它也不是 minor GC 要复制或晋升的普通对象。
+```
+
+因此准确说：
+
+```text
+默认物理位置：MRAM metadata 区。
+可选快速缓存：WRAM metadata cache。
+逻辑位置：GC 管理的 young/old heap 之外。
+```
+
+这和 eJS JavaScript 对象不同。
+
+eJS 的 JavaScript object 结构：
+
+```text
+JSObject:
+  Shape *shape;
+  JSValue eprop[];
+
+Shape:
+  PropertyMap *pm;
+  n_embedded_slots;
+  n_extension_slots;
+
+PropertyMap:
+  HashTable *map;
+  prev;
+  shapes;
+  n_props;
+  n_special_props;
+  __proto__;
+```
+
+JavaScript 对象从生成开始的大致流程：
+
+```text
+1. VM 初始化阶段先创建内建 prototype、root property map、初始 shape。
+
+2. 创建普通对象 / array / function 时，VM 先选一个 Shape。
+   Shape 决定这个对象有多少 embedded property slot。
+
+3. allocate_jsobject 根据 shape->n_embedded_slots 分配 JSObject。
+   对象里保存 p->shape = os。
+   eprop[] 初始化为 JS_EMPTY。
+
+4. array/function 会额外写入 special props。
+   例如 array body、size、length。
+
+5. 读属性时：
+   JSObject -> shape -> property map -> hash table
+   property name 被查成 eprop index。
+   然后从 eprop[index] 或 extension array 读取值。
+
+6. 写已有属性时：
+   同样先找到 index，然后写入 eprop。
+   如果启用 remembered set，需要 write barrier。
+
+7. 新增属性时：
+   当前 PropertyMap 没有这个名字，就创建/复用 next PropertyMap。
+   再找/创建对应 Shape。
+   如果 embedded slots 不够，就分配 extension array。
+   最后把 object->shape 更新为新 Shape。
+
+8. GC 扫描 JSObject 时：
+   先扫描 shape。
+   再根据 shape / property map 判断 eprop 和 extension 里哪些位置需要扫描。
+```
+
+为什么这对 GiY 很重要：
+
+```text
+师兄 Java-like 代码:
+  class_table_index 是稳定 metadata 索引。
+  metadata 不跟着对象在 young/old 之间移动。
+  所以扫描对象时可以直接读 class bitmap。
+
+eJS JavaScript:
+  JSObject->shape 是一个 GC-managed heap pointer。
+  Shape / PropertyMap 自己也可能被复制、转发、移动。
+  对象字段布局不是编译期固定的，而是运行时 shape 决定的。
+
+所以 GiY 如果先 reserve shape 但不立刻 materialize，
+后续扫描 JSObject 时如果需要读 shape->pm / slot 信息，
+就可能遇到“地址已经 forward，但目标内容还没真正复制好”的问题。
+```
+
+## 师兄代码如何避免每次从 MRAM 读取 klass/class metadata
+
+问题判断：
+
+```text
+如果每次扫描对象都通过 class_table_index 去 MRAM 读 class_table / class_info，
+确实会慢。
+师兄代码也意识到了这个问题。
+```
+
+他的主要解决方法是 `CACHE_CLASS_TABLE`。
+
+核心思想：
+
+```text
+不要把完整 klass/class metadata 当成普通对象搬到 young/old。
+而是把 GC 扫描最常用、最小必要的信息提前压缩成一个 WRAM cache。
+```
+
+WRAM cache 的加载位置：
+
+```text
+mydpulib/trampoline.h:
+  如果定义了 CACHE_CLASS_TABLE，
+  每次 binary 运行前，从 MRAM 的 binary_class_table 中读取当前 binary 需要的 class cache。
+  读取到 WRAM 的 wram_class_table_cache。
+```
+
+cache 的结构大致是：
+
+```text
+wram_class_table_cache[0]:
+  cached_class_num
+
+wram_class_convert_table:
+  local class id -> global class id
+
+wram_class_table:
+  每个 local class id 两个 long:
+    wram_class_table[2 * id]     = field_num
+    wram_class_table[2 * id + 1] = reference bitmap
+```
+
+GC 扫描时：
+
+```text
+#ifdef CACHE_CLASS_TABLE
+  class_id = header->class_table_index;
+  field_num = wram_class_table[2 * class_id];
+  bitmap = wram_class_table[2 * class_id + 1];
+  header->class_table_index = wram_class_convert_table[class_id];
+#else
+  class_table_head = class_table[header->class_table_index];  // MRAM
+  field_num = class_table_head[CLASS_INFO_IDX_INSTANCE_SIZE] / 8;
+  bitmap_info = class_table_head[CLASS_INFO_IDX_BITMAP_INFO];
+  bitmap = class_table_head[bitmap_entry_index];
+#endif
+```
+
+所以：
+
+```text
+没有 CACHE_CLASS_TABLE:
+  扫描对象需要读 MRAM metadata。
+
+有 CACHE_CLASS_TABLE:
+  minor GC 扫描 young 对象时只读 WRAM 中的 field_num 和 bitmap。
+```
+
+为什么还需要 `wram_class_convert_table`：
+
+```text
+启用 cache 时，transpiler 对 NEW 传入的是 local class id。
+young 区对象 header 里保存 local class id。
+
+minor GC 扫描并复制到 old 区时，
+用 local class id 查 WRAM cache。
+在真正写入 old 区前，
+把 header->class_table_index 改回 global class id。
+```
+
+这样 old 区对象仍然保存全局 class id，后续 major GC 或跨 binary 场景还能用完整 MRAM metadata。
+
+这和 eJS GiY 的区别：
+
+```text
+师兄代码:
+  class metadata 静态、数量有限、编译/转换阶段可知。
+  GC 只需要 field_num + reference bitmap。
+  所以可以提前压缩到 WRAM cache。
+
+eJS JavaScript:
+  Shape / PropertyMap 是运行时动态创建的 heap object。
+  对象加属性会产生新的 PropertyMap / Shape。
+  Shape 还可能被 GC 移动。
+  所以不能简单提前做一个固定 class cache。
+```
+
+对 GiY 的启发：
+
+```text
+可以考虑为 JSObject 做一个类似的 shape scan descriptor cache。
+cache 中只放 GC 扫描需要的信息：
+  n_embedded_slots
+  n_extension_slots
+  n_props
+  n_special_props
+  extension 起点
+
+但必须解决：
+  Shape 是动态产生的。
+  Shape 可能被 young->old 复制。
+  cache entry 需要在 shape 创建/变化时维护。
+  reserve-first 策略下不能读未 materialize 的 forwarded shape。
+```
+
+## GiY 的 JavaScript 类型/Shape 问题带来多大性能影响
+
+问题定义：
+
+```text
+这里说的“类型问题”主要不是 JS 运行时类型判断本身，
+而是 JSObject 的 layout 依赖 Shape / PropertyMap。
+
+Cheney 原本可以用普通 visitor：
+  先处理 object->shape
+  再用 shape->pm 判断 embedded/extension slots
+
+GiY 因为 reserve-first：
+  shape 可能已经 forward/reserve，但 old 目标内容还没有真正 materialize
+  所以当前 GiY 对 JSObject 采用 conservative scan：
+    处理 p->shape
+    然后按对象 header size 扫全部 eprop slots
+```
+
+相关代码：
+
+```text
+ejsvm/GiY.cc:
+  giy_scan_jsobject_conservative()
+  按 hdr->size 算 slots，扫描全部 eprop。
+
+ejsvm/gc-visitor-inl.h:
+  原 visitor 会通过 Shape / PropertyMap 精确判断 embedded/extension。
+```
+
+现有数据不能把“类型问题”完全独立拆出来，因为 GiY 和 Cheney 同时还有其他差异：
+
+```text
+GiY:
+  reserve-first
+  edge log / function table slot set
+  local workspace 占用 young 空间
+  different copying strategy
+  conservative JSObject scan
+
+Cheney:
+  immediate copy
+  precise visitor
+  no GiY edge log
+```
+
+因此目前可以给出的结论是：
+
+```text
+类型/Shape 问题在 cache 行为上很明显；
+但在总运行时间上，目前不是最大的单独瓶颈。
+```
+
+已有 PMU 实验：
+
+```text
+数据目录：
+build.debug/benchmarks/out_gc_cache_miss_20260516_235434
+
+对象：
+  cache_cheney vs giy
+  cache/local workspace sizes: 640, 768, 896 KB
+  benchmarks: CD, Havlak, Richards, Storage
+  event groups: generic cache, L1D load, LLC load
+```
+
+GC window 内部结果：
+
+```text
+640KB:
+  GiY GC overhead: +3.85%
+  GiY GC cache misses: +88.54%
+  GC miss rate: Cheney 0.657% -> GiY 1.882%
+  GC MPKI: +95.93%
+
+768KB:
+  GiY GC overhead: +1.36%
+  GiY GC cache misses: +61.51%
+  GC miss rate: Cheney 0.777% -> GiY 1.609%
+  GC MPKI: +68.41%
+
+896KB:
+  GiY GC overhead: -0.20%
+  GiY GC cache misses: +47.13%
+  GC miss rate: Cheney 0.865% -> GiY 1.701%
+  GC MPKI: +51.85%
+```
+
+重要细节：
+
+```text
+GiY 的 GC references 比 Cheney 少 22% 到 34%，
+但是 cache misses 反而多 47% 到 89%。
+
+这说明 GiY 不是“访问更多所以 miss 更多”，
+而是访问模式/metadata locality 更差。
+Shape / PropertyMap / conservative eprop scan 是最可能来源之一。
+```
+
+whole-program PMU：
+
+```text
+generic cache misses:
+  GiY 比 Cheney 多约 22.9% 到 27.8%
+
+L1D load misses:
+  GiY 比 Cheney 多约 17.5% 到 22.0%
+
+LLC load misses:
+  GiY 比 Cheney 多约 84.0% 到 121.8%
+```
+
+但总时间变化不大：
+
+```text
+PMU run 总时间：
+  GiY 比 Cheney 慢约 2.4% 到 3.4%
+
+PMU run GC overhead：
+  GiY 从 -0.2% 到 +3.9%
+```
+
+另外，552KB fair full-suite 三轮实验显示：
+
+```text
+GiY minor GC 次数比 Cheney 多 13.55%。
+但 GiY GC overhead 总和比 Cheney 低约 25%。
+总运行时间三轮混合：
+  round1: GiY -1.56%
+  round2: GiY +2.21%
+  round3: GiY -1.93%
+```
+
+解释：
+
+```text
+类型/Shape 问题确实破坏 cache locality。
+但是当前 GiY 的 copy/reserve 流程在部分 benchmark 上减少了 GC 工作量，
+所以 wall-clock 上没有直接放大成很大的退化。
+
+换句话说：
+  cache 层面：问题很明显，GC miss 大约 1.5x 到 1.9x。
+  时间层面：目前只表现为几个百分点以内，甚至在部分公平实验中被 GiY 其他优势抵消。
+```
+
+如果要精确测“类型问题本身”的成本，需要做 ablation：
+
+```text
+方案 A：
+  GiY current conservative JSObject scan
+  vs
+  GiY + shape scan descriptor cache / materialized shape precise scan
+  其他参数完全不变。
+
+方案 B：
+  Cheney precise scan
+  vs
+  Cheney conservative JSObject scan
+  这样可以单独测 conservative scan 的代价。
+
+应增加 counters：
+  jsobject_scanned
+  eprop_slots_checked
+  precise_slots_expected
+  shape_edges
+  property_map_edges
+  extension_slots_scanned
+  old_or_immediate_slots_noop
+```
+
+当前可写进报告的保守表述：
+
+```text
+GiY 的 JavaScript Shape/Layout 问题目前主要表现为 cache locality 问题：
+GC-window cache misses 比 Cheney 高约 47% 到 89%，
+GC miss rate 约为 Cheney 的 2.0x 到 2.9x。
+
+但是它没有等比例转化为总运行时间退化；
+在现有 benchmark 中，GiY 总时间通常只在 Cheney 附近几个百分点内波动。
+```
+
+## 采用方案 A 测量 Shape/Layout 问题成本的合理成本
+
+方案 A：
+
+```text
+A0: 当前 GiY conservative JSObject scan
+A1: GiY + materialized/descriptor-based precise JSObject scan
+其他参数保持不变
+```
+
+测量目标：
+
+```text
+type_cost_time = A0_GC_overhead - A1_GC_overhead
+type_cost_misses = A0_GC_cache_misses - A1_GC_cache_misses
+extra_slots = conservative_eprop_slots - precise_eprop_slots
+```
+
+需要避免的误测：
+
+```text
+不能简单把 GiY 改成普通 precise visitor 就跑。
+原因是 GiY reserve-first 下 shape 可能已经 forwarded/reserved，
+但 old 目标内容还没有真正 materialize。
+
+如果直接读 shape->pm，可能读到不安全的 metadata。
+```
+
+推荐低风险 A1：
+
+```text
+新增编译开关，例如 GIY_JSOBJECT_PRECISE_SCAN=1。
+
+扫描 JSObject 时：
+  1. 先处理 p->shape edge。
+  2. 如果 shape 在 young 且已/将被 forwarded，则强制 materialize shape。
+  3. materialize shape->pm。
+  4. 用 shape/pm 信息做 precise scan。
+  5. 如果 shape/pm 无效，则 fallback 到 conservative scan。
+```
+
+这个 A1 测到的是：
+
+```text
+解决 Shape/Layout 问题后的净收益：
+  少扫描无用 eprop slot
+  但增加 shape/pm 提前 materialization 成本
+```
+
+它不是完全纯粹的理论成本，但非常接近真实可实现方案。
+
+需要增加 counters：
+
+```text
+jsobject_scans
+conservative_eprop_slots
+precise_eprop_slots
+skipped_eprop_slots
+shape_edges
+shape_materialize_attempts
+shape_materialize_young
+pm_materialize_attempts
+pm_materialize_young
+precise_scan_fallbacks
+extension_arrays_scanned
+extension_slots_scanned
+```
+
+合理实施成本：
+
+```text
+代码修改：
+  低风险 materialized precise scan: 2-4 小时
+  更完整 descriptor cache: 0.5-1.5 天
+
+推荐先不要直接做完整 descriptor cache。
+因为 descriptor cache 会改 Shape/PropertyMap 创建和维护路径，
+更像优化实现，不像纯测量。
+```
+
+合理运行成本：
+
+```text
+Smoke:
+  hello_world + giy_gc_probe + Bounce
+  约几分钟到 30 分钟
+
+Key benchmark:
+  CD, Havlak, Richards, Storage
+  A0/A1 各跑 3 次
+  约 2-5 小时
+
+PMU cache miss:
+  固定一个 workspace，例如 896KB
+  A0/A1 x 4 benchmarks x 3 event groups
+  约 5-6 小时
+
+Full suite:
+  12 benchmarks x A0/A1 x 3 rounds
+  约 6-8 小时
+```
+
+推荐顺序：
+
+```text
+第 1 步：
+  做 A1 materialized precise scan + counters。
+
+第 2 步：
+  smoke + key benchmarks。
+
+第 3 步：
+  如果 key benchmarks 显示 GC cache misses 明显下降，
+  再跑 PMU 和 full suite。
+
+第 4 步：
+  只有当 A1 有收益，再考虑实现真正 descriptor cache。
+```
+
+可接受的报告口径：
+
+```text
+如果 A1 比 A0 快：
+  当前 GiY 的 conservative JSObject scan/Shape 问题有实际时间成本。
+
+如果 A1 cache miss 降低但时间不变：
+  类型问题主要是 cache locality 问题，还没成为 wall-clock 主瓶颈。
+
+如果 A1 更慢：
+  当前问题存在，但“强制 materialize shape/pm”不是好解决方案；
+  应转向 descriptor cache。
+```
+
+## 2026-05-18 GiY JSObject precise scan 实装与测量
+
+目标：
+
+```text
+解决当前 GiY 在 JSObject 扫描时过度 conservative 的问题：
+  旧实现不读取 Shape/PropertyMap layout，
+  而是把 JSObject header size 后面的 eprop[] 全部当作可能引用扫描。
+
+这样安全，但会扫描很多不需要的 slot。
+```
+
+最终实装：
+
+```text
+文件：
+  ejsvm/GiY.cc
+  ejsvm/common.mk
+
+新增开关：
+  GIY_JSOBJECT_PRECISE_SCAN
+    0: 旧 conservative JSObject scan
+    1: 新 precise JSObject scan
+
+  GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES
+    默认 0。
+    可以显式设为 2048 等值，实验 Shape layout cache。
+```
+
+实现思想：
+
+```text
+1. 进入 JSObject scan 时，先保存 source-side p->shape。
+2. 处理 p->shape 这个 edge。
+3. 不从 forwarding 后的 old object 读取 layout。
+   而是从仍在 young/init/dram 中的 source-side Shape 读取 layout。
+4. 验证 Shape 和 PropertyMap 的对象类型。
+5. 如果 layout 合法，就只扫描：
+     special slots
+     pm->n_special_props 到 actual_embedded 之间的普通 property slots
+     extension property array edge
+6. 如果 layout 不合法，fallback 到旧 conservative scan。
+```
+
+为什么这样做：
+
+```text
+GiY 的 minor GC 是 reserve first / materialize later。
+如果扫描 p->shape 后立刻去读新的 old-side shape，
+这个 old-side copy 可能还没有 materialize。
+
+所以最小风险方案不是强制提前 copy Shape/PropertyMap，
+而是读取 source-side shape layout。
+这样不会破坏 GiY 的 reserve/copy 顺序。
+```
+
+验证：
+
+```text
+最终默认形态：
+  make -C build.debug ejsvm OPT_GC=giy CACHE_SIZE_KB=896 GIY_JSOBJECT_PRECISE_SCAN=1 -B -j4
+  成功。
+
+Smoke:
+  build.debug/benchmarks/out135_giy_jsobj_final_smoke
+  giy_gc_probe status=0
+  JSObject precise scan=1
+  JSObject scans=10964
+  JSObject precise=10964
+  JSObject fallbacks=0
+```
+
+第一组测量：A0 conservative vs A1 source-side precise scan
+
+```text
+目录：
+  build.debug/benchmarks/out133_giy_jsobj_precise_896_key
+
+配置：
+  CACHE_SIZE_KB=896
+  A0: GIY_JSOBJECT_PRECISE_SCAN=0
+  A1: GIY_JSOBJECT_PRECISE_SCAN=1
+  GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES=0
+
+CD:
+  wall time:
+    A0 486.634 sec
+    A1 483.499 sec
+    delta -0.64%
+
+  GC full time:
+    A0 15.402 sec
+    A1 16.948 sec
+    delta +10.04%
+
+  JSObject scan:
+    scans 64516021 -> 64516021
+    conservative slots 95978461 -> 0
+    precise slots 0 -> 85471147
+    skipped slots 0 -> 10507314
+    fallbacks 0
+
+  GC cache misses:
+    A0 13555354
+    A1 12896873
+    delta -4.86%
+
+  cache MPKI:
+    A0 0.201
+    A1 0.157
+    delta -21.89%
+
+  instructions:
+    A0 67368404290
+    A1 82091916019
+    delta +21.86%
+```
+
+解释：
+
+```text
+A1 确实减少了 cache miss 和 MPKI。
+但是每个 JSObject 都读取 Shape/PropertyMap layout，
+所以指令数明显增加，GC full time 没有改善。
+wall time 小幅下降，但幅度很小，不能认为是稳定性能收益。
+```
+
+第二组测量：layout cache 实验
+
+```text
+目录：
+  build.debug/benchmarks/out134_giy_jsobj_layout_cache_896
+
+配置：
+  CACHE_SIZE_KB=896
+  A0-cache:
+    GIY_JSOBJECT_PRECISE_SCAN=0
+    GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES=2048
+  A2-cache:
+    GIY_JSOBJECT_PRECISE_SCAN=1
+    GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES=2048
+
+说明：
+  A0-cache 也预留 96KB layout cache 空间。
+  所以 A0-cache vs A2-cache 的 local workspace 使用量公平。
+```
+
+giy_gc_probe：
+
+```text
+layout cache hits/misses:
+  A2-cache hits 10943
+  A2-cache misses 21
+  invalid 0
+
+cache misses:
+  A0-cache 3313
+  A2-cache 2570
+  delta -22.43%
+
+cache MPKI:
+  A0-cache 0.480
+  A2-cache 0.325
+  delta -32.29%
+```
+
+CD：
+
+```text
+layout cache hits/misses:
+  A2-cache hits 63294618
+  A2-cache misses 1341867
+  invalid 0
+
+wall time:
+  A0-cache 483.815 sec
+  A2-cache 481.196 sec
+  delta -0.54%
+
+GC full time:
+  A0-cache 16.450 sec
+  A2-cache 16.556 sec
+  delta +0.64%
+
+cache misses:
+  A0-cache 12750843
+  A2-cache 13355433
+  delta +4.74%
+
+instructions:
+  A0-cache 73406934594
+  A2-cache 77168575189
+  delta +5.12%
+```
+
+解释：
+
+```text
+layout cache 对 micro benchmark 有帮助。
+但是 CD 中 96KB local workspace cache 会占用 young/local budget，
+并且 cache table 本身也会被频繁访问。
+
+结果是：
+  wall time 只有 -0.54%，基本接近噪声；
+  GC full time 略增；
+  cache misses 反而增加。
+
+因此 layout cache 不适合作为默认开启方案。
+它保留为实验开关，默认 GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES=0。
+```
+
+当前结论：
+
+```text
+最合理的默认方案：
+  使用 source-side precise JSObject scan。
+  不默认启用 layout cache。
+
+能确认的问题：
+  旧 GiY 的 conservative JSObject scan 确实会扫描不必要 slot。
+  precise scan 能降低 GC cache miss / MPKI。
+
+还不能确认：
+  这个优化能稳定降低 wall-clock 时间。
+  当前 CD 上 wall time 只小幅变化，GC time 没有变好。
+
+后续更有价值的方向：
+  不是简单扩大 layout cache，
+  而是寻找更轻量的 shape descriptor / slot bitmap 表示，
+  或者只对高收益 Shape 启用 precise scan。
+```
+
+## 2026-05-18 GiY JSObject cache miss 修复迭代：A5-A10
+
+目标：
+
+```text
+继续解决 GiY 的 JSObject 扫描导致 cache miss / GC 性能不理想的问题。
+要求不是只提出方案，而是实现、测试，失败后继续迭代。
+```
+
+本轮代码改动：
+
+```text
+文件：
+  ejsvm/GiY.cc
+  ejsvm/common.mk
+
+新增/保留的实验开关：
+  GIY_JSOBJECT_PRECISE_SCAN
+  GIY_JSOBJECT_PRECISE_ARRAY
+  GIY_JSOBJECT_SHAPE_ONLY_SCAN
+  GIY_JSOBJECT_TYPE_AWARE_SCAN
+  GIY_JSOBJECT_TYPE_AWARE_ARRAY
+  GIY_JSOBJECT_TYPE_AWARE_BOXED_PRIMITIVE
+  GIY_JSOBJECT_ARRAY_FAST_PATH
+  GIY_JSOBJECT_ARRAY_SKIP_SIZE
+  GIY_JSOBJECT_PRECISE_MIN_SLOTS
+  GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES
+
+最终较合理的方案：
+  GIY_JSOBJECT_ARRAY_SKIP_SIZE=1
+
+思想：
+  JavaScript Array 的 eprop[0] 是 size 槽。
+  它不是 GC 需要追踪的对象引用。
+  旧 GiY conservative JSObject scan 会把 eprop[0] 也当作普通 JSValue 扫描。
+  A10 对 CELLT_ARRAY 增加专用扫描路径：
+    仍然扫描 shape；
+    扫描 eprop[1] 以后所有槽；
+    跳过 eprop[0] size；
+    不读取 Shape / PropertyMap；
+    不占用额外 GC Local Workspace。
+```
+
+为什么放弃前面的方案：
+
+```text
+A5 selective type-aware：
+  只对少数类型做 type-aware，但仍有额外通用分派成本。
+  Storage 结果：
+    total 331.697s
+    GC overhead 42.708s
+    instructions 268,413,274,040
+  相比 A0-current，GC 和 instructions 仍退化。
+
+A6 selective dispatch：
+  把类型选择提前到 giy_process_young_node。
+  Storage 结果：
+    total 362.702s
+    GC overhead 42.768s
+    instructions 267,352,840,747
+  cache miss 降低，但 GC/instructions 仍不理想。
+
+A7 non-array precise + layout cache：
+  512-entry layout cache 占用 12KB GC Local Workspace。
+  Storage 结果：
+    minor GC 108582，而 A0 是 106281
+    GC overhead 44.032s
+  结论：
+    layout cache 即使缩小，也会吃掉 young/local budget，增加 minor GC。
+    不适合作为默认方案。
+
+A8 shape-only non-array：
+  不读 PropertyMap，不占 layout cache。
+  但 Storage/CD 中 precise count 都是 0。
+  说明该 workload 中命中的非 Array precise scan 很少/没有。
+  结果更像代码布局/分支影响，不是真正解决扫描问题。
+
+A9 array fast path only：
+  只把 Array 提前走 conservative fast path。
+  Storage 结果：
+    total 334.810s
+    GC overhead 45.812s
+    instructions 294,152,167,568
+  明确失败。
+```
+
+A10 测试结果：
+
+```text
+二进制：
+  build.debug/ejsvm_giy_jsobj_a10_array_skip_size_896
+
+编译：
+  make -C build.debug ejsvm OPT_GC=giy CACHE_SIZE_KB=896 GIY_JSOBJECT_ARRAY_SKIP_SIZE=1 -B -j4
+
+短测试 giy_gc_probe：
+  JSObject scans        10964
+  type-aware(Array)     10839
+  conservative          125
+  skipped slots         10839
+  cache-misses          1655
+  instructions          6,610,950
+
+Storage：
+  A0-current r2:
+    total               331.238s
+    GC overhead         41.921s
+    GC CPU              41.838s
+    minor GC            106281
+    forward operations  1,091,998,221
+    cache-misses        1,473,720
+    instructions        265,165,742,901
+
+  A10:
+    total               333.614s
+    GC overhead         42.161s
+    GC CPU              41.871s
+    minor GC            106281
+    forward operations  1,091,998,221
+    skipped slots       546,097,411
+    cache-misses        1,479,382
+    instructions        260,427,802,730
+
+  判断：
+    minor GC / forward operations 完全相同，说明 workspace 公平。
+    GC CPU 基本持平。
+    instructions 下降约 1.8%。
+    total time 稍慢，可能包含 wall-time 抖动。
+    cache miss 与 A0 r2 接近，但低于 A0 r1。
+
+CD：
+  A0-current:
+    total               487.230s
+    GC overhead         15.305s
+    GC CPU              15.072s
+    GC core             8.964s
+    minor GC            115688
+    forward operations  162,299,040
+    cache-misses        13,090,644
+    instructions        67,368,403,117
+
+  A10:
+    total               485.309s
+    GC overhead         15.036s
+    GC CPU              14.892s
+    GC core             8.948s
+    minor GC            115688
+    forward operations  162,299,040
+    skipped slots       10,452,756
+    cache-misses        13,051,193
+    instructions        67,425,946,795
+
+  判断：
+    total time 下降约 0.4%。
+    GC overhead 下降约 1.8%。
+    GC CPU 下降约 1.2%。
+    cache miss 小幅下降。
+    instructions 基本持平。
+```
+
+当前结论：
+
+```text
+A10 是当前最合理的低风险修复。
+
+它不是完整的 Shape/PropertyMap precise scan。
+它是针对 JS Array 热路径的专用精确化：
+  跳过必然非引用的 size 槽；
+  不读取 Shape/PropertyMap；
+  不增加 GC Local Workspace；
+  不改变 minor GC 次数；
+  在 CD 上同时改善 GC time 和 cache miss；
+  在 Storage 上保持 GC CPU 基本不变，并降低 instructions。
+
+因此：
+  不推荐默认开启 layout cache。
+  不推荐默认开启通用 type-aware JSObject scan。
+  可以把 GIY_JSOBJECT_ARRAY_SKIP_SIZE=1 作为下一步主要候选。
+
+如果还要继续提高 cache miss：
+  应该考虑把“对象扫描描述符”提前放到对象头或 allocation-site metadata，
+  避免 GC 扫描时读取 Shape/PropertyMap。
+  这比在 GC Local Workspace 里放 layout cache 更符合 GiY 设计。
+```
+
+验证：
+
+```text
+已运行：
+  make -C build.debug ejsvm OPT_GC=giy CACHE_SIZE_KB=896 GIY_JSOBJECT_ARRAY_SKIP_SIZE=1 -B -j4
+  build.debug/ejsvm_giy_jsobj_a10_array_skip_size_896 giy_gc_probe.sbc
+  build.debug/ejsvm_giy_jsobj_a10_array_skip_size_896 Storage.sbc
+  build.debug/ejsvm_giy_jsobj_a10_array_skip_size_896 CD.sbc
+  make -C build.debug ejsvm OPT_GC=giy CACHE_SIZE_KB=896 -B -j4
+
+结果目录：
+  build.debug/benchmarks/out139_giy_jsobj_typeaware_selective_896
+```
+
+## 2026-05-18 当前最好 GiY 方案与 Cheney 差距简表
+
+用户问题：
+
+```text
+简单说明当前最好的方案是什么，怎么做的，和 Cheney GC 差多少。
+```
+
+当前最好方案：
+
+```text
+A10: GIY_JSOBJECT_ARRAY_SKIP_SIZE=1
+
+做法：
+  JS Array 的 eprop[0] 是 size，不是 GC 引用。
+  旧 GiY conservative scan 会把它也当 JSValue 扫。
+  A10 对 CELLT_ARRAY 做专用扫描：
+    扫 shape；
+    跳过 eprop[0]；
+    从 eprop[1] 开始扫描 body/length/其他槽；
+    不读 Shape / PropertyMap；
+    不使用 layout cache；
+    不增加 GC Local Workspace。
+```
+
+相对旧 GiY 的直接效果：
+
+```text
+Storage:
+  instructions 265.17B -> 260.43B，下降约 1.8%
+  GC CPU 基本持平：41.838s -> 41.871s
+  skipped slots: 546,097,411
+
+CD:
+  total 487.230s -> 485.309s，约快 0.4%
+  GC overhead 15.305s -> 15.036s，约快 1.8%
+  cache misses 13,090,644 -> 13,051,193，小幅下降
+  skipped slots: 10,452,756
+```
+
+和已有 Cheney 对照的差距：
+
+```text
+注意：
+  A10 还没有重新跑完整 13 benchmark Cheney 同轮对照。
+  下面 Cheney 数字来自已有 896KB cache_cheney 对照矩阵。
+
+已有完整矩阵中，896KB:
+  GiY total      6661.375s
+  Cheney total   6946.021s
+  GiY 比同 size Cheney 快 284.646s，约 4.10%
+
+但最优点比较:
+  best Cheney = 640KB, 6585.095s
+  best GiY    = 768KB, 6635.928s
+  GiY 比 best Cheney 慢 50.833s，约 0.77%
+
+A10 单项与已有 896KB Cheney 粗略比较:
+  Storage:
+    A10 333.614s vs Cheney 340.908s
+    A10 快约 7.294s，约 2.14%
+    GC: A10 42.161s vs Cheney 51.761s，A10 GC 更快
+
+  CD:
+    A10 485.309s vs Cheney 492.660s
+    A10 快约 7.351s，约 1.49%
+    GC: A10 15.036s vs Cheney 11.981s，A10 GC 仍更慢
+```
+
+一句话结论：
+
+```text
+当前最好的方案是 A10 Array skip-size。
+它是低风险、小改动、不占 workspace 的优化。
+它让 GiY 更接近 Cheney，并在部分 896KB 单项上已经快于已有 Cheney 对照；
+但如果拿各自最优 workspace 的完整 benchmark 比，GiY 仍大约慢 0.77%，还没有稳定全面超过 Cheney。
+```
+
+补充：GiY 最好 size 与 Cheney size 对比：
+
+```text
+基于完整 13 benchmark workspace-size 矩阵：
+
+GiY:
+  best size = 768KB
+  total = 6635.928s
+
+Cheney:
+  best size = 640KB
+  total = 6585.095s
+
+best GiY vs best Cheney:
+  GiY 慢 50.833s
+  约慢 0.772%
+
+同 size 比较：
+  512KB: GiY 慢 162.843s，约慢 2.456%
+  640KB: GiY 慢 144.672s，约慢 2.197%
+  768KB: GiY 快 0.399s，约快 0.006%，基本打平
+  896KB: GiY 快 284.646s，约快 4.098%
+
+所以：
+  有 GiY 比 Cheney 快的 size：768KB 和 896KB。
+  其中 768KB 基本可以看成打平；
+  896KB 是 GiY 明显快于同 size Cheney 的配置。
+  但从“各自最优配置”看，Cheney 640KB 仍比 GiY 768KB 快约 0.77%。
+```
+
+## 2026-05-18 896KB 参数详细分析
+
+空间结构：
+
+```text
+GiY 896KB GC Local Workspace:
+  RSet:                192.00 KB
+  init objects:         19.76 KB
+  young before aux:    684.24 KB
+  GiY stack:            85.52 KB
+  FT slot set:          32.00 KB
+  aux total:           117.52 KB
+  ordinary Young:      566.72 KB
+
+Cheney 896KB:
+  RSet:                192.00 KB
+  init objects:         19.76 KB
+  FT slot set:          85.52 KB
+  ordinary Young:      約 598.71 KB
+
+差异：
+  Cheney 的 ordinary Young 比 GiY 多约 32KB。
+  原因是 GiY 需要额外的 traversal stack。
+  这是算法结构差异，不是实验不公平。
+```
+
+完整 13 benchmark 聚合：
+
+```text
+GiY 896KB:
+  total:     6661.375s
+  GC:         114.211s
+  minor GC: 1,114,512
+
+Cheney 896KB:
+  total:     6946.021s
+  GC:         112.801s
+  minor GC: 1,044,731
+
+差值:
+  total: GiY 快 284.646s，约 4.098%
+  GC:    GiY 慢 1.410s，约 1.25%
+  minor: GiY 多 69,781 次，约 6.68%
+
+解释：
+  896KB 下 GiY 总时间明显赢同 size Cheney。
+  但 GC overhead 并没有赢，minor GC 次数也更多。
+  所以 896KB 的胜利不是“GC 全指标压倒 Cheney”，而是 workload 总执行时间层面的胜利。
+```
+
+逐 benchmark 总时间：
+
+```text
+GiY 赢 11/13：
+  Richards:    快 266.488s，约 13.37%
+  CD:          快 15.442s，约 3.13%
+  Bounce:      快 14.047s，约 4.30%
+  Storage:     快 13.401s，约 3.93%
+  Permute:     快 13.273s，约 1.62%
+  Queens:      快 6.727s，约 3.05%
+  Mandelbrot:  快 4.993s，约 1.24%
+  Towers:      快 3.641s，约 1.10%
+  Sieve:       快 3.525s，约 1.48%
+  NBody:       快 2.760s，约 0.43%
+  List:        快 2.314s，约 1.24%
+
+GiY 输 2/13：
+  Havlak:      慢 58.393s，约 7.13%
+  DeltaBlue:   慢 3.572s，约 2.74%
+
+关键判断：
+  896KB 的总优势很大程度来自 Richards。
+  如果去掉 Richards，GiY 对 Cheney 的优势会小很多。
+  Havlak 仍然是主要反例。
+```
+
+逐 benchmark GC：
+
+```text
+GiY GC 明显赢：
+  Storage: GiY GC 比 Cheney 少 10.412s
+
+GiY GC 明显输：
+  Havlak:     多 6.364s
+  CD:         多 2.138s
+  NBody:      多 1.605s
+  Mandelbrot: 多 1.504s
+
+解释：
+  GiY 在 Storage 上的 GC 优势很清楚。
+  但在 CD/Havlak/NBody/Mandelbrot 上，Cheney 的 immediate copy + linear scavenge 仍然有优势。
+```
+
+cache miss 896KB 对照：
+
+```text
+whole-program generic:
+  Cheney miss rate: 8.265%
+  GiY miss rate:    11.854%
+  GiY misses:       +22.892%
+
+L1D load:
+  Cheney miss rate: 2.174%
+  GiY miss rate:    2.543%
+  GiY misses:       +21.969%
+
+LLC load:
+  Cheney miss rate: 2.742%
+  GiY miss rate:    6.677%
+  GiY misses:       +121.822%
+
+GC-window:
+  Cheney GC miss rate: 0.865%
+  GiY GC miss rate:    1.701%
+  GiY GC misses:       +47.126%
+  GiY GC refs:         -25.199%
+  GiY GC MPKI:         +51.853%
+
+解释：
+  896KB 下 GiY 总时间可以赢 Cheney，
+  但 cache miss rate 没有赢。
+  GiY 的访问次数/引用次数有时更少，但 miss rate 更高，尤其 LLC-load 很差。
+```
+
+A10 补充：
+
+```text
+A10 = GIY_JSOBJECT_ARRAY_SKIP_SIZE=1。
+它只在 Storage/CD 做了单项验证，还没有重新完整跑 13 benchmark。
+
+Storage:
+  A10 333.614s vs 已有 Cheney 896KB 340.908s
+  A10 快约 7.294s，约 2.14%
+
+CD:
+  A10 485.309s vs 已有 Cheney 896KB 492.660s
+  A10 快约 7.351s，约 1.49%
+
+注意：
+  这是跨实验结果的粗略比较。
+  如果要发表/汇报为最终结论，需要重新跑 A10 的完整 13 benchmark 和 Cheney 同轮对照。
+```
+
+896KB 总结：
+
+```text
+896KB 是 GiY 相对同 size Cheney 最明显占优的配置。
+总时间 GiY 快约 4.10%。
+但是 GC overhead 仍略慢，minor GC 更多，cache miss rate 也更差。
+
+因此 896KB 的正确表述应该是：
+  GiY 在 896KB 下端到端性能优于同 size Cheney；
+  但 GiY 的 GC/cache locality 还没有全面优于 Cheney；
+  当前优势主要来自 workload-level 表现，特别是 Richards 和 Storage；
+  Havlak 仍是最重要的反例。
+```
+
+## 2026-05-18 GC 论文中应该比较 total time 还是 GC time
+
+用户问题：
+
+```text
+作为 GC 研究者，在论文中比较时到底应该比较总运行时间还是 GC 运行时间？
+世界上其他 GC 论文一般比较什么？
+```
+
+结论：
+
+```text
+正式论文里不能只比较 GC time。
+最重要的主结果通常应该是 end-to-end total execution time / throughput。
+
+原因：
+  用户和 VM 最终感受到的是程序总运行时间。
+  GC 优化可能减少 GC time，但增加 mutator cost、write barrier、cache pollution、memory footprint。
+  反过来，也可能 GC time 略差，但 total time 更好。
+  所以 total time 才是最终性能结论。
+
+GC time 是必须报告的辅助指标。
+它用来解释：
+  collector 本身是否更快；
+  minor/major GC 是否减少；
+  pause time 是否改善；
+  优化收益是否真的来自 GC，而不是 benchmark noise。
+```
+
+推荐论文指标层级：
+
+```text
+一级主指标：
+  total execution time / throughput
+  normalized runtime
+  geometric mean / median across benchmarks
+
+二级 GC 指标：
+  total GC time / GC overhead
+  core GC time, e.g. scavenge/materialize/copy/scan
+  number of collections
+  average/max/percentile pause time
+
+三级解释指标：
+  allocation amount
+  promoted/copied bytes
+  memory footprint / heap size / workspace size
+  cache miss rate / LLC miss / MPKI
+  barrier cost / remembered-set cost
+```
+
+对 GiY 论文的建议：
+
+```text
+应该同时给两种公平比较：
+
+1. Same-budget comparison
+   Cheney / GiY / GiYOL 使用相同 GC Local Workspace total。
+   这是回答：
+     在相同 cache/workspace 预算下，谁更好？
+
+2. Best-tuned comparison
+   各自选择自己的最佳 workspace size。
+   这是回答：
+     每个 collector 都调到最佳后，谁更好？
+
+你的当前数据应该这样写：
+  same 896KB:
+    GiY total time 比 Cheney 快约 4.10%。
+    但 GiY GC overhead 略慢，cache miss rate 更差。
+
+  best size:
+    best GiY = 768KB, 6635.928s。
+    best Cheney = 640KB, 6585.095s。
+    GiY 仍慢约 0.77%。
+
+因此论文中不能只说“GiY 快于 Cheney”。
+更严谨的说法是：
+  GiY 在较大 local workspace, especially 896KB, 可以取得更好的 end-to-end time；
+  但在各自最佳配置下，目前 GiY 还没有稳定超过 Cheney；
+  GC/cache 指标显示 locality 仍是 GiY 的主要改进空间。
+```
+
+一句话原则：
+
+```text
+论文主图放 total time / normalized runtime。
+GC time、pause time、cache miss、minor GC count 放在分析图里解释原因。
+如果 claim 是 low-latency GC，则 pause time 是主指标之一。
+如果 claim 是 cache-local GC，则必须同时报告 cache counters 和 total time。
+```
+
+2026-05-18 补充调查：size 越大 GiY 是否越占优势，以及 GC 时间更长但 business 时间更短的原因
+
+本次没有修改 GC 代码，只做数据和代码路径调查。
+
+使用的数据：
+- `build.debug/benchmarks/out_cache_cheney_cache_size_20260515_115946/compare_giy_vs_cache_cheney.csv`
+- `build.debug/benchmarks/out_giy_cache_size_20260515_004640/summary.csv`
+- `build.debug/benchmarks/out_cache_cheney_cache_size_20260515_115946/summary.csv`
+- `build.debug/benchmarks/out_gc_cache_miss_20260516_235434/compare_giy_vs_cache_cheney_cache_miss.csv`
+- `build.debug/benchmarks/out_gc_cache_miss_20260516_235434/compare_giy_vs_cache_cheney_gc_pmu.csv`
+- `build.debug/benchmarks/out29_giy_current_full/business_non_gc_delta_investigation.md`
+- `build.debug/benchmarks/out29_giy_current_full/deep_business_gap_causal_investigation.md`
+
+结论 1：相对 Cheney，GiY 的确随着 total GC Local Workspace 变大而更有优势。
+
+全 benchmark 汇总：
+
+```text
+size  GiY total  Cheney total  GiY-Cheney  GiY GC  Cheney GC  business diff  minor GC diff
+512   6793.957   6631.114      +162.843s   165.650 143.579    +140.772s      +374290
+640   6729.767   6585.095      +144.672s   138.876 126.606    +132.402s      +185154
+768   6635.928   6636.327      -0.399s     121.671 117.653    -4.417s        +107768
+896   6661.375   6946.021      -284.646s   114.211 112.801    -286.056s      +69781
+```
+
+但是这个结论要加两个限制：
+- GiY 自己的最佳 total time 是 768KB，不是 896KB。
+- 896KB 的 4.10% 大胜主要被 Richards 放大。896KB 中 Richards 一项贡献了 `-266.488s` total diff 和 `-266.429s` business diff。
+
+去掉 Richards 后，896KB 仍然是 GiY 更快，但幅度只有：
+
+```text
+GiY 4934.887s vs Cheney 4953.045s
+diff = -18.158s = -0.367%
+business diff = -19.627s
+```
+
+Richards 896KB 的 Cheney full-matrix 时间是 `1992.976s`，但后续 cache-miss/PMU 三次 Cheney 896KB Richards 是 `1744.968s / 1733.641s / 1763.784s`。因此 full-matrix 里的 Cheney 896KB Richards 很可能是异常慢样本，不能把 4.10% 当成稳定机制收益。若用 PMU 中 Richards 的均值替代，896KB 的总体优势大约只剩 `0.49%`。
+
+结论 2：size 变大后 GiY 更占优势，最可信的结构性原因是“固定额外空间开销被摊薄”。
+
+GiY 在 ordinary young 之外还要占用 GC Local Workspace 内部空间：
+- RSet values/buffer/hash 在 `giy_rset.cc` 中占用 cache/local workspace。
+- GiY traversal stack 和 FT slot set 在 `GiY.cc` 的 `giy_bind_stack_to_cache_impl` 中从 `cache_space.end` 向下预留。
+- 当前 GiY 比 Cheney 额外少了约 32KB ordinary young，这个 32KB 在小 workspace 下影响很大，在大 workspace 下影响变小。
+
+估算 active young：
+
+```text
+size  Cheney active young est.  GiY active young  GiY capacity penalty
+512   262.71KB                  230.72KB          13.87%
+640   374.71KB                  342.72KB          9.33%
+768   486.71KB                  454.72KB          7.04%
+896   598.71KB                  566.72KB          5.64%
+```
+
+实际 minor GC excess 与这个容量惩罚方向一致：
+
+```text
+size  observed GiY minor GC excess
+512   +15.76%
+640   +11.15%
+768   +8.41%
+896   +6.68%
+```
+
+因此 GiY 的劣势随 size 增大而缩小，是可信的。
+
+结论 3：GiY 的 GC total time 反而更长，不是因为每次 GC 都更慢，而主要是因为 minor GC 次数更多。
+
+全 benchmark 加权平均 pause：
+
+```text
+size  GiY avg pause  Cheney avg pause  GiY pause diff  GiY count diff  GiY total GC diff
+512   0.0603ms       0.0605ms          -0.34%          +15.76%         +15.37%
+640   0.0752ms       0.0762ms          -1.31%          +11.15%         +9.69%
+768   0.0875ms       0.0918ms          -4.60%          +8.41%          +3.42%
+896   0.1025ms       0.1080ms          -5.09%          +6.68%          +1.25%
+```
+
+解释：
+- GiY 每次 minor GC 平均并不比 Cheney 慢，甚至略短。
+- 但 GiY ordinary young 更小，所以触发 minor GC 更多。
+- `total GC time = GC count * average pause`，因此目前 full matrix 中 GiY total GC time 仍略高。
+- 随着 workspace 变大，GC count gap 快速缩小，所以 GC time gap 也从 `+22.071s` 缩到 `+1.410s`。
+
+结论 4：GiY business time 更短，不能简单解释成 cache miss 更低。
+
+计时代码确认：
+- `giy_dram_manager.cc` 和 `cache_dram_manager.cc` 都是 `business_wall = total_elapsed_wall - total_gc_full_wall`。
+- 所以 business time 不是纯 JS mutator 语义时间，而是所有非 GC window 的 wall time，包括 write barrier、allocation fast path、metadata/cache 行为和噪声。
+
+cache-miss/PMU 数据反而显示当前 GiY cache miss 更差：
+
+```text
+size  generic miss rate          L1D-load miss rate        LLC-load miss rate
+640   Cheney 9.599%, GiY 14.441% Cheney 2.127%, GiY 2.468% Cheney 2.573%, GiY 7.161%
+768   Cheney 8.971%, GiY 12.499% Cheney 2.146%, GiY 2.435% Cheney 2.476%, GiY 5.787%
+896   Cheney 8.265%, GiY 11.854% Cheney 2.174%, GiY 2.543% Cheney 2.742%, GiY 6.677%
+```
+
+GC-window PMU 也显示 GiY GC miss rate 更高：
+
+```text
+size  Cheney GC miss rate  GiY GC miss rate
+640   0.657%               1.882%
+768   0.777%               1.609%
+896   0.865%               1.701%
+```
+
+因此不能说“GiY business time 更短是因为 GiY cache miss 更低”。更合理的解释是：
+- 之前的 `out31/out33` 实验验证过：如果启用 `GIY_RSET_INDEX_FAST=true`，可以明显减少以前 GiY write barrier 中的线性扫描病灶；但本次 size matrix 的 GiY build log 没有看到 `-DGIY_RSET_INDEX_FAST=1`，所以不能把本次 896KB business 优势归因于 index-fast。
+- 大 workspace 降低 GC 频率，也减少 GC 对 runtime metadata、inline cache、shape/alloc-site 状态的扰动。
+- 896KB aggregate business 优势主要来自 Richards 的 Cheney 异常慢结果；去掉 Richards 后，business 优势只剩约 `19.6s / 12 benchmarks`。
+
+结论 5：最可信的表述。
+
+```text
+GiY 相对 Cheney 随 local workspace size 增大而更有优势，这个趋势可信。
+主要原因不是当前 GiY 的 cache miss 更好，而是 GiY 的固定 local-workspace 额外开销在大 size 下被摊薄，ordinary young 容量劣势下降，minor GC 次数差距下降。
+
+当前 GiY 的 total GC time 略长，是因为 minor GC 次数仍更多；每次 GC 的平均 pause 实际上略短。
+
+当前 896KB 的 business time 明显更短，不能完全当作稳定算法收益；它被 Richards 的 Cheney 异常慢样本强烈放大。去掉 Richards 或用后续 PMU Richards 均值修正后，GiY 仍略快，但优势大约只有 0.4%-0.5% 量级。
+```
+
+后续如果要把这个结论写进论文，应补做：
+- 896KB Richards 单独重复多次，确认是否异常。
+- phase-level PMU：reserve roots、reserve RS、young traverse/materialize、patch roots/RS 分开测。
+- same total workspace 和 same ordinary young capacity 两组都测，分别回答“总预算公平”和“实际 young 容量公平”两个问题。
+
+2026-05-18 补充实验：GiY/Cheney 性能差距的因果归因
+
+用户要求：
+- 从当前角度彻底找出性能差距原因。
+- 反复做实验，直到真正确信原因为止。
+
+本次实验输出目录：
+- `build.debug/benchmarks/out_perf_gap_causal_20260518_115744`
+- 生成汇总：`build.debug/benchmarks/out_perf_gap_causal_20260518_115744/causal_summary.csv`
+
+本次跑过的实验：
+
+```text
+1. cheney896_richards
+   OPT_GC=cache_cheney CACHE_SIZE_KB=896
+   benchmark=Richards
+   目的：验证旧 full matrix 中 Cheney896 Richards=1992.976s 是否异常。
+
+2. giy896_default_havlak
+   OPT_GC=giy CACHE_SIZE_KB=896
+   benchmark=Havlak
+   目的：当前同轮 GiY default baseline。
+
+3. cheney896_havlak
+   OPT_GC=cache_cheney CACHE_SIZE_KB=896
+   benchmark=Havlak
+   目的：当前同轮 Cheney baseline。
+
+4. cheney860_havlak
+   OPT_GC=cache_cheney CACHE_SIZE_KB=860
+   benchmark=Havlak
+   目的：把 Cheney ordinary young 降到接近 GiY896，反向验证容量因素。
+
+5. giy933_havlak
+   OPT_GC=giy CACHE_SIZE_KB=933
+   benchmark=Havlak
+   目的：把 GiY ordinary young 提到接近 Cheney896，正向验证容量因素。
+
+6. giy896_rsetfast_havlak
+   OPT_GC=giy CACHE_SIZE_KB=896 GIY_RSET_INDEX_FAST=true
+   benchmark=Havlak
+   目的：验证 remembered-set value 更新路径是否是 business gap 主因。
+
+7. giy896_precise_havlak
+   OPT_GC=giy CACHE_SIZE_KB=896 GIY_JSOBJECT_PRECISE_SCAN=1
+   benchmark=Havlak
+   目的：验证 JSObject precise scan 是否能解释/解决 Havlak gap。
+
+8. giy896_wbprofile_havlak
+   OPT_GC=giy CACHE_SIZE_KB=896 GIY_WB_PROFILE=true
+   benchmark=Havlak
+   目的：直接统计 GiY write barrier / RSet 线性扫描步数。
+```
+
+结论 1：旧 896KB aggregate 的大胜确实被 Richards 异常放大。
+
+旧 full matrix：
+
+```text
+Cheney896 Richards = 1992.976s
+GiY896 Richards    = 1726.488s
+Richards alone made GiY look faster by 266.488s.
+```
+
+本次重跑：
+
+```text
+Cheney896 Richards = 1737.234s
+business           = 1737.052s
+GC                 = 0.182s
+minor GC           = 2131
+```
+
+这个结果和之前 PMU 三次 Cheney896 Richards `1744.968 / 1733.641 / 1763.784s` 一致，和旧 `1992.976s` 不一致。因此：
+
+```text
+896KB 的 GiY 4.10% aggregate win 不能当作稳定机制收益。
+用本次 Richards 修正旧 full matrix 后，GiY896 的总体优势约为 0.43%。
+如果同时用 PMU 的 GiY Richards 均值修正，优势约为 0.33%。
+```
+
+结论 2：Havlak 当前同轮差距主要是 business-side，不是 GC time。
+
+当前同轮 baseline：
+
+```text
+config             total      business   GC       minor GC  allocations   WB calls
+Cheney896 Havlak   753.030s   718.707s   34.323s  219201    1.828B        116.642M
+GiY896 default     887.230s   845.507s   41.724s  239914    2.030B        145.691M
+```
+
+差距：
+
+```text
+GiY default - Cheney896:
+  total    +134.200s
+  business +126.800s
+  GC       +7.401s
+
+business 解释 94.49% 的 total gap。
+```
+
+因此 Havlak 不是“GiY GC 本身慢一点”这么简单，而是 GiY 默认配置在非 GC window 中有很大的额外成本。
+
+结论 3：capacity / ordinary young 不是 Havlak gap 主因。
+
+GiY933 把 ordinary young 提到约 Cheney896 水平：
+
+```text
+GiY896 default:
+  young_after_aux = 566.72KB
+  minor GC        = 239914
+  total           = 887.230s
+  business        = 845.507s
+  GC              = 41.724s
+
+GiY933:
+  young_after_aux = 599.09KB
+  minor GC        = 226920
+  total           = 882.661s
+  business        = 841.703s
+  GC              = 40.958s
+```
+
+变化：
+
+```text
+minor GC -12994
+total    -4.569s
+business -3.804s
+GC       -0.766s
+```
+
+也就是说，容量补偿确实降低了 minor GC 次数，但只改善约 `4.6s`，远小于 `134.2s` 的 Havlak gap。
+
+反向验证 Cheney860：
+
+```text
+Cheney860:
+  total    777.625s
+  business 742.002s
+  GC       35.623s
+  minor GC 234829
+```
+
+即使把 Cheney 的 ordinary young 降到接近 GiY896，Cheney860 仍明显快于 GiY896 default：
+
+```text
+GiY896 default - Cheney860:
+  total +109.605s
+```
+
+因此：
+
+```text
+local workspace / ordinary young 容量解释 minor GC count 和一小部分 GC time，
+但不是 Havlak 主要性能差距的原因。
+```
+
+结论 4：RSet value 更新路径是 Havlak 最大已确认原因。
+
+RSet-fast 实验：
+
+```text
+GiY896 default:
+  total       887.230s
+  business    845.507s
+  GC           41.724s
+  minor GC     239914
+  allocations 2.029601985B
+  forwards    384564451
+
+GiY896 RSet-fast:
+  total       800.577s
+  business    757.771s
+  GC           42.806s
+  minor GC     239914
+  allocations 2.029601985B
+  forwards    384564455
+```
+
+变化：
+
+```text
+RSet-fast - default:
+  total    -86.653s
+  business -87.736s
+  GC       +1.082s
+```
+
+关键点：
+- minor GC count 没变。
+- allocation count 没变。
+- forward operations 基本没变。
+- 改善几乎全部发生在 business time。
+
+因此这是非常干净的因果证据：
+
+```text
+GiY default Havlak 的主要性能问题来自 mutator-side RSet/value maintenance，
+不是来自 GC copy 本身，也不是来自 young 容量。
+```
+
+解释比例：
+
+```text
+RSet-fast 解释 default GiY vs Cheney896 total gap 的约 64.57%。
+RSet-fast 解释 default GiY vs Cheney896 business gap 的约 69.19%。
+```
+
+RSet-fast 后仍有剩余差距：
+
+```text
+GiY896 RSet-fast - Cheney896:
+  total    +47.547s
+  business +39.064s
+  GC       +8.483s
+
+GiY896 RSet-fast - Cheney860:
+  total    +22.952s
+  business +15.769s
+  GC       +7.183s
+```
+
+这说明 RSet-fast 修掉最大病灶后，剩余问题主要是：
+- GiY 仍有额外 allocation / runtime metadata 行为。
+- GiY GC core/scavenge/materialization 仍比 Cheney 更贵一些。
+- GiY cache miss rate 仍更高。
+
+结论 5：WB profile 直接确认线性扫描病灶。
+
+`GIY_WB_PROFILE=true` 当前 Havlak 结果：
+
+```text
+Write barrier calls: 145691273
+Update attempts:     438551833
+Update hits:         31771029
+Update scan steps:   377525614949
+Steps per attempt:   860.846
+Clear attempts JS:   380431513
+Clear attempts ptr:  26797759
+Young adds JS:       118826933
+Young adds ptr:      26864340
+Duplicate updates:   26588697
+Fallback insertions: 4727859
+```
+
+换算：
+
+```text
+Update scan steps / write barrier call = 2591.27
+clear attempts total = 407229272
+```
+
+这与代码机制一致：
+- `giy_rset.cc` 中 `rememberset_update_existing` 在未启用 `GIY_RSET_INDEX_FAST` 时会调用线性扫描。
+- 当 old/init slot 被写成 immediate/old/null 时，write barrier 会尝试把 `remembered_set.values[index]` 清掉。
+- Havlak 会产生大量这类 clear/update attempt，导致数千亿级扫描步数。
+
+因此 RSet 线性扫描不是猜测，而是由：
+1. 代码路径；
+2. WB profile counter；
+3. RSet-fast macro 干预带来的 86.653s total 改善；
+三者共同确认。
+
+结论 6：JSObject precise scan 不是 Havlak 的解决方向。
+
+`GIY_JSOBJECT_PRECISE_SCAN=1`：
+
+```text
+GiY896 precise:
+  total       946.942s
+  business    898.472s
+  GC           48.470s
+  minor GC     239914
+  scavenge     33.468s
+
+GiY896 default:
+  total       887.230s
+  business    845.507s
+  GC           41.724s
+  scavenge     26.968s
+```
+
+变化：
+
+```text
+precise - default:
+  total    +59.712s
+  business +52.965s
+  GC       +6.746s
+```
+
+虽然 precise scan 改变了 JSObject 扫描路径：
+
+```text
+JSObject scans:         252379895
+JSObject precise:       252379895
+JSObject cons slots:    0
+JSObject precise slots: 397431541
+JSObject skipped slots: 72654137
+```
+
+但它让 Havlak 变慢。因此：
+
+```text
+“JSObject conservative scan 多扫了字段”不是 Havlak 当前性能差距的主因。
+至少 naive precise scan 不是解决方案。
+```
+
+最终可信归因：
+
+```text
+1. 896KB aggregate 看起来 GiY 大胜，主要被 Richards 的 Cheney 异常慢样本放大。
+   修正后 GiY896 只小幅领先，大约 0.3%-0.4%。
+
+2. Havlak 是当前 GiY 的最大负例。
+   同轮数据中 GiY896 default 比 Cheney896 慢 134.2s，其中 126.8s 是 business-side。
+
+3. Havlak 的最大已确认原因是 GiY default 的 remembered-set value 更新路径。
+   它在 write barrier 中触发大量线性扫描，WB profile 记录到 3775 亿次 scan steps。
+   开启 GIY_RSET_INDEX_FAST 后，不改变 allocation/minor-GC/forward 数量，却让 total 改善 86.653s。
+
+4. local workspace 容量解释 minor GC count 趋势和一小部分 GC time，但不是 Havlak gap 主因。
+   GiY933 只改善 4.569s。
+
+5. JSObject precise scan 不是当前 Havlak gap 的解决方案。
+   它让 Havlak 变慢 59.712s。
+
+6. RSet-fast 之后仍有剩余 gap：
+   对 Cheney896 还慢 47.547s，对 same-active-young 的 Cheney860 还慢 22.952s。
+   下一步应研究剩余 extra allocation / metadata behavior / GiY materialization scavenge overhead。
+```
+
+后续优先级：
+
+```text
+第一优先级：
+  把 GIY_RSET_INDEX_FAST 变成默认或实现无 fallback 线性扫描的 production RSet index。
+
+第二优先级：
+  继续追剩余 22-48s gap：
+    allocation count 为什么 GiY 仍比 Cheney 高；
+    GiY materialization/scavenge 为什么比 Cheney scavenge 多约 6-8s；
+    cache miss rate 为什么仍更差。
+
+暂不优先：
+  naive JSObject precise scan。
+```
+
+2026-05-18 补充解释：GIY_RSET_INDEX_FAST 默认化 / 无 fallback production RSet index，以及 Richards 修正含义
+
+用户问题：
+- “把 GIY_RSET_INDEX_FAST 变成默认或实现无 fallback 线性扫描的 production RSet index”是什么意思？
+- “896KB aggregate 看起来 GiY 大胜，主要被 Richards 的 Cheney 异常慢样本放大。修正后 GiY896 只小幅领先 0.3%-0.4%”是什么意思？
+- 这是否表示原来的 Cheney 实现有问题？
+
+解释 1：GIY_RSET_INDEX_FAST 的意思。
+
+当前 GiY remembered set 不只记录 old/init slot 地址，还记录该 slot 里最近写入的 young value：
+
+```text
+remembered_set.buffer[i] = slot address
+remembered_set.values[i] = current young value or 0
+```
+
+当 old/init slot 被写成 young object 时，GiY 会加入或更新 RSet。
+当 old/init slot 后来被写成 immediate / old / null 时，GiY 需要把对应的 `values[i]` 清成 0。
+
+问题是：
+
+```text
+已知 slot address，怎样快速找到它在 remembered_set.buffer[] 里的 index i？
+```
+
+默认实现的问题：
+- `rememberset_update_existing` 找不到 O(1) index 时，会调用 `rememberset_find_index_linear`。
+- 这个函数从 `buffer[0]` 扫到 `buffer[count)`。
+- Havlak 会产生大量 clear/update attempt，于是这个线性扫描被调用非常多次。
+- WB profile 实测 `Update scan steps = 377,525,614,949`，也就是三千七百多亿步。
+
+`GIY_RSET_INDEX_FAST=true` 的作用：
+- 在 hash table 旁边维护一个 `remembered_set_hash_indices[]`。
+- hash table 里找到 slot address 后，立刻知道它对应 `buffer[index]`。
+- 这样更新 `values[index]` 不需要从头扫描 buffer。
+
+为什么还说要 production index：
+- 当前 fast path 是实验开关，只在 make 时传 `GIY_RSET_INDEX_FAST=true` 才打开。
+- 当前代码仍保留 fallback：如果 hash probe 超过 `HASH_PROBE_LIMIT`，插入的 entry 可能没有 index 映射，后续仍可能退回线性扫描。
+- production 版本应该保证所有 RSet entry 都能通过 bounded/O(1) 方式找到 index，不能再退回全表线性扫描。
+
+因此“把 GIY_RSET_INDEX_FAST 变成默认或实现无 fallback 线性扫描的 production RSet index”的具体意思是：
+
+```text
+让 GiY 默认维护 slot -> RSet index 的映射；
+所有 remembered slot 的 update/clear 都通过这个映射直接更新 values[index]；
+不允许正常路径调用 rememberset_find_index_linear 扫整个 buffer；
+如果 hash table 满或 probe 超限，应扩容、rehash、使用 overflow index table，或直接触发可控处理，而不是静默退回线性扫描。
+```
+
+解释 2：Richards 修正是什么意思。
+
+旧 full matrix 里：
+
+```text
+Cheney896 Richards = 1992.976s
+GiY896 Richards    = 1726.488s
+```
+
+这一个 benchmark 就让 GiY 看起来快了：
+
+```text
+1992.976 - 1726.488 = 266.488s
+```
+
+而整个 896KB aggregate 里 GiY 比 Cheney 快 `284.646s`。
+也就是说，几乎整个 896KB “大胜”都来自 Richards 这一项。
+
+后来我们重跑同一个 `Cheney896 Richards`：
+
+```text
+本次重跑 Cheney896 Richards = 1737.234s
+之前 PMU 三次 Cheney896 Richards = 1744.968 / 1733.641 / 1763.784s
+```
+
+这说明 `1992.976s` 那次明显偏慢，是异常测量点或运行环境噪声，不应该当作稳定算法性能。
+
+用 `1737.234s` 修正后：
+
+```text
+原本 896KB GiY aggregate advantage ≈ 4.10%
+修正 Richards 后 advantage ≈ 0.43%
+如果同时用 PMU 中 GiY Richards 均值修正，advantage ≈ 0.33%
+```
+
+解释 3：这不等于 Cheney 实现有 bug。
+
+目前没有证据说明 Cheney 实现“错了”。
+
+更准确的说法是：
+
+```text
+Cheney896 Richards 那一次 benchmark 测量结果异常慢。
+异常可能来自系统噪声、CPU frequency/scheduling、cache/TLB 状态、后台负载、thermal/OS jitter、单次长 benchmark 的方差等。
+```
+
+如果 Cheney 实现真的有 bug，应该更稳定地复现错误或慢速。
+但后续多次运行同一 Cheney896 Richards 都回到 `1730-1760s` 区间，所以更像测量异常，而不是实现错误。
+
+论文里应该写：
+
+```text
+The large 896KB aggregate improvement is not robust because it is dominated by an outlier in Cheney/Richards.
+After replacing that outlier with repeated measurements, GiY896 only shows a small end-to-end advantage.
+```
+
+中文表述：
+
+```text
+896KB 下 GiY 可能略快，但原来 4.10% 的大幅领先不可靠；
+它主要被一次 Cheney/Richards 异常慢运行放大。
+目前没有证据说明 Cheney 算法或实现本身有错误。
+```
+
+## 2026-05-18 补充解释：师兄代码如何避免 slot address -> RSet index 问题
+
+用户问：师兄是怎么解决“已知 old field slot address，怎样快速找到它在 `remembered_set.buffer[]` 里的 index `i`”这个问题的。
+
+结论：师兄不是用一个更快的 index 解决这个问题，而是他的 remembered set 设计没有制造这个问题。
+
+师兄的 remembered set 只保存 old object 里的 field slot address：
+
+```text
+register_to_rs(field_ptr)
+  -> rs[rs_index] = field_ptr
+  -> rs_index++
+```
+
+minor GC 扫 remembered set 时，不读取一个另外保存的 `values[i]`，而是直接读取这个 old slot 当前的内容：
+
+```text
+old_field_ptr = rs[i]
+young_ref_ptr = *old_field_ptr
+if young_ref_ptr is still a young pointer:
+    *old_field_ptr = copy_for_minor(young_ref_ptr)
+```
+
+所以如果这个 slot 后来被写成了 `null`、old pointer、immediate value，minor GC 会直接读到当前值，然后自然跳过。它不需要提前找到 `rs[i]`，也不需要清掉一个保存的 `values[i]`。
+
+GiY 现在的问题来自另一个设计选择：
+
+```text
+GiY 为了让 minor GC 的 reserve/copy 阶段尽量只访问 local workspace，
+额外保存 remembered_set.values[i]。
+```
+
+这样 minor GC 可以不读 old slot，但是 write barrier 后续必须维护 `values[i]` 的正确性。当某个 old slot 不再指向 young object 时，GiY 需要把对应的 `values[i]` 清掉。于是就产生了：
+
+```text
+已知 slot address，怎样快速找到它对应的 remembered_set.values[i]？
+```
+
+师兄方案的代价是：minor GC 每次扫描 RS 都要读 old/MRAM slot，一条 RS entry 至少一次 old memory read。GiY 方案的目标是避免这类 old-slot read，但代价是 write barrier 必须维护 slot -> index 映射。
+
+因此：
+
+```text
+师兄：RS 只存 slot；GC 时读 slot 当前值；简单，但 minor GC 读 old memory。
+GiY：RS 存 slot + saved value；GC 时尽量不读 old slot；但需要 production slot->index。
+```
+
+如果 GiY 直接采用师兄方法，可以简化正确性问题，但会削弱 GiY 的核心 cache/local workspace 设计。因此更符合 GiY 的方向是实现无 fallback 线性扫描的 production RSet index；也可以另外做一个“读 old slot”的对照变体，用来量化这个设计取舍的真实成本。
+
+## 2026-05-19 阶段记录：GiY 增加“像师兄一样”的 RSet 读 slot 变体与中途 benchmark 状态
+
+用户要求：给当前 GiY 增加一个多余选项，采用类似师兄代码的 remembered set 设计，看看实际性能提升。
+
+实现状态：
+- 新增编译选项 `GIY_RSET_READ_SLOT_AT_GC=true`。
+- 默认 GiY 行为不变：RSet 保存 `buffer[] + values[]`，minor GC 用 `values[i]` 避免读 old slot。
+- 新变体行为：
+  - RSet 只保存 old/init slot address，不维护 `values[]`。
+  - write barrier 对非 young 写入不再需要查找 index 并清 `values[i]`。
+  - minor GC 扫 RSet 时读取 slot 当前值：
+    - 如果当前值仍然指向 young，就 reserve；
+    - reserve 后立即根据 forwarding pointer patch 这个 slot；
+    - 后面的 `giy_patch_remembered_set_slots()` 在该模式下直接返回。
+- 新增脚本：
+  - `tools/run_giy_rset_read_slot_benchmarks.sh`
+  - `tools/parse_giy_rset_read_slot_benchmarks.py`
+
+已经做过的正确性/构建测试：
+- `make OPT_GC=giy CACHE_SIZE_KB=896 -B -j2` 通过。
+- `make OPT_GC=giy CACHE_SIZE_KB=896 GIY_RSET_READ_SLOT_AT_GC=true -B -j2` 通过。
+- read-slot 变体下，小样例 `a.sbc` 到 `g.sbc`、`../ejsvm/js/hello.sbc`、`../ejsvm/js/f1.sbc` 全部退出码 0。
+- read-slot 变体下，`GIY_MPROTECT_OLD=1 ./ejsvm a.sbc` 退出码 0。
+- read-slot 变体下，`benchmarks/Sieve.sbc` 单独运行退出码 0。
+
+benchmark 状态：
+- 第一次目录 `out_giy_rset_read_slot_20260518_215620` 无效：传入相对输出路径，脚本进入 `benchmarks` 后重定向路径失效，默认组 status 1；这个目录不用于结论。
+- 已修正脚本：如果 `OUT_BASE` 是相对路径，先转换成绝对路径。
+- 有效目录：
+  - `/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_20260518_220105`
+- 该有效目录中：
+  - `giy_default` 13 个 benchmark 全部完成，status 0。
+  - `giy_rset_read_slot` 构建完成，`Bounce` 完成 status 0。
+  - 用户中断时正在跑 `giy_rset_read_slot/CD`，该项只有半截 `CD.out`，没有 status/time，不能作为有效结果。
+
+目前唯一完整成对结果是 `Bounce`：
+
+```text
+Default GiY:
+  total execution = 304.598 sec
+  GC overhead(full) = 0.182 sec
+  minor GC count = 3351
+  RSet capacity = 8192
+
+GiY read-slot-at-GC:
+  total execution = 305.128 sec
+  GC overhead(full) = 0.209 sec
+  minor GC count = 3351
+  RSet capacity = 16384
+
+end-to-end speedup = -0.174%
+GC overhead change = worse by about 14.8% on this one benchmark
+```
+
+当前阶段性结论：
+- 目前没有证据表明“像师兄一样在 GC 时读 old slot”会提升 GiY 性能。
+- 在唯一完整成对 benchmark `Bounce` 上，它反而略慢；差距很小，接近噪声范围，但 GC full time 明显略高。
+- 这符合预期的 tradeoff：
+  - 优点：write barrier 简化，不需要维护 `values[]`，也没有 slot->index clear/update 问题；RSet 容量从 8192 增加到 16384。
+  - 代价：minor GC 扫 RSet 时必须读取 old/init slot 当前值，并且本实现会在 RSet scan 阶段即时 patch old slot；这破坏了原 GiY “minor GC reserve 阶段尽量不读 old memory”的设计目标。
+- 因为 full paired benchmark 还没有跑完，不能下最终性能结论。当前只能说：从 `Bounce` 与正确性 smoke tests 看，这个变体可以运行，但尚未显示性能收益。
+
+## 2026-05-19 实验方法判断：一次完整 benchmark 是否足够判断 read-slot 方案
+
+用户问：能不能只跑一次完整 benchmarks，就判断 GiY 采用师兄式 read-slot RSet 后是否真正提升。
+
+结论：
+- 一次完整 paired benchmark 可以作为初步筛选，可以判断“有没有明显的大提升”。
+- 但一次完整 benchmark 不能严格证明“真正提升”，尤其当差距只有 0.x% 到 2% 时，很容易被系统噪声、CPU 频率、调度、thermal、cache/TLB 状态、后台负载影响。
+- 如果一次完整结果显示 read-slot 变体在 aggregate 上慢，或者只快不到约 1%，应认为“没有可靠提升”。
+- 如果一次完整结果显示多数 benchmark 都快，并且 aggregate 快超过约 3%-5%，可以说“有明显提升的信号”，但论文中仍应至少对关键项重复 3 次。
+- 如果提升主要来自单个 benchmark，尤其是 Richards 这种长时间项目，就不能直接下结论，需要重跑该项确认不是 outlier。
+
+建议判断标准：
+
+```text
+只跑一次 full suite 时：
+1. 看所有 benchmark 的方向：多数快，还是少数快。
+2. 看 aggregate speedup：是否超过 3%-5%。
+3. 看 GC full time：是否真的下降，而不是 business time 噪声。
+4. 看 RSet 压力大的 benchmark：CD / Storage / Havlak 是否改善。
+5. 如果只有 0.x% 差距，结论写成 no reliable improvement。
+```
+
+对当前 read-slot 方案的预期：
+- 它可能减少 write barrier 的 update/clear 成本。
+- 但它会让 minor GC 扫 RSet 时读 old slot，并且即时 patch old slot。
+- 因此它不一定比当前 GiY 更快；如果 RSet update/clear 不是主要瓶颈，read-slot 方案很可能没有提升，甚至会让 GC time 增加。
+
+## 2026-05-19 实验执行计划：read-slot GiY 一次公平 full suite
+
+用户要求：跑一次可靠、公平的 full suite，验证 GiY 采用师兄式 read-slot RSet 后是否有真实提升。
+
+本次执行规则：
+- 使用新的干净输出目录，不混用之前中断产生的半截数据。
+- 只比较两个配置：
+  - `giy_default`
+  - `giy_rset_read_slot`，即 `GIY_RSET_READ_SLOT_AT_GC=true`
+- 两个配置都使用：
+  - `OPT_GC=giy`
+  - `CACHE_SIZE_KB=896`
+  - 同一套 benchmarks：Bounce, CD, DeltaBlue, Havlak, List, Mandelbrot, NBody, Permute, Queens, Richards, Sieve, Storage, Towers
+  - `taskset -c 0` 固定同一个 CPU core
+- 每个配置重新构建，构建日志和二进制保存在各自目录。
+- 结论标准：
+  - 如果 aggregate 提升小于约 1%，或者主要来自单个 benchmark，不认为有可靠提升。
+  - 如果多数 benchmark 改善、aggregate 明显提升、GC full time 也下降，才认为有真实提升信号。
+
+### Full suite 结果
+
+输出目录：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326
+```
+
+两个配置均完成 13/13 benchmark，status 全部为 0。
+
+整体结果：
+
+```text
+Default GiY total:     6730.506 sec
+Read-slot GiY total:   6646.009 sec
+End-to-end speedup:    +1.255%
+
+Default GiY GC full:   126.084 sec
+Read-slot GiY GC full: 147.527 sec
+GC full change:        -17.007%  (read-slot 的 GC time 更长)
+```
+
+逐项重要结果：
+
+```text
+Bounce:      +0.045%
+CD:          -0.391%
+DeltaBlue:   +0.836%
+Havlak:      +8.638%
+List:        -0.063%
+Mandelbrot:  -0.127%
+NBody:       +0.146%
+Permute:     +0.449%
+Queens:      -0.173%
+Richards:    -0.227%
+Sieve:       +0.332%
+Storage:     +2.268%
+Towers:      +0.188%
+```
+
+关键稳健性检查：
+
+```text
+Aggregate excluding Havlak:
+Default GiY total:     5846.082 sec
+Read-slot GiY total:   5837.980 sec
+Speedup:               +0.139%
+
+Default GiY GC full:   84.055 sec
+Read-slot GiY GC full: 88.109 sec
+GC full change:        -4.823%
+```
+
+结论：
+- 不能认为“采用师兄式 read-slot RSet”给 GiY 带来了可靠、真实的提升。
+- 表面 aggregate 有 +1.255%，但主要由 `Havlak` 的 +8.638% 拉动。
+- 排除 `Havlak` 后只剩 +0.139%，基本属于噪声范围。
+- 更重要的是，GC full time 总体变差 17.007%，说明该方案没有改善 GiY 的 GC 本体；它只是可能减少了一部分业务阶段 write barrier / values[] 维护成本，或者出现了 benchmark 噪声。
+- 该结果支持之前判断：read-slot 方案简化 RSet 维护，但把成本转移回 minor GC 的 old-slot read 和 old-slot patch，削弱 GiY 的核心 local workspace 设计。
+- 后续不建议把 read-slot 作为 GiY 主方案；它可以作为对照实验保留。更符合 GiY 的主线仍是 production slot->index 或 reserved-space/local-workspace 方案。
+
+### 4-5 页英文 PPT 大纲：本周进度报告
+
+Slide 1: Weekly Goal and Context
+- Focus: understand GC locality problems in GiY and evaluate RSet design choices.
+- Worked with Sonda-san to read and discuss the related paper.
+- Main question: should GiY keep remembered-set metadata inside the local workspace, or read old slots during minor GC?
+- Goal of the week: separate design intuition from measured performance.
+
+Slide 2: Paper Reading with Sonda-san
+- Reviewed the paper's motivation: reduce expensive memory traffic during GC.
+- Key idea understood: locality is not only about copying objects, but also about metadata and root/RSet processing.
+- Discussion point: a design can reduce write barrier cost while increasing GC-time memory traffic.
+- Takeaway for GiY: the GC local workspace should be treated as a first-class budget, not just a cache-like area.
+
+Slide 3: Remembered Set Design Experiment
+- Baseline GiY:
+  - RSet stores slot addresses and saved values.
+  - Minor GC can reserve young targets without reading old slots.
+  - Cost: write barrier must maintain values[] and needs slot-to-index updates.
+- Senior-style read-slot variant:
+  - RSet stores only slot addresses.
+  - Minor GC reads the current old slot value.
+  - Cost shifts from write barrier to GC-time old memory reads.
+
+Slide 4: Benchmark Result and Interpretation
+- Full suite completed at 896KB local workspace.
+- Aggregate result: read-slot variant was +1.255% faster end-to-end.
+- However, most of the gain came from Havlak.
+- Excluding Havlak, improvement was only +0.139%.
+- GC full time became worse by 17.007%.
+- Conclusion: no reliable evidence that the senior-style RSet improves GiY.
+
+Slide 5: Next Step
+- Keep read-slot RSet as an experimental comparison, not the main design.
+- Next implementation target: redesign the reserved-space layout.
+- Plan:
+  - Revisit how GC local workspace is divided.
+  - Try reserving large objects or special regions earlier.
+  - Improve address continuity for small objects.
+  - Measure whether better reserved-space layout improves locality without increasing GC-time old memory reads.
+
+### Excel 用 remembered-set 策略差异表
+
+用户要求：做一个 Excel 表格，显示各 benchmark 在 remembered-set 策略上的差异。
+
+已生成 CSV：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326/remember_set_strategy_diff_for_excel.csv
+```
+
+字段含义：
+- `Default Total sec`: 当前 GiY 的总运行时间。
+- `Read-slot Total sec`: 师兄式 read-slot RSet 变体的总运行时间。
+- `Delta sec`: `Read-slot - Default`，正数表示 read-slot 更慢。
+- `Speedup %`: `(Default - Read-slot) / Default * 100`，正数表示 read-slot 更快。
+- `Default GC sec` / `Read-slot GC sec`: 两种策略的 full GC time。
+- `GC Delta sec`: `Read-slot GC - Default GC`，正数表示 read-slot 的 GC 更慢。
+- `GC Change %`: `(Default GC - Read-slot GC) / Default GC * 100`，负数表示 read-slot 的 GC 更慢。
+- `AGG_ALL`: 全 13 个 benchmark 聚合。
+- `AGG_EXCL_HAVLAK`: 排除 Havlak 后的稳健性检查。
+
+### PPT/Excel 图表建议：展示当前 GiY 与师兄式 read-slot RSet 的差异
+
+用户问：想展示各 benchmark 的总时间、当前 GiY 策略和师兄式策略在 GC 时间和总时间上的差异，应该做什么图。
+
+建议不要把 total time 和 GC time 放在同一个普通柱状图里，因为两者量级差异很大：例如 Richards 总时间约 1700 秒，但 GC time 只有约 0.2 秒；放在同一轴会导致 GC 差异完全看不见。
+
+推荐图表组合：
+
+1. 主图：每个 benchmark 的 total speedup 条形图
+   - 横轴：`Speedup %`
+   - 纵轴：benchmark name
+   - 0% 画一条基准线
+   - 正数表示 read-slot 更快，负数表示 read-slot 更慢
+   - 用不同颜色标出 `Havlak`，因为 aggregate 的提升主要由它贡献
+   - 目的：最清楚地展示“这个策略是否整体更快”
+
+2. 辅图：GC time change 条形图
+   - 横轴：`GC Change %` 或 `GC Delta sec`
+   - 纵轴：benchmark name
+   - 0 画基准线
+   - 负数表示 read-slot 的 GC 更慢
+   - 目的：展示虽然 total time 有些项目变快，但 GC 本体通常没有改善
+
+3. Absolute total time grouped bar chart
+   - 每个 benchmark 两根柱：`Default Total sec` vs `Read-slot Total sec`
+   - 建议横向柱状图
+   - 如果 Richards 太大导致其他项目看不清，可以用 normalized total chart 替代：
+     - `Default = 100%`
+     - `Read-slot = Read-slot Total / Default Total * 100%`
+
+4. Summary chart
+   - 只放两组：
+     - `AGG_ALL`
+     - `AGG_EXCL_HAVLAK`
+   - 展示 speedup：
+     - `AGG_ALL = +1.255%`
+     - `AGG_EXCL_HAVLAK = +0.139%`
+   - 目的：说明 read-slot 表面提升主要由 Havlak 拉动，不是稳健提升。
+
+最推荐用于 PPT 的三张图：
+
+```text
+Figure 1: Total runtime speedup by benchmark
+Figure 2: GC time change by benchmark
+Figure 3: Aggregate speedup with/without Havlak
+```
+
+结论表达：
+
+```text
+The read-slot remembered-set strategy slightly improves aggregate runtime,
+but the improvement is dominated by Havlak. Excluding Havlak, the speedup
+almost disappears, while total GC time becomes worse.
+```
+
+### 已生成 PPT 图表对应 CSV 数据
+
+用户要求：生成上述图表对应的数据。
+
+已生成 3 个 CSV，均在 full suite 输出目录下：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326/figure1_total_runtime_speedup.csv
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326/figure2_gc_time_change.csv
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326/figure3_aggregate_with_without_havlak.csv
+```
+
+用途：
+- `figure1_total_runtime_speedup.csv`
+  - 用于画 `Total Runtime Speedup by Benchmark`
+  - 主要列：`Benchmark`, `Speedup_pct`, `ReadSlot_Normalized_pct`
+  - `Speedup_pct > 0` 表示 read-slot 更快。
+- `figure2_gc_time_change.csv`
+  - 用于画 `GC Time Change by Benchmark`
+  - 主要列：`Benchmark`, `GC_Change_pct`, `GC_Delta_sec`
+  - `GC_Change_pct < 0` 表示 read-slot 的 GC 更慢。
+- `figure3_aggregate_with_without_havlak.csv`
+  - 用于画 `Aggregate With / Without Havlak`
+  - 主要行：`AGG_ALL`, `AGG_EXCL_HAVLAK`
+  - 目的：展示 overall speedup 主要被 Havlak 放大。
+
+### 已生成两张表格：总时间变化与 GC 时间变化
+
+用户要求：生成两张表格，第一张展示两个 GC/remembered-set 策略的总时间变化，第二张展示 GC 时间变化。
+
+已生成：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326/table1_total_time_change.csv
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326/table2_gc_time_change.csv
+```
+
+表 1 字段：
+- `Current_GiY_Total_sec`
+- `SeniorStyle_ReadSlot_Total_sec`
+- `Delta_sec = SeniorStyle - Current`
+- `Speedup_pct = (Current - SeniorStyle) / Current * 100`
+
+表 2 字段：
+- `Current_GiY_GC_sec`
+- `SeniorStyle_ReadSlot_GC_sec`
+- `GC_Delta_sec = SeniorStyle GC - Current GC`
+- `GC_Change_pct = (Current GC - SeniorStyle GC) / Current GC * 100`
+
+解释规则：
+- `Delta_sec > 0` 表示师兄式 read-slot 更慢。
+- `Speedup_pct > 0` 表示师兄式 read-slot 更快。
+- `GC_Delta_sec > 0` 表示师兄式 read-slot 的 GC 时间更长。
+- `GC_Change_pct < 0` 表示师兄式 read-slot 的 GC 更慢。
+
+### 展示用简化表格：只显示 GiY 两个策略的 benchmark 时间
+
+用户澄清：展示时只需要 GiY 的两个策略在各个 benchmark 上的时间，不需要差值、speedup、解释列。
+
+已生成两个更干净的 CSV：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326/presentation_total_time_two_giy_strategies.csv
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326/presentation_gc_time_two_giy_strategies.csv
+```
+
+表格只包含：
+- `Benchmark`
+- `Current GiY ... Time`
+- `Senior-style GiY ... Time`
+
+用于 PPT 展示时推荐直接用 grouped bar chart。
+
+用户要求：不要 CSV，要可以直接粘贴进 Excel 的格式，并且必须输出进 `AIlog.md`。
+
+Total Time:
+
+```text
+Benchmark	Current GiY Total Time (sec)	Senior-style GiY Total Time (sec)
+Bounce	305.381	305.245
+CD	488.697	490.609
+DeltaBlue	134.592	133.467
+Havlak	884.424	808.029
+List	185.541	185.657
+Mandelbrot	403.913	404.425
+NBody	657.648	656.691
+Permute	812.984	809.334
+Queens	217.205	217.581
+Richards	1732.828	1736.754
+Sieve	237.934	237.144
+Storage	337.940	330.276
+Towers	331.419	330.797
+```
+
+GC Time:
+
+```text
+Benchmark	Current GiY GC Time (sec)	Senior-style GiY GC Time (sec)
+Bounce	0.198	0.218
+CD	15.606	16.210
+DeltaBlue	2.424	3.730
+Havlak	42.029	59.418
+List	0.031	0.026
+Mandelbrot	8.813	8.757
+NBody	13.133	14.436
+Permute	0.003	0.003
+Queens	0.060	0.058
+Richards	0.196	0.184
+Sieve	1.328	1.253
+Storage	42.255	43.226
+Towers	0.008	0.008
+```
+
+用户进一步要求：要真正的表格，中间有分割线。
+
+Total Time:
+
+| Benchmark | Current GiY Total Time (sec) | Senior-style GiY Total Time (sec) |
+|---|---:|---:|
+| Bounce | 305.381 | 305.245 |
+| CD | 488.697 | 490.609 |
+| DeltaBlue | 134.592 | 133.467 |
+| Havlak | 884.424 | 808.029 |
+| List | 185.541 | 185.657 |
+| Mandelbrot | 403.913 | 404.425 |
+| NBody | 657.648 | 656.691 |
+| Permute | 812.984 | 809.334 |
+| Queens | 217.205 | 217.581 |
+| Richards | 1732.828 | 1736.754 |
+| Sieve | 237.934 | 237.144 |
+| Storage | 337.940 | 330.276 |
+| Towers | 331.419 | 330.797 |
+
+GC Time:
+
+| Benchmark | Current GiY GC Time (sec) | Senior-style GiY GC Time (sec) |
+|---|---:|---:|
+| Bounce | 0.198 | 0.218 |
+| CD | 15.606 | 16.210 |
+| DeltaBlue | 2.424 | 3.730 |
+| Havlak | 42.029 | 59.418 |
+| List | 0.031 | 0.026 |
+| Mandelbrot | 8.813 | 8.757 |
+| NBody | 13.133 | 14.436 |
+| Permute | 0.003 | 0.003 |
+| Queens | 0.060 | 0.058 |
+| Richards | 0.196 | 0.184 |
+| Sieve | 1.328 | 1.253 |
+| Storage | 42.255 | 43.226 |
+| Towers | 0.008 | 0.008 |
+
+最终一句话结论：
+
+```text
+Across all 13 benchmarks, the senior-style read-slot strategy did not make GC faster;
+GC time became 17.007% slower, while total execution time became 1.255% faster.
+However, excluding Havlak, the total-time improvement almost disappears (+0.139%),
+and GC time is still 4.823% slower.
+```
+
+中文解释：
+- 全 13 项聚合：
+  - GC 时间没有变快，而是变慢 `17.007%`。
+  - 总运行时间没有变慢，而是表面上变快 `1.255%`。
+- 排除 Havlak 后：
+  - GC 时间仍然变慢 `4.823%`。
+  - 总运行时间只变快 `0.139%`，基本可以认为没有可靠提升。
+
+因此展示时应该说：
+
+```text
+Senior-style RSet reduces neither GC time nor provides a robust total-time improvement.
+The apparent total-time gain is mainly caused by Havlak.
+```
+
+## 2026-05-19 Cache miss 测量计划：当前 GiY vs 师兄式 read-slot RSet
+
+用户要求：测量这两种 RSet 策略的 cache miss 率区别。
+
+机器状态：
+- `perf stat -e cache-references,cache-misses true` 可用。
+- `perf list` 显示可用事件包括：
+  - `cache-references`
+  - `cache-misses`
+  - `L1-dcache-loads`
+  - `L1-dcache-load-misses`
+  - `LLC-loads`
+  - `LLC-load-misses`
+  - `LLC-stores`
+  - `LLC-store-misses`
+
+本次先做 full-suite generic cache miss 测量：
+
+```text
+events = cycles,instructions,cache-references,cache-misses
+```
+
+比较对象：
+- `giy_default`
+- `giy_rset_read_slot`
+
+为了和刚才 runtime full suite 保持一致，本次直接使用已保存的两个二进制：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326/giy_default/ejsvm
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_fullsuite_20260519_001326/giy_rset_read_slot/ejsvm
+```
+
+新增脚本：
+
+```text
+/home/qiancheng/ejs-new/tools/run_giy_rset_read_slot_cache_miss.sh
+/home/qiancheng/ejs-new/tools/parse_giy_rset_read_slot_cache_miss.py
+```
+
+输出指标：
+- `cache_miss_rate_pct = cache-misses / cache-references * 100`
+- `cache_mpki = cache-misses / instructions * 1000`
+
+说明：
+- 这次测量是整个程序运行期间的 cache miss，而不是只在 GC 窗口内的 cache miss。
+- 它可以回答“两个 RSet 策略对整体 cache 行为有什么影响”。
+- 如果要进一步分解 GC-only cache miss，需要额外在 GC 代码内部加 PMU sampling 或复用已有 GC PMU 统计路径。
+
+### Cache miss full suite 结果
+
+输出目录：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_cache_miss_20260519_140935
+```
+
+两个配置均完成 13/13 benchmark，status 全部为 0。
+
+生成文件：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_cache_miss_20260519_140935/summary.csv
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_cache_miss_20260519_140935/cache_miss_strategy_diff.csv
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_cache_miss_20260519_140935/summary.md
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_cache_miss_20260519_140935/presentation_cache_miss_two_giy_strategies.csv
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_rset_read_slot_cache_miss_20260519_140935/presentation_cache_miss_delta.csv
+```
+
+Weighted aggregate 结果：
+
+```text
+AGG_ALL:
+  Current GiY cache miss rate:      9.937%
+  Senior-style read-slot rate:      11.400%
+  Delta:                            +1.463 percentage points
+  Relative change:                  +14.723%
+
+  Current GiY MPKI:                 0.0219
+  Senior-style read-slot MPKI:      0.0253
+  Relative MPKI change:             +15.654%
+
+AGG_EXCL_HAVLAK:
+  Current GiY cache miss rate:      4.910%
+  Senior-style read-slot rate:      5.708%
+  Delta:                            +0.798 percentage points
+  Relative change:                  +16.252%
+
+  Current GiY MPKI:                 0.00763
+  Senior-style read-slot MPKI:      0.00837
+  Relative MPKI change:             +9.655%
+```
+
+逐项 cache miss rate：
+
+| Benchmark | Current GiY miss rate % | Senior-style miss rate % | Delta pp |
+|---|---:|---:|---:|
+| Bounce | 10.130 | 19.664 | 9.534 |
+| CD | 4.372 | 4.526 | 0.154 |
+| DeltaBlue | 10.080 | 12.149 | 2.069 |
+| Havlak | 17.667 | 19.402 | 1.735 |
+| List | 26.832 | 23.594 | -3.238 |
+| Mandelbrot | 0.289 | 0.504 | 0.215 |
+| NBody | 0.328 | 0.724 | 0.396 |
+| Permute | 15.215 | 13.901 | -1.314 |
+| Queens | 25.464 | 20.375 | -5.089 |
+| Richards | 25.180 | 31.388 | 6.208 |
+| Sieve | 3.146 | 2.916 | -0.231 |
+| Storage | 9.511 | 8.856 | -0.656 |
+| Towers | 15.014 | 25.307 | 10.293 |
+
+结论：
+- 从 whole-program generic cache counters 看，师兄式 read-slot RSet 没有降低 cache miss rate。
+- 全 13 项聚合下，read-slot 的 cache miss rate 从 `9.937%` 上升到 `11.400%`。
+- 排除 Havlak 后，read-slot 仍然从 `4.910%` 上升到 `5.708%`。
+- MPKI 也变差，说明不是单纯 cache reference 数变化造成的表面现象。
+- 这支持之前的 runtime/GC-time 结论：read-slot 方案虽然简化了 RSet write barrier 维护，但把 old-slot read 带回 GC/程序执行路径，整体 locality 没有改善。
+
+## 2026-05-19: 将 GiY 默认 RSet 改成师兄式 read-slot，并记录到 important.md
+
+用户新建了 `important.md`，要求把这次实验结果放进去，并且以后可能继续把重要实验结果放入该文件。同时，用户决定为了降低其他因素，当前 GiY 采用师兄式 remembered set：RSet 只存 old/init 区的 slot 地址，即使这样 minor GC 必须重新访问 old slot。
+
+已写入：
+- `/home/qiancheng/ejs-new/important.md`
+- 本 `AIlog.md`
+
+代码修改：
+- `ejsvm/giy_rset.cc`
+  - `GIY_RSET_READ_SLOT_AT_GC` 默认值改为 `1`。
+  - read-slot 模式下 `remembered_set.values = NULL`。
+  - read-slot 模式下不编译、不分配 `remembered_set_hash_indices`。
+  - 初始化时打印 RSet workspace：`mode`, `buffer`, `values`, `hash`。
+- `ejsvm/GiY.cc`
+  - `GIY_RSET_READ_SLOT_AT_GC` 默认值改为 `1`。
+  - read-slot 路径在 RSet scan 时读取当前 slot value，reserve young object，并立即 patch slot。
+  - read-slot 模式下 `giy_patch_remembered_set_slots()` 直接返回，因为 patch 已经在 scan 阶段完成。
+- `ejsvm/common.mk`
+  - 保留 `GIY_RSET_READ_SLOT_AT_GC=true`。
+  - 新增 `GIY_RSET_READ_SLOT_AT_GC=false`，用于显式恢复旧 saved-value 对照策略。
+- `ejsvm/cache_dram_manager.h`
+  - `values` 字段注释改为 optional，说明 read-slot 模式下为 `NULL`。
+- `tools/run_giy_rset_read_slot_benchmarks.sh`
+  - 旧策略对照显式使用 `GIY_RSET_READ_SLOT_AT_GC=false`，避免源代码默认值改成 read-slot 后实验标签失真。
+
+默认 GiY 当前 RSet local workspace：
+
+```text
+mode   = read_slot
+buffer = 128 KB
+values = 0 KB
+hash   = 64 KB
+total  = 192 KB
+capacity = 16384 slots
+```
+
+这里的重点是：默认 read-slot 模式不再消耗 `values[]` 空间，也不再消耗额外的 slot->index 表空间。仍然保留 64 KB hash table，用于 write barrier 时去重，避免 RSet 重复 slot 过多。
+
+验证：
+
+```text
+make OPT_GC=giy CACHE_SIZE_KB=896 -B -j2
+```
+
+结果：build 成功。
+
+```text
+./ejsvm a.sbc
+GIY_MPROTECT_OLD=1 ./ejsvm a.sbc
+```
+
+结果：两个 smoke test 都 status 0。初始化输出确认：
+
+```text
+init_info: giy rset mode=read_slot buffer=128KB values=0KB hash=64KB
+```
+
+实验结论仍然保留：
+- read-slot RSet 作为实验控制方案合理，因为它更接近师兄代码的 remembered-set 思想。
+- 它不是当前测量中性能更好的 GC 路径：GC 时间变慢，whole-program cache miss rate 也变差。
+- 当前采用它的主要理由是降低实现差异，而不是声称它优化了 cache 行为。
+
+## 2026-05-19: 当前 GiY local workspace 与 Cheney GC local workspace 的数据结构区别
+
+当前按代码实际情况看，GiY 和 Cheney 的 RSet 已经基本一致：
+
+- 两者 RSet 都在 `cache_space.end` 往下切。
+- 两者都使用 `remembered_set.buffer` 存 old/init 区 slot address。
+- 两者都使用 `remembered_set.hash_table` 做 write barrier 去重。
+- 两者当前默认都不使用 `remembered_set.values[]`。
+- 当前 GiY read-slot 模式下 `values = NULL`；Cheney 的 `values` 字段也没有分配。
+
+当前 896KB 配置下，RSet 部分：
+
+```text
+buffer = 128 KB
+hash   = 64 KB
+values = 0 KB
+total  = 192 KB
+capacity = 16384 slots
+```
+
+真正不同的是 RSet 之外的 GC auxiliary/local workspace：
+
+GiY：
+- `GiYGCStack g_gc_stack`
+  - 放在 cache/local workspace。
+  - 大小为 young-before-aux 的 1/8，至少 8KB。
+  - 用来保存已经 reserve destination、但还没有扫描 child 的 young object payload pointer。
+  - GiY 需要它，因为 GiY 是先 reserve forwarding/destination，再统一 traverse 并 copy 到 old。
+- `GiYFTSlotSet g_ft_slot_set`
+  - 放在 cache/local workspace。
+  - 大小为 young-before-aux 的 1/64，至少 32KB。
+  - 用来记录 function table / inline cache 等外部强引用 slot。
+  - minor GC 时先 reserve，copy 后再 patch。
+- `EdgePatchLog g_edge_log`
+  - 当前不占 workspace，`items = NULL`, `capacity = 0`。
+  - 现在主要是 profile/计数概念，不是真正的 patch table。
+- 可选但默认不用：
+  - `g_jsobject_layout_cache`: 只有 `GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES > 0` 时才占 local workspace。
+  - GiYOL staging/batch: 只有 `USE_GIYOL && GIYOL_STAGING_COPY` 时才占 local workspace。
+
+Cheney：
+- `remembered_set.buffer + remembered_set.hash_table`
+  - 与当前 GiY read-slot RSet 基本一致。
+- `CacheCheneyFTSlotSet cache_cheney_ft_slot_set`
+  - 放在 cache/local workspace。
+  - 大小为 young-before-aux 的 1/8，至少 32KB。
+  - 用来记录 function table / inline cache 等外部强引用 slot。
+- 没有 GiY 的 `g_gc_stack`。
+  - 原因是 Cheney 在 scan roots / RSet 时会立即 copy 到 old/to-space，然后通过 `dram_space.current < dram_space.free` 线性 scavenge 已复制对象。
+  - 复制后的对象本身形成 Cheney scan queue，所以不需要额外 LIFO stack。
+
+用 896KB 的 `a.sbc` smoke 输出估算：
+
+```text
+GiY:
+  RSet = 192 KB
+  aux  = 117.52 KB
+       = stack 85.52 KB + FT slot set 32.00 KB
+  RSet + aux = about 309.52 KB
+
+Cheney:
+  RSet = 192 KB
+  aux  = about young-before-aux / 8
+       = about 85.5 KB if init area is the same
+  RSet + aux = about 277.5 KB
+```
+
+因此当前结构上：
+- RSet 部分已经公平，GiY 和 Cheney 基本一样。
+- GiY 多出来的主要空间是 `g_gc_stack`。
+- Cheney 的 FT slot set 比 GiY 大，但 Cheney 没有 GiY stack，所以总 auxiliary 通常仍比 GiY 小约一个 32KB 的量级。
+- 这个差异来自算法本身：GiY 需要在 young 内先建立 forwarding/reservation 图；Cheney 直接把 copied object 放进 old/to-space，用 old/to-space 的 scan pointer 当 work queue。
+
+## 2026-05-19: 师兄 DPU 代码中 GC stack 的处理方式与 WRAM 布局
+
+本次查看了：
+
+```text
+/home/qiancheng/miniproject-qiancheng-pimgc/yoshitsune/runtime_c/mydpulib_latest/mydpulib/gc_stack.h
+/home/qiancheng/miniproject-qiancheng-pimgc/yoshitsune/runtime_c/mydpulib_latest/mydpulib/gc_stack.c
+/home/qiancheng/miniproject-qiancheng-pimgc/yoshitsune/runtime_c/mydpulib_latest/mydpulib/allocator/generational_wram_major_is_compact/generational_wram.c
+```
+
+结论：
+- 师兄的代码没有像 Cheney 那样完全消除 GC stack。
+- 它仍然使用显式 `GCStack gc_stack[NR_TASKLETS]`。
+- 但这个 stack 不是从 young heap 中切一大块，而是每个 tasklet 用 `mem_alloc(GC_WRAM_STACK_SIZE)` 单独在 WRAM 里分配固定 1KB。
+- 另外还有一个共享 WRAM stack，大小 1KB，用于 tasklet 之间取工作。
+- 还有一个 MRAM 上的 `gc_mram_stack`，大小约 10KB，作为共享 stack 的慢速后备空间。
+- 当前活跃代码中，本地 GC stack push 到满时会 abort；把本地 stack 后半部分 spill 到 shared WRAM/MRAM 的代码存在，但被注释掉了。因此这个版本不是“完全动态扩容”，而是“小固定 WRAM stack + 共享/后备设计意图”。
+
+GC stack 结构：
+
+```c
+typedef struct {
+    uintptr_t* gc_stack_top;
+    uintptr_t gc_stack_start;
+    uintptr_t gc_stack_end;
+} GCStack;
+```
+
+大小：
+
+```text
+GC_WRAM_STACK_SIZE = 1024 bytes
+GC_WRAM_SHARED_STACK_SIZE = 1024 bytes
+GC_MRAM_STACK_SIZE ≈ 10 KB
+```
+
+师兄 generational WRAM GC 的 WRAM heap 布局：
+
+```text
+wram_heap
+  [ Allocator struct ]
+  [ Remembered Set: 4096 bytes ]
+  [ Young generation: 28 KB ]
+```
+
+对应代码：
+
+```c
+#define HEAP_RS_SIZE (4096)
+#define HEAP_YOUNG_SIZE (1024 * 28)
+#define HEAP_WRAM_SIZE (sizeof(Allocator) + HEAP_RS_SIZE + HEAP_YOUNG_SIZE)
+
+allocator->rs = (uintptr_t)wram_heap + sizeof(Allocator);
+allocator->young_start = allocator->rs + HEAP_RS_SIZE;
+allocator->young_end = allocator->young_start + HEAP_YOUNG_SIZE;
+```
+
+注意：GC stack 不在这个 `wram_heap` 里面。它是额外通过 `mem_alloc()` 分出来的 WRAM 区域：
+
+```text
+per-tasklet local GC stack: 1KB * NR_TASKLETS
+shared WRAM GC stack: 1KB
+wram_heap: Allocator + RS 4KB + Young 28KB
+```
+
+所以与当前 ejs-new GiY 的区别是：
+- 当前 GiY 把 `g_gc_stack` 从 GC Local Workspace/young-side budget 中按比例切出来，896KB 下约 85.52KB。
+- 师兄代码把每个 tasklet 的 GC stack 固定为 1KB，并且放在 `wram_heap` 之外。
+- 师兄这样做符合 DPU 现实：WRAM 很小，所以不能给 GC stack 留很大的弹性空间；如果栈压力太大，理论上要靠 shared WRAM/MRAM 机制，但当前版本 push overflow spill 逻辑被注释，实际满了会 abort。
+
+### 更简单版：师兄到底怎么处理 GC stack
+
+师兄的 minor GC 流程中，GC stack 的作用和 GiY 很像：它保存“已经决定要复制/promote，但还没有扫描 child 的对象”。
+
+流程：
+
+```text
+发现 young object
+  -> 给它分配 MRAM old 目标地址，写到 header->gc_ptr
+  -> 把这个 young object 的 header 指针 push 到当前 tasklet 的 gc_stack
+  -> 之后 traverse_stack() pop 出对象
+  -> 扫描它的字段
+  -> 如果字段又指向 young object，也给 child 分配 old 目标地址，并 push 到 gc_stack
+  -> 当前对象字段全部修完以后，mram_write 整个对象到 MRAM old
+```
+
+所以师兄不是用 Cheney scan pointer 代替 stack。他仍然有显式 stack。
+
+关键区别：
+
+```text
+当前 GiY:
+  g_gc_stack 大小按 workspace/young 比例切，896KB 下约 85KB。
+
+师兄:
+  每个 tasklet 固定只有 1KB local WRAM gc_stack。
+```
+
+师兄实际代码：
+
+```c
+#define GC_WRAM_STACK_SIZE 1024
+
+gc_stack->gc_stack_start = (uintptr_t)mem_alloc(GC_WRAM_STACK_SIZE);
+gc_stack->gc_stack_end = gc_stack->gc_stack_start + GC_WRAM_STACK_SIZE;
+gc_stack->gc_stack_top = (uintptr_t*)gc_stack->gc_stack_start;
+```
+
+也就是说，师兄解决空间占用的方法不是“不要 stack”，而是“每个 tasklet 只给一个很小的固定 WRAM stack”。
+
+还有一个容易误解的点：
+- 代码里确实有 shared WRAM stack 和 MRAM stack 的设计。
+- 但当前 `gc_stack_push()` 满了以后会先打印 `GC Stack overflowed` 然后 `abort()`。
+- 后面把一半 local stack 搬到 shared WRAM/MRAM 的代码被注释掉了。
+- 所以当前实际行为是：1KB local stack 够用就继续，不够就失败；不是自动扩容。
+
+## 2026-05-19: FT slot set 是什么，以及师兄 WRAM 与当前 GC Local Workspace 的区别
+
+FT slot set 的 FT 指 Function Table。这里的 slot 不是对象本身，而是“保存指针的那个位置的地址”。在 ejs-new 里，它主要记录 function table / inline cache 等 VM 元数据里的强引用 slot。
+
+为什么需要 FT slot set：
+- 普通对象之间的 old-to-young 引用由 remembered set 记录。
+- 但是 VM 的 function table / inline cache 不是普通 heap object。
+- 这些结构里也可能保存指向 young object 的引用，例如 `JSValue` slot 或 `void*` slot。
+- 如果 minor GC 不记录这些 slot，就可能漏掉 young object，或者 GC 后这些 slot 还指向已经失效的 young 地址。
+
+FT slot set 的作用：
+
+```text
+程序运行时：
+  如果 function table / inline cache 的某个 slot 写入 young 指针
+  -> 记录这个 slot address 到 FT slot set
+
+minor GC 时：
+  reserve phase 扫 FT slot set
+  -> 把 slot 当前指向的 young object 加入 GC tracing
+
+copy/traverse 后：
+  patch phase 再扫 FT slot set
+  -> 把 slot 里的 old young 地址改成新的 old 地址
+```
+
+它和 remembered set 的区别：
+
+```text
+remembered set:
+  记录普通 old/init object field slot
+
+FT slot set:
+  记录 VM 元数据里的 root-like slot
+  例如 function table / inline cache
+```
+
+当前 ejs-new 中：
+- GiY: `GiYFTSlotSet g_ft_slot_set`
+  - size = young-before-aux / 64, min 32KB。
+- Cheney: `CacheCheneyFTSlotSet cache_cheney_ft_slot_set`
+  - size = young-before-aux / 8, min 32KB。
+
+师兄 DPU 代码中没有完全对应 ejs-new 这个 FT slot set 的结构。师兄面对的是 Java/DPU runtime，主要 root 来源是：
+- Java stack
+- exported_ref
+- remembered set
+- class/method metadata
+
+而 ejs-new 的 JavaScript runtime 额外有 FunctionTable / InlineCache 这种会缓存对象、shape、property map 的 VM 元数据，所以需要 FT slot set。
+
+师兄 WRAM 与当前 GC Local Workspace 的根本区别：
+
+1. 师兄 WRAM 是真实硬件 memory。
+
+```text
+DPU WRAM:
+  真实 fast local memory
+  容量很小
+  地址空间上明确不同于 MRAM
+```
+
+所以师兄可以真实地说：
+
+```text
+young object 在 WRAM
+old object 在 MRAM
+WRAM pointer 和 MRAM pointer 可以通过表示方式区分
+```
+
+2. 当前 GC Local Workspace 是人为预算，不是真硬件分区。
+
+```text
+ejs-new GC Local Workspace:
+  是 malloc 出来的 cache_space 中的一部分
+  目标是让它“尽量留在 CPU cache”
+  但它不是硬件强制的 L2 区
+```
+
+所以当前只能说：
+
+```text
+这些结构被放进 local workspace budget
+期望由于大小受控和访问频繁，它们更可能留在 cache
+```
+
+不能说它们物理上一定在 cache。
+
+3. 师兄 WRAM 同时放 young 和少量 GC 元数据。
+
+师兄 generational WRAM heap：
+
+```text
+wram_heap:
+  Allocator
+  remembered set: 4KB
+  young generation: 28KB
+
+outside wram_heap but still WRAM:
+  per-tasklet GC stack: 1KB each
+  shared GC stack: 1KB
+```
+
+4. 当前 GC Local Workspace 概念更大。
+
+当前用户定义的 GC Local Workspace / local-cache budget 不是只指辅助结构，而是“希望整体放进 cache 的 GC local budget”。它包含：
+
+```text
+init/work metadata area
+remembered set buffer/hash
+young allocation area
+GiY auxiliary structures
+  - g_gc_stack
+  - FT slot set
+  - optional GiYOL staging/batch
+```
+
+5. 两者空间压力方向不同。
+
+师兄：
+- WRAM 很小，所以所有结构都必须极小。
+- GC stack 固定 1KB。
+- RSet 固定 4KB。
+- young 固定 28KB。
+- 溢出就很危险，很多设计依赖硬件局部性和小对象假设。
+
+当前 GiY：
+- workspace 现在按 512/640/768/896KB 做实验。
+- 辅助结构可以更大，例如 896KB 下 `g_gc_stack` 约 85KB。
+- 目标不是适配硬件 WRAM 容量，而是在 CPU cache 层面测试 locality tradeoff。
+
+设计分析：
+- 师兄 WRAM 是“硬约束”：放不下就不能运行，或者必须 spill 到 MRAM。
+- 当前 GC Local Workspace 是“实验约束”：放大或缩小会改变 locality、young capacity、GC frequency。
+- 因此不能直接把师兄的 1KB stack 照搬成最佳值；它是 DPU WRAM 极小容量下的结果。
+- 但可以借鉴师兄思想：高频小元数据应该尽量小、固定、可预测；不要让 GC stack 这类辅助结构无限占用 workspace。
+- 对你的实验来说，最公平的比较方式仍然是：统一总 workspace budget，再比较不同 GC 如何在这个 budget 内分配 young / RSet / stack / FT slot set。
+
+## 2026-05-19: 为什么 FT slot set 不直接和 remembered set 合并
+
+用户问题：既然 remembered set 和 FT slot set 都是在记录“可能指向 young 的 slot”，为什么要分开？能不能合并？
+
+结论：
+- 概念上可以统一成一个更 general 的 slot set。
+- 但当前代码里不能简单把 FT slot 直接塞进 remembered set。
+- 原因是当前 remembered set 有一个隐含前提：它记录的是 old/init heap object 里的 field slot。
+- FT slot set 记录的是 VM metadata 里的 slot，例如 function table / inline cache，它们不是普通 heap object field。
+
+当前 remembered set 的假设：
+
+```text
+slot address 必须在：
+  dram_space old 区
+  或 cache_space init 区
+```
+
+当前 GiY RSet scan 里会检查：
+
+```text
+slot_in_dram = slot_addr >= dram_space.begin && slot_addr < dram_space.end
+slot_in_init = slot_addr >= cache_space.begin && slot_addr < cache_space.work_begin
+if (!slot_in_dram && !slot_in_init) continue;
+```
+
+因此如果把 FunctionTable / InlineCache 的 slot address 直接塞进 remembered set，很可能会被这段过滤掉，因为这些 slot 不一定在 old/init heap range 内。
+
+两者来源也不同：
+
+```text
+remembered set:
+  来自普通 heap write barrier
+  语义是 old/init object field -> young object
+
+FT slot set:
+  来自 VM metadata update hook
+  语义是 FunctionTable / InlineCache metadata slot -> young object
+```
+
+为什么当前分开更安全：
+- 不破坏 remembered set 的 old-to-young invariant。
+- RSet 扫描时可以只处理 heap slot，FT set 扫描时可以处理 metadata slot。
+- profile/debug 更清楚：可以分开知道 ordinary old-to-young 和 VM metadata root 的成本。
+- 不需要让 RSet 接受非 heap 地址，减少误扫任意地址的风险。
+
+如果要合并，正确方式不是“直接共用 remembered_set.buffer”，而是重新设计成：
+
+```text
+UnifiedSlotSet:
+  slot address
+  slot kind: JSValue slot / void* slot
+  slot domain: heap old slot / init slot / VM metadata slot
+```
+
+扫描时根据 `slot domain` 决定是否需要 old-space guard、是否允许非 heap 地址、如何 patch。
+
+可能的收益：
+- 少一个 set，少一个固定 workspace allocation。
+- 统一去重逻辑。
+- 让 local workspace 更简洁。
+
+风险：
+- 当前 RSet 的过滤逻辑、mprotect old read/write 逻辑、debug invariant 都要改。
+- 如果实现粗糙，可能把非 GC 管理的地址当成 heap slot 处理，导致错误。
+- 实验上会改变 RSet 数据结构本身，不再是“只改策略”的小变化。
+
+建议：
+- 现在阶段保留分离结构更清楚。
+- 如果后续要优化 workspace，可以做一个明确的新实验：`Unified Slot Set`。
+- 这个实验应该单独测，因为它改变的是 root/slot bookkeeping 设计，不只是 RSet 策略。
+
+## 2026-05-19: 当前 GiY 与 Cheney GC workspace 结构、大小、区别
+
+当前讨论以 `CACHE_SIZE_KB=896` 为例。根据当前代码和已有 smoke/benchmark 输出：
+
+```text
+init object alloc over = 19.757812 KB
+RSet 后报告的 Cache size = 704 KB
+Young before aux = 704 - 19.757812 = 684.242188 KB
+```
+
+### 共同部分
+
+GiY 当前默认已经是 read-slot RSet；Cheney 也是 read-slot 型 RSet。两者 RSet local workspace 基本一致：
+
+```text
+RSet buffer = 128 KB
+RSet hash   = 64 KB
+RSet values = 0 KB
+RSet total  = 192 KB
+capacity    = 16384 slots
+```
+
+解释：
+- `buffer` 存 old/init slot address。
+- `hash` 用于 write barrier 去重。
+- `values` 当前不使用。
+
+因此当前 GiY 和 Cheney 的 RSet 空间已经公平，差异不在 RSet。
+
+### GiY workspace
+
+GiY 在 `giy_bind_stack_to_cache_impl()` 中从 young-before-aux 继续切辅助结构：
+
+```text
+stack_bytes   = young_before_aux / 8
+ft_slot_bytes = young_before_aux / 64, min 32 KB
+edge_log      = 0 KB
+```
+
+896KB 下：
+
+```text
+Total workspace budget = 896.00 KB
+RSet                   = 192.00 KB
+Init metadata/objects  = 19.76 KB
+GiY aux total          = 117.52 KB
+  g_gc_stack           = 85.52 KB
+  FT slot set          = 32.00 KB
+  edge log             = 0.00 KB
+Usable young after aux = 566.72 KB
+```
+
+GiY aux 用途：
+- `g_gc_stack`: 保存已经 reserve old address、但还没扫描 child 的 young object。
+- `FT slot set`: 保存 FunctionTable / InlineCache 等 VM metadata 中可能指向 young 的 slot。
+- `edge_log`: 当前不分配实际 items，只保留计数/profile 概念。
+
+### Cheney workspace
+
+Cheney 在 `cache_cheney_bind_ft_slots_to_cache()` 中只切 FT slot set：
+
+```text
+ft_slot_bytes = young_before_aux / 8, min 32 KB
+```
+
+896KB 下：
+
+```text
+Total workspace budget = 896.00 KB
+RSet                   = 192.00 KB
+Init metadata/objects  = 19.76 KB
+Cheney aux total       = 85.52 KB
+  FT slot set          = 85.52 KB
+Usable young after aux = 598.72 KB
+```
+
+Cheney 没有 `g_gc_stack`，因为 Cheney 的 copied old/to-space 本身就是 work queue：
+
+```text
+root / RSet 发现 young object
+  -> 立即 copy 到 old/to-space
+  -> dram_space.free 前进
+  -> scavenge 用 dram_space.current 线性扫描已复制对象
+```
+
+所以 Cheney 不需要额外 stack 保存“待扫描对象”。
+
+### 核心差异
+
+空间差异：
+
+```text
+GiY aux    = 117.52 KB
+Cheney aux = 85.52 KB
+GiY 多用  = 32.00 KB
+```
+
+为什么只多 32KB，而不是多 85KB：
+- GiY 有 85.52KB stack，但 GiY 的 FT slot set 只有 32KB。
+- Cheney 没有 stack，但 Cheney 的 FT slot set 是 85.52KB。
+- 两者相抵后，GiY 总 aux 多 32KB。
+
+算法差异：
+- GiY: reserve first, traverse/copy later，需要 `g_gc_stack`。
+- Cheney: copy immediately, copied old/to-space itself is traversal queue。
+
+实验含义：
+- 当前 RSet 部分已经对齐。
+- GiY 少了约 32KB usable young space，会略微增加 GC frequency 或降低 young capacity。
+- 如果做严格公平比较，应该明确写出两者都在 896KB 总 budget 内，但 internal split 不同。
+- 如果想让 young-after-aux 完全一致，需要人为调整 aux 或 total budget；但那会改变“统一 total workspace budget”的公平原则。
+
+## 2026-05-19: FT slot set 在 GiY 和 Cheney 中大小不同是否公平
+
+用户指出：既然 FT slot set 在两个 GC 中作用相同，为什么 GiY 和 Cheney 的大小不同？这样公平吗？
+
+结论：
+- 这个质疑是正确的。
+- 从语义上看，GiY 和 Cheney 的 FT slot set 都记录 FunctionTable / InlineCache 等 VM metadata 中可能指向 young 的 slot。
+- 它不是 GC 算法核心数据结构，而是 VM root bookkeeping。
+- 因此如果目标是严格公平比较 GC 算法，FT slot set 大小最好应该统一。
+
+当前代码差异：
+
+```text
+GiY:
+  g_gc_stack   = young_before_aux / 8
+  FT slot set  = young_before_aux / 64, min 32KB
+
+Cheney:
+  FT slot set  = young_before_aux / 8, min 32KB
+```
+
+896KB 下：
+
+```text
+GiY FT slot set    = 32KB
+Cheney FT slot set = 85.52KB
+```
+
+为什么会这样：
+- 更像历史实现差异，而不是一个严格的理论设计。
+- GiY 已经有一个大的 `g_gc_stack`，所以 FT slot set 被设得较小。
+- Cheney 没有 `g_gc_stack`，于是 Cheney 的 FT slot set 使用了较大的 `young/8`。
+- 但 FT slot set 的语义本身并没有因为 Cheney/GiY 而改变。
+
+公平性分析：
+- 如果只按“总 workspace budget 都是 896KB”来说，表面上公平。
+- 但内部结构中，FT slot set 是同类 VM metadata bookkeeping，大小不同会引入 confound。
+- Cheney 的 FT slot set 更大，会占用更多 workspace，减少 Cheney 的 usable young。
+- GiY 的 FT slot set 更小，但 GiY 另有 `g_gc_stack`，最后 GiY usable young 仍比 Cheney 少约 32KB。
+- 因此当前结果不能简单解释为纯 GC algorithm 差异，其中包含 FT slot set allocation policy 的差异。
+
+建议：
+- 为了严格公平，应该把 FT slot set 大小改成统一配置。
+- 推荐新增类似 `FT_SLOT_SET_BYTES` 的统一宏，GiY 和 Cheney 共用。
+- 初始值可以设为 32KB，因为当前 GiY 已经使用 32KB 且通过 full suite。
+- 然后重新跑一轮 GiY/Cheney benchmark。
+
+这样比较时：
+
+```text
+RSet size: identical
+FT slot set size: identical
+total workspace budget: identical
+剩下差异主要来自：
+  GiY 需要 g_gc_stack
+  Cheney 用 copied old/to-space scan pointer
+```
+
+这会比当前比较更干净。
+
+## 2026-05-20: 统一 GiY / Cheney 的 FT slot set 大小
+
+已修改：
+- 新增统一宏 `GC_FT_SLOT_SET_BYTES`，默认值为 32KB。
+- GiY 和 Cheney 都使用这个宏决定 FT slot set 的大小。
+- `common.mk` 也支持通过 `GC_FT_SLOT_SET_BYTES=...` 覆盖该值。
+
+修改位置：
+- `ejsvm/cache_dram_manager.h`: 定义默认 `GC_FT_SLOT_SET_BYTES`。
+- `ejsvm/GiY.cc`: GiY 的 `g_ft_slot_set` 改为使用统一大小。
+- `ejsvm/cache_dram_manager.cc`: Cheney 的 `cache_cheney_ft_slot_set` 改为使用统一大小。
+- `ejsvm/common.mk`: 支持编译时传入 `GC_FT_SLOT_SET_BYTES`。
+
+验证：
+
+```text
+GiY, CACHE_SIZE_KB=896:
+  init_info: giy ft slot set bytes=32KB capacity=4096
+  Young before aux: 684.24 KB
+  Young after aux:  566.72 KB
+  Aux total:        117.52 KB
+
+Cheney, CACHE_SIZE_KB=896:
+  init_info: cache_cheney ft slot set bytes=32KB capacity=4096
+```
+
+最后已把 `build.debug/ejsvm` 重新切回 GiY 版本，并再次确认 GiY 仍打印 `giy ft slot set bytes=32KB capacity=4096`。
+
+结论：
+- 之前的 FT slot set 不公平点已经修正。
+- 之前是 GiY 32KB、Cheney 85.52KB。
+- 现在两边都是 32KB、4096 entries。
+
+修正后的 896KB workspace 结构：
+
+```text
+GiY:
+  RSet:        192KB
+  init object: 19.76KB
+  g_gc_stack:  85.52KB
+  FT slot set: 32KB
+  usable young after aux: 566.72KB
+
+Cheney:
+  RSet:        192KB
+  init object: 19.76KB
+  FT slot set: 32KB
+  usable young after aux: about 652.24KB
+```
+
+注意：
+- 现在 Cheney 的 usable young 比 GiY 大约多 85.52KB。
+- 这个差异来自 GiY 自己需要 `g_gc_stack`；Cheney 使用 copied old/to-space 的 scan pointer，不需要额外 tracing stack。
+- 如果比较规则是“总 local workspace budget 相同”，这个差异应该算作 GiY 算法的数据结构成本，不再是 FT slot set 的不公平。
+- 如果比较规则是“usable young 必须相同”，则还需要给 Cheney 增加 dummy padding，或者给 GiY 增加总 budget；但那是在比较另一个问题。
+
+剩余需要小心的差异来源：
+- `g_gc_stack`: GiY 独有，影响 usable young；这是算法设计差异。
+- JSObject scanning 相关宏：如果只给 GiY 或只给 Cheney 开启特殊优化，会不公平。
+- GiYOL staging / batch buffer：只在 GiYOL 中存在，比较 GiYOL 时必须计入 local workspace。
+- profiling/debug/mprotect 开关：benchmark 时必须两边一致。
+- 输出口径：Cheney 目前没有像 GiY 一样完整打印 `young after aux`，报告时需要手动计算或补充打印。
+
+## 2026-05-20: 重新检查 GiY / Cheney 剩余公平性差异
+
+检查目标：
+- RSet 是否仍有不公平。
+- FT slot set 是否仍有不公平。
+- GiY 独有 `g_gc_stack` 是否属于不公平，且 85KB 是否过大。
+- JSObject scan / GiYOL / profiling 开关是否会引入额外 confound。
+
+### 1. RSet
+
+当前默认 GiY：
+
+```text
+GIY_RSET_READ_SLOT_AT_GC = 1
+RSet buffer = 128KB
+RSet values = 0KB
+RSet hash   = 64KB
+RSet total  = 192KB
+capacity    = 16384
+```
+
+Cheney：
+
+```text
+RSet buffer = 128KB
+RSet hash   = 64KB
+RSet total  = 192KB
+capacity    = 16384
+```
+
+结论：
+- 当前默认 GiY 和 Cheney 的 RSet 空间基本公平。
+- GiY 的 old slot scan 会在 GC 时重新读 slot；Cheney 也是记录 slot address 后在 GC 时读 slot。
+- 注意：如果未来用 `GIY_RSET_READ_SLOT_AT_GC=false`，GiY 会重新多出 `values[]`，那就不是和 Cheney 的公平对照了。
+
+### 2. FT slot set
+
+已修正：
+
+```text
+GiY FT slot set    = 32KB, capacity 4096
+Cheney FT slot set = 32KB, capacity 4096
+```
+
+结论：
+- 之前 Cheney FT slot set 更大是不干净的差异。
+- 现在已经统一，不再是主要公平性问题。
+
+### 3. GiY g_gc_stack
+
+当前公式：
+
+```c
+stack_bytes = young_before_aux / 8
+```
+
+896KB 配置下：
+
+```text
+young_before_aux = 684.24KB
+g_gc_stack       = 85.52KB
+capacity         = 10947 pointers
+```
+
+512/640/768/896 当前估算：
+
+```text
+CACHE_SIZE_KB  young_before  stack    capacity  GiY young after aux  Cheney young after aux
+512            300.24KB      37.52KB  4803      230.72KB             268.24KB
+640            428.24KB      53.52KB  6851      342.72KB             396.24KB
+768            556.24KB      69.52KB  8899      454.72KB             524.24KB
+896            684.24KB      85.52KB  10947     566.72KB             652.24KB
+```
+
+历史 `GIY_PROFILE_DETAIL=1` full-suite 结果中，最大 stack depth：
+
+```text
+Most benchmarks: 147-320 entries
+Havlak:          5244 entries
+```
+
+该历史 run 的 stack capacity 为约 5442 entries，Havlak 用到了 96.4%。
+
+结论：
+- 85KB/10947 entries 对大多数 benchmark 明显过大。
+- 但不能简单降到 8KB 或 16KB，因为 Havlak 曾经接近 5442 entries。
+- 更合理的生产默认可能是固定 64KB 左右，capacity 8192 entries，比历史 Havlak 峰值 5244 多约 56% safety margin。
+- 如果只看当前 896KB，85KB 是保守、偏大；它牺牲了约 85.52KB usable young，使 GiY 比 Cheney 更频繁 GC。
+- 这不是“不公平给 GiY 好处”，反而是 GiY 自己承担了过大的算法辅助空间成本。
+
+### 4. JSObject scan
+
+当前默认输出：
+
+```text
+JSObject precise scan: 0
+JSObject type-aware scan: 0
+JSObject array skip size: 0
+```
+
+结论：
+- 默认 GiY 没有开启特殊 JSObject precise/type-aware 优化。
+- 因此默认 GiY vs Cheney 比较中，JSObject scan 不是明显不公平来源。
+- 但如果单独打开这些宏，只能作为 GiY 优化实验，不能直接拿去和默认 Cheney 比。
+
+### 5. GiYOL workspace
+
+GiYOL 默认会有 staging / batch workspace：
+
+```text
+GIYOL_TINY_STAGING_BYTES = 5KB
+GIYOL_TINY_FLUSH_BYTES   = 4KB
+GIYOL_WORKSPACE_BATCH_ENTRIES = 4096
+```
+
+结论：
+- 这只影响 GiYOL，不影响 GiY vs Cheney。
+- 比较 GiYOL 时必须把 staging/batch 算进 GC Local Workspace。
+
+### 6. profiling/debug/mprotect
+
+检查结果：
+- `GIY_PROFILE_DETAIL` 默认关闭。
+- `GIY_MPROTECT_OLD` 是运行时环境变量，默认关闭。
+- cache miss 脚本中 GiY 和 Cheney 都用 `taskset -c 0`，CPU pinning 基本一致。
+
+注意：
+- `GIY_PROFILE_DETAIL=true` 会显著拖慢程序，不能作为性能 benchmark。
+- 它只适合测 stack depth / internal counters。
+- 本次曾尝试用当前 896KB detail build 跑 Havlak，但 overhead 太大，已中止；不把这次未完成结果作为证据。
+
+总体结论：
+- 当前已修正的 FT slot set 差异不再是不公平点。
+- 当前 RSet 默认策略也基本公平。
+- 剩下最大的结构差异是 GiY 的 `g_gc_stack`。
+- 在“统一总 local workspace budget”的规则下，`g_gc_stack` 应该算 GiY 算法成本，不是不公平。
+- 但从工程上看，`young/8` 的比例式 stack sizing 偏保守；建议改成可配置固定大小，并实验 48KB / 64KB / 85KB。
+
+## 2026-05-20: GiY GC stack 48KB / 64KB / 85KB 实验
+
+实现：
+- 新增编译参数 `GIY_GC_STACK_BYTES`。
+- 默认值改为 `64 * 1024`，即 64KB。
+- 如果显式传 `GIY_GC_STACK_BYTES=0`，则恢复旧逻辑 `young_before_aux / 8`。
+- `common.mk` 已支持传入 `GIY_GC_STACK_BYTES=...`。
+
+测试方法：
+- 固定 `CACHE_SIZE_KB=896`。
+- 生成临时缩短版 benchmark：`*_StackMini.sbc`。
+- 修改点：只把 `new Run(..., 100, inner)` 的外层重复次数从 100 改成 3；inner workload 保持不变。
+- 跑 2 轮，配置为 48KB / 64KB / 85KB。
+- 输出目录：
+  - `build.debug/benchmarks/out_giy_stack_size_mini_20260520_010013`
+  - `build.debug/benchmarks/out_giy_stack_size_mini_r2_20260520_011904`
+
+注意：
+- 这不是正式论文用 full-suite。
+- 原本尝试跑完整 suite，但 Bounce 单个 benchmark 在 48KB 下耗时约 306 秒，因此完整 3 组 full-suite 会变成数小时级。
+- 本实验用于快速判断 stack size 的方向、overflow 风险和趋势。
+
+两轮合计结果：
+
+```text
+config   total_sum  gc_sum  business_sum  minor_sum  young_after  stack
+48KB     398.898s   8.715s  390.183s      62702      604.24KB     48KB
+64KB     401.191s   8.762s  392.429s      64370      588.24KB     64KB
+85KB     400.493s   8.916s  391.577s      66800      567.24KB     85KB
+```
+
+相对 85KB：
+
+```text
+48KB:
+  total time: -0.398%
+  GC time:    -2.254%
+  minor GC:   -4098
+  young gain: +37.00KB
+
+64KB:
+  total time: +0.174%
+  GC time:    -1.727%
+  minor GC:   -2430
+  young gain: +21.00KB
+```
+
+结论：
+- 三组都成功跑完，包含 Havlak，没有 stack overflow。
+- 48KB 在这两轮缩短版测试中总时间最好，GC 次数最少。
+- 64KB 的 GC 时间也比 85KB 少，并且比 48KB 有明显更大的安全余量。
+- 85KB/原 young/8 方案没有明显优势，反而减少 usable young，导致 minor GC 次数最多。
+
+判断：
+- 如果只看这次缩短版测试的性能，48KB 最快。
+- 如果作为默认设计，64KB 更稳妥：它比 85KB 节省约 21KB young space，同时比历史 Havlak peak stack depth 有更高安全余量。
+- 因此当前默认改为 64KB；48KB 可以作为 aggressive 实验配置继续测试。
+
+默认 64KB smoke 验证：
+
+```text
+make OPT_GC=giy CACHE_SIZE_KB=896 -B -j2
+./ejsvm a.sbc
+
+init_info: giy gc stack bytes=64KB capacity=8192 mode=fixed
+Young after aux: 588.24 KB
+Aux total: 96.00 KB (stack 64.00 KB, ft 32.00 KB)
+```
+
+当前 GiY 默认配置确认：
+
+```text
+Build:
+  OPT_GC=giy
+  CACHE_SIZE_KB=896
+
+Local workspace budget:
+  total budget: 896KB
+  RSet reservation: 192KB
+    buffer: 128KB
+    values: 0KB
+    hash: 64KB
+  remaining cache manager space after RSet: 704KB
+  initial object allocation: 19.76KB
+
+Young / auxiliary layout:
+  Young before aux: 684.24KB
+  GC stack: 64KB fixed, capacity 8192 entries
+  FT slot set: 32KB, capacity 4096 entries
+  Aux total: 96KB
+  Young after aux: 588.24KB
+
+Other flags:
+  RSet mode: read_slot
+  GIY_PROFILE_DETAIL: disabled
+  GiYOL staging / batch: 0KB in this GiY build
+  JSObject precise scan: disabled
+  JSObject type-aware scan: disabled
+  Small memcpy limit: 256 bytes
+```
+
+解释：
+- 现在 GiY 的 GC stack 已经从旧的 `young_before_aux / 8` 改为默认固定 `64KB`。
+- 如果需要恢复旧逻辑，可以编译时传 `GIY_GC_STACK_BYTES=0`。
+- 如果要继续测试更 aggressive 的方案，可以编译时传 `GIY_GC_STACK_BYTES=49152`，即 48KB。
+
+## 2026-05-20: GiY 默认 GC stack 改为 48KB
+
+实现：
+- `ejsvm/GiY.cc` 中默认 `GIY_GC_STACK_BYTES` 从 `64 * 1024` 改为 `48 * 1024`。
+- `common.mk` 的覆盖机制不变，仍然可以用 `GIY_GC_STACK_BYTES=...` 临时指定大小。
+
+验证命令：
+
+```text
+make OPT_GC=giy CACHE_SIZE_KB=896 -B -j2
+./ejsvm a.sbc
+```
+
+当前 GiY 结构：
+
+```text
+Build:
+  OPT_GC=giy
+  CACHE_SIZE_KB=896
+
+Local workspace budget:
+  total budget: 896KB
+  RSet reservation: 192KB
+    buffer: 128KB
+    values: 0KB
+    hash: 64KB
+  remaining cache manager space after RSet: 704KB
+  initial object allocation: 19.76KB
+
+Young / auxiliary layout:
+  Young before aux: 684.24KB
+  GC stack: 48KB fixed, capacity 6144 entries
+  FT slot set: 32KB, capacity 4096 entries
+  Aux total: 80KB
+  Young after aux: 604.24KB
+
+Other flags:
+  RSet mode: read_slot
+  GIY_PROFILE_DETAIL: disabled
+  GiYOL staging / batch: 0KB in this GiY build
+  JSObject precise scan: disabled
+  JSObject type-aware scan: disabled
+  Small memcpy limit: 256 bytes
+```
+
+和 64KB stack 配置相比：
+
+```text
+GC stack:        64KB -> 48KB   (-16KB)
+GC stack cap:    8192 -> 6144   (-2048 entries)
+FT slot set:     32KB -> 32KB   (unchanged)
+Aux total:       96KB -> 80KB   (-16KB)
+Young after aux: 588.24KB -> 604.24KB (+16KB)
+RSet total:      192KB -> 192KB (unchanged)
+```
+
+判断：
+- 这次修改只减少 GiY traversal stack，不改变 RSet、FT slot set、initial object allocation、GiYOL staging/batch。
+- 结构上的直接收益是把 16KB 从 auxiliary area 还给 ordinary young area。
+- 风险是 traversal stack 容量从 8192 entries 降到 6144 entries；之前缩短版 benchmark 中 48KB 已经跑过 Havlak，没有 overflow，但正式使用前仍建议在 full suite 中确认。
+
+## 2026-05-20: CheneyGC vs GiY48 full suite
+
+目的：
+- 完整跑一遍 CheneyGC 和当前 GiY 配置。
+- 当前 GiY 配置为 `CACHE_SIZE_KB=896`，`GIY_GC_STACK_BYTES=48 * 1024`。
+
+测试方法：
+- benchmark：`Bounce CD DeltaBlue Havlak List Mandelbrot NBody Permute Queens Richards Sieve Storage Towers`，共 13 项。
+- 两边都使用 `CACHE_SIZE_KB=896`。
+- CPU 固定到 `taskset -c 0`，减少调度噪声。
+- 输出目录：
+
+```text
+build.debug/benchmarks/out_full_cheney_vs_giy48_20260520_014521
+```
+
+生成文件：
+
+```text
+parsed_summary.tsv
+compare_cheney_vs_giy48.tsv
+analysis_report.md
+```
+
+运行状态：
+- CheneyGC：13/13 status 0。
+- GiY48：13/13 status 0。
+- GiY48 full Havlak 也成功通过，说明 48KB traversal stack 在这次 full suite 中没有 overflow。
+
+当前 workspace 结构：
+
+```text
+Both:
+  total local workspace budget: 896KB
+  remembered set reservation: 192KB
+  remaining cache manager space after RSet: 704KB
+  initial object allocation: 19.76KB
+  FT slot set: 32KB
+
+Cheney:
+  extra GC stack: 0KB
+  effective ordinary young estimate:
+    704KB - 19.76KB - 32KB = about 652.24KB
+
+GiY48:
+  GC traversal stack: 48KB
+  FT slot set: 32KB
+  Aux total: 80KB
+  Young before aux: 684.24KB
+  Young after aux: 604.24KB
+```
+
+总体结果：
+
+```text
+All 13 benchmarks:
+  Cheney total:      6627.809s
+  GiY48 total:       6690.812s
+  delta:             +63.003s  (+0.95%)
+
+  Cheney business:   6512.842s
+  GiY48 business:    6546.417s
+  delta:             +33.575s  (+0.52%)
+
+  Cheney GC full:    114.966s
+  GiY48 GC full:     144.395s
+  delta:             +29.429s  (+25.60%)
+
+  Cheney GC core:    77.182s
+  GiY48 GC core:     100.694s
+  delta:             +23.512s  (+30.46%)
+
+  Cheney scavenge:   74.080s
+  GiY48 scavenge:    75.245s
+  delta:             +1.165s   (+1.57%)
+
+  Cheney minor GCs:  955522
+  GiY48 minor GCs:   1045148
+  delta:             +89626    (+9.38%)
+```
+
+重要解释：
+- Full suite 中 GiY48 总时间只比 Cheney 慢 `0.95%`，差距已经很小。
+- 但是 GC full 时间仍慢 `25.60%`。
+- 关键点是：GiY48 的 scavenge 总时间只比 Cheney 多 `1.57%`，说明 young traversal/copy 主体并不是主要问题。
+- 真正拉开 GC core 的是 scan_RS：
+
+```text
+All 13:
+  Cheney scan_RS: 2.507s
+  GiY48 scan_RS:  24.937s
+  delta:          +22.430s
+
+All 13 GC core gap:
+  +23.512s
+```
+
+也就是说，这次 GC core gap 几乎全部可以由 GiY 的 remembered-set reserve/scan phase 解释。
+
+GC-heavy 三项：
+
+```text
+CD + Havlak + Storage:
+  Cheney total:      1573.127s
+  GiY48 total:       1639.426s
+  delta:             +66.299s (+4.21%)
+
+  Cheney GC full:    94.264s
+  GiY48 GC full:     117.389s
+  delta:             +23.125s (+24.53%)
+
+  Cheney scavenge:   72.601s
+  GiY48 scavenge:    73.088s
+  delta:             +0.487s (+0.67%)
+
+  Cheney scan_RS:    1.867s
+  GiY48 scan_RS:     21.745s
+  delta:             +19.878s
+```
+
+逐项关键结果：
+
+```text
+Havlak:
+  total:  Cheney 748.734s -> GiY48 812.747s, +64.013s (+8.55%)
+  GC:     Cheney 33.169s  -> GiY48 58.483s,  +25.314s (+76.32%)
+  scanRS: Cheney 1.669s   -> GiY48 20.541s
+  GC miss rate: Cheney 1.34% -> GiY48 6.09%
+
+Storage:
+  total:  Cheney 339.370s -> GiY48 331.727s, -7.643s (-2.25%)
+  GC:     Cheney 48.650s  -> GiY48 42.875s,  -5.775s (-11.87%)
+  scavenge: Cheney 45.237s -> GiY48 38.984s
+  GC miss rate: Cheney 0.87% -> GiY48 0.39%
+
+CD:
+  total:  Cheney 485.023s -> GiY48 494.952s, +9.929s (+2.05%)
+  GC:     Cheney 12.445s  -> GiY48 16.031s,  +3.586s (+28.81%)
+  scanRS: Cheney 0.148s   -> GiY48 1.039s
+```
+
+判断：
+- GiY48 的主要优势在 Storage 上成立：GC 时间和 scavenge 时间都比 Cheney 少，说明 GiY 的“尽量避免 old/DRAM read、在 young/local workspace 中完成 traversal/copy 决策”的方向是有效的。
+- GiY48 的主要劣势集中在 Havlak：scan_RS 从 `1.669s` 增加到 `20.541s`，并且 GC cache miss rate 从 `1.34%` 增加到 `6.09%`。
+- Full suite 总体慢 `0.95%` 主要是 Havlak 拉开的。如果排除 Havlak，本轮 GiY48 反而约快 `1.01s`。
+
+最可能原因：
+1. GiY48 effective young 仍小于 Cheney。
+   - Cheney 约 `652.24KB` ordinary young。
+   - GiY48 为 `604.24KB` ordinary young。
+   - GiY48 少约 `48KB`，导致 minor GC count 比 Cheney 多 `9.38%`。
+
+2. GiY 当前 RSet read-slot 策略在 Havlak 上成本很高。
+   - GiY 的 `giy_scan_remembered_set_slots()` 在 GC 中读取 old/init slot 的当前值，判断是否仍指向 young，然后 reserve。
+   - Cheney 的 `scan_remembered_set()` 直接用 Cheney tracer process edge。
+   - 在 Havlak 这种 remembered-set/old-slot 活跃的 workload 中，GiY 的 reserve-only phase 造成大量 slot read 和 cache miss。
+
+3. `Business logic` 差异不能简单理解成“应用代码本身变慢”。
+   - 这里的 business time 是 total - GC full。
+   - 它包含 mutator-side write barrier、allocation fast path、GC 后 cache pollution 对下一段 mutator 的影响。
+   - Havlak 中 GiY48 的 write barrier calls 是 `143,307,492`，Cheney 是 `114,502,529`；这会推高非 GC 时间。
+
+4. GiY 的 scavenge/copy 主体没有明显输。
+   - All 13 scavenge 只慢 `1.57%`。
+   - GC-heavy 三项 scavenge 只慢 `0.67%`。
+   - Storage 中 GiY scavenge 还快 `13.82%`。
+   - 因此下一步不应该优先怀疑 copy/traverse 主体，而应该优先优化 RSet scan/reserve path，尤其是 Havlak。
+
+下一步建议：
+- 第一优先级：针对 Havlak profile `remembered_set.count`、RSet slot 来源、old slot cache miss。
+- 第二优先级：考虑恢复/改进 value-cached RSet，或做 hybrid RSet：记录 slot，同时缓存上次 young value/version，减少 GC 时对 old slot 的直接读取。
+- 第三优先级：继续保留 48KB stack 作为默认候选，因为 full suite 已通过，且它比 64KB 多给 young 16KB。
+
+逐项 benchmark 差距表：
+
+说明：正数表示 GiY48 比 Cheney 慢；负数表示 GiY48 比 Cheney 快。
+
+| Benchmark | Total Cheney | Total GiY48 | Total delta | Total delta % | GC Cheney | GC GiY48 | GC delta | GC delta % | Minor GC delta % |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 326.103 | 305.261 | -20.842 | -6.39% | 0.199 | 0.200 | +0.001 | +0.50% | +7.94% |
+| CD | 485.023 | 494.952 | +9.929 | +2.05% | 12.445 | 16.031 | +3.586 | +28.81% | +12.75% |
+| DeltaBlue | 129.067 | 133.908 | +4.841 | +3.75% | 2.165 | 3.621 | +1.456 | +67.25% | +11.02% |
+| Havlak | 748.734 | 812.747 | +64.013 | +8.55% | 33.169 | 58.483 | +25.314 | +76.32% | +12.38% |
+| List | 187.323 | 186.657 | -0.666 | -0.36% | 0.031 | 0.030 | -0.001 | -3.23% | +7.85% |
+| Mandelbrot | 404.325 | 405.852 | +1.527 | +0.38% | 6.862 | 8.154 | +1.292 | +18.83% | +7.95% |
+| NBody | 647.830 | 650.090 | +2.260 | +0.35% | 10.206 | 13.565 | +3.359 | +32.91% | +7.95% |
+| Permute | 820.324 | 833.725 | +13.401 | +1.63% | 0.002 | 0.003 | +0.001 | +50.00% | +9.38% |
+| Queens | 217.720 | 222.599 | +4.879 | +2.24% | 0.054 | 0.060 | +0.006 | +11.11% | +8.05% |
+| Richards | 1746.595 | 1743.867 | -2.728 | -0.16% | 0.200 | 0.191 | -0.009 | -4.50% | +8.08% |
+| Sieve | 238.318 | 238.358 | +0.040 | +0.02% | 0.976 | 1.175 | +0.199 | +20.39% | +6.67% |
+| Storage | 339.370 | 331.727 | -7.643 | -2.25% | 48.650 | 42.875 | -5.775 | -11.87% | +7.95% |
+| Towers | 337.077 | 331.069 | -6.008 | -1.78% | 0.007 | 0.007 | +0.000 | +0.00% | +7.87% |
+
+## 2026-05-20: 为什么 Havlak 当前不适合 GiY
+
+结论：
+- 不是 Havlak 天生不能用 GiY，而是当前 GiY 的 `read_slot` remembered-set 设计在 Havlak 上特别吃亏。
+- Havlak 是图算法 benchmark，会构造并反复分析 control-flow graph。
+- 代码中有大量长期存在的图结构和容器：
+  - `ControlFlowGraph`
+  - `BasicBlock`
+  - `BasicBlockEdge`
+  - `LoopStructureGraph`
+  - `SimpleLoop`
+  - `UnionFindNode`
+  - `som.Vector`
+  - `som.IdentitySet`
+  - `som.IdentityDictionary`
+- 这些结构会形成大量对象间引用，并且很多容器在运行过程中持续追加/更新引用。
+
+为什么这对当前 GiY 不利：
+1. GiY 的理想情况是：
+   - 大部分 live young graph 可以在 young/local workspace 内完成发现、reserve、copy；
+   - remembered set 很小；
+   - GC 尽量少读 old/DRAM。
+
+2. Havlak 的实际情况是：
+   - CFG / loop graph / vectors / sets 很容易跨过多次 minor GC，变成 old；
+   - 后续算法仍然不断创建新对象，并把新对象挂到旧 graph / old containers 上；
+   - 于是产生大量 old-to-young slots；
+   - minor GC 时必须处理 remembered set。
+
+3. 当前 GiY 使用 `GIY_RSET_READ_SLOT_AT_GC=1`：
+   - remembered set 记录的是 old slot address；
+   - minor GC 时 `giy_scan_remembered_set_slots()` 要重新读取这些 old/init slots；
+   - 如果 slot 当前仍指向 young，才 reserve target；
+   - 之后还要在后续 phase patch remembered-set slots。
+
+4. 这正好破坏了 GiY 的核心假设：
+   - GiY 本来想避免 GC 过程中频繁读 old；
+   - Havlak 迫使 GiY 在 RSet phase 读大量 old slots；
+   - 这些 old slots 分布在图结构和容器里，locality 很差；
+   - 因此 cache miss 明显上升。
+
+本次数据：
+
+```text
+Havlak:
+  Cheney total:   748.734s
+  GiY48 total:    812.747s
+  delta:          +64.013s (+8.55%)
+
+  Cheney GC:      33.169s
+  GiY48 GC:       58.483s
+  delta:          +25.314s (+76.32%)
+
+  Cheney scan_RS: 1.669s
+  GiY48 scan_RS:  20.541s
+
+  Cheney scavenge: 20.373s
+  GiY48 scavenge:  25.409s
+
+  Cheney GC miss rate: 1.34%
+  GiY48 GC miss rate:  6.09%
+
+  Cheney minor GC: 200221
+  GiY48 minor GC:  225001
+  delta:           +12.38%
+```
+
+解释：
+- Havlak 上 GiY 的最大问题不是 copy/scavenge 主体，而是 remembered-set scan。
+- `scan_RS` 从 `1.669s` 增加到 `20.541s`，单这一项就解释了大部分 GC 差距。
+- GiY48 的 young after aux 是 `604.24KB`，Cheney 估算 ordinary young 约 `652.24KB`，GiY 少约 `48KB`，所以 minor GC 次数也更多。
+- 更多 minor GC 会反复触发更贵的 RSet scan，形成放大效应。
+
+和 Storage 的对比：
+
+```text
+Storage:
+  Cheney GC:      48.650s
+  GiY48 GC:       42.875s
+  GiY48 faster:   -11.87%
+
+  Cheney scan_RS: 0.050s
+  GiY48 scan_RS:  0.165s
+
+  Cheney scavenge: 45.237s
+  GiY48 scavenge:  38.984s
+```
+
+Storage 虽然 GC-heavy，但 remembered-set scan 很小，所以 GiY 的局部 traversal / old-read avoidance 优势能发挥出来。Havlak 正相反：RSet/old-slot 读取太强，抵消并超过了 GiY 的优势。
+
+因此准确表述应该是：
+- Havlak 不适合“当前 read-slot RSet 版本的 GiY”。
+- 如果未来实现 hybrid/value-cached RSet、减少 GC 时读取 old slots，Havlak 可能会变得更适合 GiY。
+
+## 2026-05-20: Havlak saved-value RSet 单项实验
+
+目的：
+- 在当前 GiY48 配置下，切回旧的 saved-value RSet。
+- 这个版本不在 GC 的 RSet scan 阶段直接读取 old slot，而是在 write barrier 时保存 slot 的 value。
+- 只跑一次 Havlak，并与 Cheney / GiY48 read-slot 对比。
+
+构建配置：
+
+```text
+OPT_GC=giy
+CACHE_SIZE_KB=896
+GIY_GC_STACK_BYTES=49152
+GIY_RSET_READ_SLOT_AT_GC=false
+GIY_RSET_INDEX_FAST=true
+```
+
+输出目录：
+
+```text
+build.debug/benchmarks/out_havlak_giy48_saved_value_rset_20260520_114821
+```
+
+启动后的空间分布：
+
+```text
+RSet mode: saved_value
+RSet buffer: 64KB
+RSet values: 64KB
+RSet hash:   64KB
+RSet total:  192KB
+
+Remaining cache manager space after RSet: 704KB
+Initial object allocation: 19.76KB
+
+Young before aux: 684.24KB
+GC stack:         48KB, capacity 6144
+FT slot set:      32KB, capacity 4096
+Aux total:        80KB
+Young after aux:  604.24KB
+```
+
+和当前 read-slot RSet 的空间区别：
+
+```text
+read-slot:
+  buffer 128KB + values 0KB + hash 64KB = 192KB
+
+saved-value:
+  buffer 64KB + values 64KB + hash 64KB = 192KB
+```
+
+所以两者总 RSet 空间一样，GiY ordinary young 也一样，都是 `604.24KB`。
+
+三方 Havlak 结果：
+
+| Metric | Cheney | GiY48 read-slot | GiY48 saved-value | saved vs read-slot | saved vs Cheney |
+|---|---:|---:|---:|---:|---:|
+| Total sec | 748.734 | 812.747 | 809.171 | -3.576 (-0.44%) | +60.437 (+8.07%) |
+| Business sec | 715.565 | 754.263 | 767.666 | +13.403 (+1.78%) | +52.101 (+7.28%) |
+| GC full sec | 33.169 | 58.483 | 41.505 | -16.978 (-29.03%) | +8.336 (+25.13%) |
+| GC core sec | 22.198 | 46.118 | 28.348 | -17.770 (-38.53%) | +6.150 (+27.71%) |
+| scan_RS sec | 1.669 | 20.541 | 1.433 | -19.108 (-93.02%) | -0.236 (-14.14%) |
+| Scavenge sec | 20.373 | 25.409 | 26.747 | +1.338 (+5.27%) | +6.374 (+31.29%) |
+| Minor GC count | 200221 | 225001 | 225001 | +0.00% | +12.38% |
+| GC cache misses | 29407315 | 128918727 | 64309588 | -50.12% | +118.69% |
+| GC cache refs | 2196319620 | 2116017931 | 2153675612 | +1.78% | -1.94% |
+| GC miss rate | 1.34% | 6.09% | 2.99% | -3.10 pp | +1.65 pp |
+| Write barrier calls | 114502529 | 143307492 | 143307492 | +0.00% | +25.16% |
+
+判断：
+- saved-value RSet 成功解决了 read-slot 版本在 Havlak 上的最大问题：
+  - `scan_RS` 从 `20.541s` 降到 `1.433s`，比 read-slot 少 `93.02%`。
+  - GC full 从 `58.483s` 降到 `41.505s`，少 `29.03%`。
+  - GC cache miss rate 从 `6.09%` 降到 `2.99%`。
+- 但是 total 只改善 `0.44%`，原因是代价转移到非 GC 部分：
+  - Business time 从 `754.263s` 增加到 `767.666s`，多 `13.403s`。
+  - saved-value 模式需要在 write barrier 中保存/更新 value，Havlak 的 write barrier calls 有 `143,307,492` 次，这部分成本进入 business time。
+- saved-value 仍明显慢于 Cheney：
+  - total 慢 `8.07%`；
+  - GC full 慢 `25.13%`；
+  - scavenge 慢 `31.29%`；
+  - minor GC 多 `12.38%`。
+
+结论：
+- 旧 saved-value RSet 确认了我的判断：Havlak 上 read-slot 的 old-slot 读取确实是大问题。
+- 但简单回到 saved-value 不是最终方案，因为它把成本从 GC scan_RS 转移到了 mutator/write barrier。
+- 最有价值的方向应该是 hybrid RSet：
+  - 保留 slot address，保证 patch 正确；
+  - 同时缓存 value 或 dirty/version 信息；
+  - GC 时尽量少读 old slot；
+  - write barrier 中也不能引入太重的重复更新成本。
+
+## 2026-05-20: 下一步 RSet 设计思考
+
+基于 Havlak 三方实验，我现在的判断是：
+- read-slot RSet 的问题是 GC 阶段读 old slot 太多；
+- saved-value RSet 的问题是 write barrier 阶段更新 value 太多；
+- 因此不应该简单二选一，而应该做 hybrid/indexed RSet。
+
+最推荐的方案：
+
+### 方案 A：Indexed Hybrid RSet
+
+核心想法：
+- RSet entry 仍然保存 old slot address。
+- 同时保存一个 cached value。
+- 再保存一个 dirty bit。
+- GC 时：
+  - 如果 dirty=0，用 cached value，不读 old slot；
+  - 如果 dirty=1，才读 old slot 的当前值。
+- write barrier 时：
+  - 第一次看到 slot：插入 slot + value，dirty=0；
+  - 后续同一个 slot 再写：
+    - 如果 value 没变，什么都不做；
+    - 如果 value 变了，不必每次更新 cached value，可以只把 dirty bit 置 1。
+
+这样同时避免两个极端：
+- 不像 read-slot 那样 GC 时读所有 old slots；
+- 不像 saved-value 那样 duplicate write 时反复更新 values[]。
+
+正确性：
+- 如果 slot 插入后没有再被写过，cached value 就是准确的，GC 可以直接用它。
+- 如果 slot 插入后又被写过，dirty=1，GC 读真实 slot，所以不会使用过期 value。
+- minor GC patch 完以后 RSet 本来就会 clear，因此不需要跨 GC 保留复杂状态。
+
+### 方案 B：把 RSet hash table 改成 index table
+
+当前 saved-value fast index 有一个明显问题：
+- `remembered_set_hash_indices` 是 `malloc` 出来的；
+- 它不在 GC Local Workspace 里；
+- 这既不完全符合 workspace 设计，也可能造成 write barrier 侧 cache miss。
+
+更好的设计：
+- hash table 不直接存 slot address；
+- hash table 存 entry index + 1；
+- 查找时：
+  - 从 hash table 取 index；
+  - 到 `buffer[index]` 里比较 slot address；
+  - 相等则找到 entry。
+
+好处：
+- 不需要额外的 `remembered_set_hash_indices`。
+- hash table 可以用 `uint16_t` 或 `uint32_t`，而不是 `uintptr_t`。
+- 如果 capacity 小于 65535，`uint16_t` 就够。
+- 对当前 8192/16384 entries 来说完全够。
+
+空间估算：
+
+```text
+当前 saved-value:
+  buffer: 64KB
+  values: 64KB
+  hash:   64KB
+  malloc index table: about 32KB, not counted in local workspace
+
+indexed saved-value:
+  buffer: 64KB
+  values: 64KB
+  hash index table: 16KB if uint16_t * 8192
+  optional dirty bitmap: about 1KB
+```
+
+这会比当前 saved-value 更公平，也更 cache-friendly。
+
+### 方案 C：occupied hash slot list，避免每次 memset 整个 hash
+
+当前 RSet clear 会清整个 hash table。
+- 64KB hash table * 大量 minor GC，会产生大量固定成本和 cache pollution。
+- Havlak 有 `225001` 次 minor GC，这个成本会被放大。
+
+改法：
+- 插入 hash slot 时，把 hash slot index 记录到 `occupied_hash_slots[]`。
+- clear 时只清这些实际用过的 hash slots。
+
+好处：
+- RSet 小时 clear 成本接近 O(used hash slots)，不是 O(hash table size)。
+- 对 Havlak / NBody 这种 minor GC 次数很多的情况尤其重要。
+
+### 我建议的实现顺序
+
+第一步：
+- 先实现 indexed saved-value RSet。
+- 去掉 malloc 出来的 `remembered_set_hash_indices`。
+- hash table 存 entry index。
+- 保持 RSet 总预算不增加。
+- 先跑 Havlak。
+
+第二步：
+- 加 dirty bitmap，形成 hybrid RSet。
+- duplicate write 不再每次更新 values[]，只设 dirty bit。
+- GC 时 dirty entry 才读 old slot。
+- 再跑 Havlak，观察：
+  - business time 是否下降；
+  - scan_RS 是否仍接近 saved-value；
+  - GC miss rate 是否低于 read-slot。
+
+第三步：
+- 加 occupied hash slot list。
+- 目标是减少大量 minor GC 下的 hash clear 成本。
+
+我认为最有希望的目标结果：
+- scan_RS 接近 saved-value：约 `1.4s`，不要回到 read-slot 的 `20.5s`；
+- business time 接近 read-slot，不要像 saved-value 那样增加 `13.4s`；
+- cache miss rate 低于 read-slot 的 `6.09%`，尽量接近 saved-value 的 `2.99%`；
+- total time 至少明显低于当前 read-slot 的 `812.747s`，目标先压到 `790s` 以下，再考虑接近 Cheney 的 `748.734s`。
+
+## 2026-05-20: Cheney 和 GiY read-slot 的真正差距
+
+基于 full suite 结果：
+
+```text
+All 13:
+  Cheney total:   6627.809s
+  GiY read-slot:  6690.812s
+  total gap:      +63.003s (+0.95%)
+
+  business gap:   +33.575s
+  GC full gap:    +29.429s
+```
+
+表面看：
+- GiY read-slot 总时间只慢 `0.95%`。
+- 差距由 business gap 和 GC gap 共同构成。
+
+真正的 GC core 差距：
+
+```text
+All 13:
+  Cheney GC core: 77.182s
+  GiY GC core:    100.694s
+  gap:            +23.512s
+
+  Cheney scan_RS: 2.507s
+  GiY scan_RS:    24.937s
+  gap:            +22.430s
+
+  Cheney scavenge: 74.080s
+  GiY scavenge:    75.245s
+  gap:             +1.165s
+```
+
+判断：
+- GiY read-slot 并不是主要输在 traversal/copy/scavenge 主体。
+- 几乎整个 GC core gap 都来自 `scan_RS`。
+- 因此当前最真实的算法差距是：GiY read-slot 在 minor GC 中读取 remembered-set old slots 的成本太高。
+
+Havlak 是主要来源：
+
+```text
+Havlak:
+  total gap:      +64.013s
+  business gap:   +38.698s
+  GC full gap:    +25.314s
+
+  scan_RS:
+    Cheney:       1.669s
+    GiY read-slot:20.541s
+    gap:          +18.872s
+
+  scavenge:
+    Cheney:       20.373s
+    GiY read-slot:25.409s
+    gap:          +5.036s
+
+  GC miss rate:
+    Cheney:       1.34%
+    GiY read-slot:6.09%
+```
+
+如果排除 Havlak：
+
+```text
+Total gap:
+  all 13 gap:       +63.003s
+  Havlak gap:       +64.013s
+  without Havlak:   -1.010s
+```
+
+也就是说：
+- full suite 的总时间差几乎完全由 Havlak 造成；
+- 除 Havlak 以外，本轮 GiY read-slot 总时间并不输 Cheney。
+
+为什么 `scan_RS` 会变成真正差距：
+- Cheney 在 scan remembered set 时直接用 Cheney tracer 处理 slot。
+- GiY read-slot 需要：
+  1. 遍历 remembered set；
+  2. 读取 old/init slot 当前值；
+  3. 判断是否仍指向 young；
+  4. reserve young object；
+  5. 后面再 patch slot。
+- 这个流程符合 GiY 的 correctness 需求，但在 Havlak 这种 old graph / old container 指向大量 young object 的 workload 上，会产生大量 old-slot reads。
+- 这些 old slot locality 差，导致 GC cache miss rate 上升。
+
+为什么 business 也有差距：
+- 这里的 business time 是 `total - GC full`，不等于纯 JavaScript 语义执行成本。
+- 它包括：
+  - mutator write barrier 成本；
+  - 分配路径差异；
+  - GC 后 cache pollution 对下一段 mutator 的影响；
+  - benchmark 本身因 GC 时机不同产生的运行波动。
+- Havlak 中 GiY read-slot 的 write barrier calls 是 `143,307,492`，Cheney 是 `114,502,529`，这说明 GiY 的有效 young 较小导致更多 GC 周期和更多跨代记录压力。
+
+最终结论：
+- Cheney vs GiY read-slot 的真正差距不是“GiY copy 慢”。
+- 真正差距是：
+  1. GiY read-slot 的 ordinary young 比 Cheney 小，minor GC 更多；
+  2. read-slot RSet 在 GC 阶段大量读 old slots；
+  3. Havlak 这种 graph/container workload 放大了 old-to-young remembered-set 压力；
+  4. 由此造成 scan_RS 时间和 GC cache miss 显著上升。
+
+优化重点：
+- 优先优化 RSet，不是优先重写 copy/scavenge。
+- 目标是减少 GC 时 old-slot reads，同时不要把太多成本转移到 write barrier。
+
+## 2026-05-20 13:13 JST - Cheney vs GiY fairness / measurement overhead check
+
+Question:
+- 当前 Cheney 和 GiY 的比较是否公平？
+- 有没有 GiY 执行了、但 Cheney 没有执行的测量操作？
+
+Current judgment:
+- 没有发现会显著扭曲结果的 GiY-only heavy measurement。
+- `GIY_PROFILE_DETAIL` 默认是 0，本轮 full suite build log 里也没有启用 `-DGIY_PROFILE_DETAIL=1`。
+- `GIY_WB_PROFILE` 也没有启用。
+- GC full wall/cpu time 和 PMU window 是在 `cache_dram_manager.cc` 的统一 GC wrapper 里包住 Cheney/GiY 两条分支，因此这部分测量框架是对称的。
+- Cheney 和 GiY 都有 phase timing：
+  - Cheney 在外层分别计 `scan_roots`, `scan_remembered_set`, `scavenge`。
+  - GiY 在 `giy_minor_collect` 内分别计 root reserve / RSet reserve / young trace-copy-patch。
+  - 这些计时调用不是 GiY 独有的重型测量，只是两种算法的阶段不同。
+
+Small GiY-only overhead noticed:
+- GiY 有 `giy_old_guard_begin/end/set_phase` 之类的调用，但默认只有在环境变量启用时才真正工作；正常 benchmark 中基本是一次 disabled check / function call，影响应很小。
+- GiY 末尾会打印更多 GiY profile 信息，但这是程序结束阶段，不能解释 Havlak 中几十秒的差距。
+
+真正的不公平/需要说明的差异不是测量，而是配置语义：
+- 在同样 `CACHE_SIZE_KB=896` 下，Cheney 和 GiY 的 total local workspace budget 一样，这是“同总预算”比较。
+- 但是 GiY 额外需要 48KB traversal stack，Cheney 没有这块结构。
+- 因此 ordinary young 大小不同：
+  - GiY read-slot: about 604.24KB
+  - Cheney: about 652.24KB
+- 这会让 GiY minor GC 次数更多，本轮 full suite 是 GiY 多约 9.38% minor GCs。
+
+Conclusion:
+- 如果研究问题是“在同一个 total GC Local Workspace budget 里，两个 GC 策略谁表现更好”，当前比较基本公平。
+- 如果研究问题是“同样大小的 ordinary young 区下，算法本身谁更好”，当前比较不完全公平，因为 GiY 被自己的 stack 占掉了 48KB young budget。
+- 为了论文级结果，建议补两组对照：
+  1. no-profile/no-PMU build：去掉 PMU/timing/gprof 对绝对时间的影响；
+  2. equal ordinary young build：例如把 Cheney 调到约 848KB total budget，或把 GiY 调到约 944KB total budget。
+
+## 2026-05-20 - Equal ordinary young comparison idea
+
+User question:
+- 能不能通过降低 CheneyGC 的 young space 大小来达成公平？
+
+Answer:
+- 可以，但这对应的是另一种公平口径：`same ordinary young size`，不是 `same total GC Local Workspace budget`。
+- 当前 `CACHE_SIZE_KB=896` 下：
+  - Cheney ordinary young 约 652.24KB
+  - GiY ordinary young 约 604.24KB
+  - 差距主要来自 GiY 额外占用 48KB traversal stack。
+- 如果要让 Cheney 的 ordinary young 和 GiY 当前配置接近，可以把 Cheney 的 total local workspace budget 从 896KB 降到约 848KB。
+- 这样做会让 Cheney 和 GiY 拥有接近的 ordinary young，但总 workspace budget 不再相同。
+
+Recommended paper/report framing:
+- 同时报告两种对照：
+  1. Equal total workspace: Cheney 896KB vs GiY 896KB。
+  2. Equal ordinary young: Cheney about 848KB vs GiY 896KB。
+- 第一组回答“同样 cache/local budget 下谁更好”。
+- 第二组回答“排除 GiY stack 占用后，算法本身的 copying/reserving 策略谁更好”。
+
+## 2026-05-20 13:19 JST - Which cache/workspace size showed the best GiY win over Cheney?
+
+Based on previous size-matrix results:
+- Data files:
+  - `build.debug/benchmarks/out_giy_cache_size_20260515_004640/summary.md`
+  - `build.debug/benchmarks/out_cache_cheney_cache_size_20260515_115946/summary.md`
+  - `build.debug/benchmarks/out_cache_cheney_cache_size_20260515_115946/compare_giy_vs_cache_cheney.md`
+
+Raw same-size aggregate comparison:
+
+```text
+size  GiY total  Cheney total  GiY-Cheney
+512   6793.957   6631.114      +162.843s
+640   6729.767   6585.095      +144.672s
+768   6635.928   6636.327      -0.399s
+896   6661.375   6946.021      -284.646s
+```
+
+Answer:
+- 原始数据中，GiY 超过 Cheney 最明显的一次是 `CACHE_SIZE_KB=896`。
+- 这次 raw aggregate 里 GiY 比 Cheney 快 `284.646s`，约 `4.10%`。
+- 但是这次大胜主要来自 `Richards` 的 Cheney 896KB 异常慢样本：
+  - Cheney896 Richards: `1992.976s`
+  - GiY896 Richards: `1726.488s`
+  - 单项贡献 `266.488s`，几乎解释了整个 896KB aggregate win。
+- 后续重复 Cheney896 Richards 后，Cheney 回到约 `1730-1760s`，说明原始 896KB 大胜不稳健。
+- 修正 Richards 异常后，GiY896 仍可能小幅领先，但只有约 `0.3%-0.5%`。
+
+Important distinction:
+- “同 size 下 GiY 最大 raw win”：`896KB`。
+- “GiY 自己最快的 size”：`768KB`，GiY total `6635.928s`。
+- “两边各自选最佳 size”：Cheney `640KB` total `6585.095s`，GiY `768KB` total `6635.928s`，此时 GiY 没有超过 Cheney。
+
+## 2026-05-20 17:18 JST - Equal total workspace + equal usable young benchmark
+
+User goal:
+- 两边都使用 `CACHE_SIZE_KB=896`。
+- 但是 CheneyGC 的实际 young/usable allocation space 缩小到和 GiY 完全一致。
+- 然后重新跑完整 benchmarks 比较性能。
+
+Implementation:
+- 新增 Cheney-only 编译参数 `CHENEY_LOCAL_PADDING_BYTES`，默认 `0`，不影响普通 Cheney。
+- 在 Cheney 的 FT slot set 之后，从 `cache_space.end` 再预留 padding。
+- 本轮使用：
+  - Cheney: `CACHE_SIZE_KB=896`, `CHENEY_LOCAL_PADDING_BYTES=49152`
+  - GiY: `CACHE_SIZE_KB=896`, `GIY_GC_STACK_BYTES=49152`, `GIY_RSET_READ_SLOT_AT_GC=true`
+- 新增脚本：
+  - `tools/run_equal_young_896_benchmarks.sh`
+  - `tools/parse_equal_young_896_benchmarks.py`
+
+Output:
+- `/home/qiancheng/ejs-new/build.debug/benchmarks/out_equal_young_896_20260520_1336`
+- `summary.csv`
+- `compare_equal_young.md`
+
+Verification:
+
+```text
+Config                  Young before aux   Young after aux   Aux total
+Cheney equal-young      684.24 KB          604.24 KB         80.00 KB
+GiY896                  684.24 KB          604.24 KB         80.00 KB
+```
+
+All benchmark statuses:
+- Cheney equal-young: 13/13 OK
+- GiY896: 13/13 OK
+
+Aggregate result:
+
+```text
+Metric              Cheney equal-young   GiY896       GiY - Cheney
+Total time          6580.231s             6597.105s   +16.874s (+0.256%)
+Business time       6460.666s             6454.527s   -6.139s  (-0.095%)
+GC full time        119.565s              142.578s    +23.013s (+19.247%)
+GC core time        80.013s               99.642s     +19.629s (+24.532%)
+scan_RS             2.546s                24.817s     +22.271s
+scavenge            76.834s               74.311s     -2.523s  (-3.284%)
+Minor GC count      1,032,930             1,045,148   +12,218  (+1.183%)
+GC miss rate        0.793%                3.232%      +2.438 pp
+```
+
+Interpretation:
+- 这次对照已经同时满足：
+  1. equal total GC Local Workspace budget: both 896KB
+  2. equal usable young: both 604.24KB
+- 缩小 Cheney young 后，GiY 的 minor GC 次数劣势从之前约 9.38% 降到约 1.18%。
+- 这说明之前一部分差距确实来自 usable young 不同。
+- 但 GiY 的 GC full/core 仍明显慢，主要集中在 `scan_RS`：
+  - Cheney `2.546s`
+  - GiY `24.817s`
+  - 差距 `+22.271s`
+- GiY 的 scavenge 本身反而更快：
+  - Cheney `76.834s`
+  - GiY `74.311s`
+  - GiY 快 `2.523s`
+- 因此在 equal-young 后，核心瓶颈更明确：不是 young traversal/copy 主体，而是 GiY read-slot remembered-set scan。
+
+Scope checks:
+
+```text
+All 13:
+  GiY total +16.874s (+0.256%)
+
+Without Havlak:
+  GiY total -10.216s (-0.176%)
+
+Without Havlak and Richards:
+  GiY total -21.315s (-0.521%)
+
+CD + Havlak + Storage:
+  GiY total +11.751s (+0.740%)
+```
+
+Per-benchmark important points:
+- Havlak remains the main negative case:
+  - Cheney `766.210s`, GiY `793.300s`, GiY slower `+27.090s` (`+3.536%`)
+  - GC delta `+22.460s`, mainly from GiY RSet scan.
+- Storage remains positive:
+  - Cheney `334.344s`, GiY `330.156s`, GiY faster `-4.188s` (`-1.253%`)
+  - GC delta `-7.903s`, GiY GC faster.
+- CD becomes positive for GiY in total time:
+  - Cheney `487.759s`, GiY `476.608s`, GiY faster `-11.151s` (`-2.286%`)
+  - but GiY GC still slower by `+2.772s`, so CD's total win is business-side.
+
+Conclusion:
+- Equal-young 后，GiY 和 Cheney 的总时间非常接近：GiY 只慢 `0.256%`。
+- GiY 的 business time 略快，但 GC time 仍慢。
+- 当前最可信的解释是：
+  1. 之前的较大 minor GC count gap 主要来自 GiY extra stack 占用 usable young；
+  2. 对齐 usable young 后，这个因素基本被消除；
+  3. 剩余 GC 差距主要来自 GiY read-slot RSet 在 GC 时大量读取 old/init slots；
+  4. GiY 的 young traversal/copy 主体并不差，甚至在 aggregate scavenge 上略快。
+
+## 2026-05-20 - How to fairly evaluate Cheney vs GiY performance
+
+Question:
+- Equal-young 比较是否公平？
+- 13 个 benchmarks 应该如何客观评价性能差距？
+- 一般论文会怎么处理这种性能差距？
+
+Judgment:
+- Equal-young 比较是公平的，但它回答的是一个受控问题：
+  - “当 total local workspace 和 usable young 都相同的时候，GiY 算法本身和 Cheney 的差距是多少？”
+- 但它不是唯一公平口径，因为 Cheney padding 是人为让 Cheney 放弃一部分本来可用的空间。
+- 因此论文/报告里不应该只用这一组作为唯一结论，而应该同时报告多种公平口径。
+
+Recommended comparison regimes:
+1. Equal total workspace:
+   - Cheney 896KB vs GiY 896KB, no artificial padding.
+   - 回答：在同样 GC Local Workspace budget 下，谁表现更好？
+   - 这是系统资源公平。
+
+2. Equal usable young:
+   - Cheney 896KB + padding vs GiY 896KB.
+   - 回答：去掉 GiY stack 占用导致的容量差异后，算法本身谁更好？
+   - 这是控制变量实验，不应作为唯一 headline。
+
+3. Best tuned per GC:
+   - Cheney 在 512/640/768/896 中取最优，GiY 也取最优。
+   - 回答：每个 GC 在各自合理调参后，最终用户能得到什么性能？
+   - 这是 end-to-end/tuned-performance 公平。
+
+Objective reporting method:
+- 不要只看 13 项 raw total time 相加，因为 Richards/Permute/NBody 这类长 benchmark 会主导 aggregate。
+- 应该报告：
+  1. per-benchmark table；
+  2. normalized ratio per benchmark, e.g. `GiY / Cheney` 或 `Cheney / GiY`；
+  3. geometric mean of normalized ratios；
+  4. median ratio；
+  5. aggregate total time as secondary metric；
+  6. with/without outlier 或至少说明 Havlak/Richards 对总结果的贡献。
+
+For GC research specifically:
+- 总运行时间是最重要的最终指标，因为用户关心 end-to-end performance。
+- 但 GC 论文通常还会单独报告：
+  - GC time / GC overhead；
+  - pause time: avg/median/max/P95/P99；
+  - collection count；
+  - memory footprint / heap size；
+  - throughput-vs-heap-size curve；
+  - benchmark-by-benchmark normalized speedup。
+
+For this project:
+- Main headline should be cautious:
+  - “With equal total workspace and equal usable young, GiY is within 0.26% of Cheney in total time; GiY has slightly faster business time and faster scavenge, but slower GC overall due to read-slot remembered-set scanning.”
+- This is stronger and more objective than saying “GiY wins/loses” from one aggregate number.
+
+## 2026-05-20 - Current GiY copy strategy
+
+Question:
+- 当前 GiY 的复制策略是什么？
+
+Current build/source state:
+- 当前 GiY 默认 `GIY_RSET_READ_SLOT_AT_GC=1`。
+- 当前 896KB equal-young benchmark 的 GiY build 使用：
+  - `OPT_GC=giy`
+  - `CACHE_SIZE_KB=896`
+  - `GIY_RSET_READ_SLOT_AT_GC=true`
+  - `GIY_GC_STACK_BYTES=49152`
+- 该 build 没有启用 `USE_GIYOL`，所以 GiYOL 的 staging/batching copy path 不生效。
+
+GiY minor GC strategy:
+1. Reserve first:
+   - `copy_for_minor(payload_ptr)` 不立即复制对象内容。
+   - 它只在 old/DRAM 中分配目标地址，把目标 payload 地址写入 source header 的 `forwarding_pointer`，然后把 source young object push 到 `gc_stack`。
+2. Root / FunctionTable / RSet reserve:
+   - Roots 使用 `GiYReserveTracer`。
+   - FunctionTable slots 单独 reserve。
+   - Remembered set 当前是 read-slot 模式：GC 时读取 old/init slot 当前值，如果指向 young，就 reserve 该 young object。
+3. Traverse stack and materialize:
+   - `giy_traverse_stack_and_copy()` 从 `gc_stack` 弹出 young object。
+   - 先扫描该 object 的 children，继续 reserve child objects，并把 young object 内部字段 patch 成 forwarding address。
+   - 然后才把整个 object 从 young copy/materialize 到 old。
+4. Copy method:
+   - `giy_copy_live_object(dst, src, nbytes, ...)`
+   - `nbytes <= 256` 时使用普通 `memcpy`。
+   - `nbytes > 256` 且在 x86 上时，使用 streaming / non-temporal store：
+     - `_mm_stream_si64`
+     - `_mm_stream_si128`
+   - 最后如果使用过 NT store，会在 minor GC 末尾执行 `_mm_sfence()`。
+5. Patch:
+   - materialize 后，GiY 再 patch roots、FunctionTable slots、remembered-set slots。
+
+Short conclusion:
+- 当前 GiY 是“两阶段复制”：
+  - 第一阶段：只 reserve old 地址并建立 forwarding pointer；
+  - 第二阶段：扫描 young object、修内部引用、再 materialize/copy 到 old。
+- 当前 GiY 不是 Cheney 那种“发现对象后立刻复制并在 to-space 扫描”的策略。
+- 当前 GiY 也不是 GiYOL 的 staging/batch copy 策略。
+
+## 2026-05-20 - GiY scanning, GC stack behavior, and 128-bit NT store rationale
+
+Questions:
+- GiY 的扫描是怎么进行的？
+- `g_gc_stack` 的运行过程是什么？
+- 为什么当前使用 128-bit non-temporal store，而不是更宽的 256-bit？
+
+Current scanning process:
+1. Minor GC starts:
+   - `ensure_gc_stack_capacity()`
+   - `gc_stack_reset()`
+   - reset profiling/layout/update state.
+2. Root reserve scan:
+   - `giy_scan_roots_generational<GiYReserveTracer>(ctx)`
+   - 扫描 global constants, global property maps, global shapes, context roots, VM stack, `gc_root_stack`。
+   - 如果 edge 指向 young object，则调用 `copy_for_minor()`。
+3. FunctionTable reserve:
+   - `giy_reserve_function_table_slots()`
+   - 扫描之前记录下来的 FunctionTable / InlineCache strong slots。
+4. Remembered set reserve:
+   - 当前 `GIY_RSET_READ_SLOT_AT_GC=1`。
+   - `giy_scan_remembered_set_slots()` 遍历 RSet slot address。
+   - GC 时重新读取 old/init slot 当前值。
+   - 如果当前值指向 young，则 reserve 该 young object，并立即 patch old/init slot 到 forwarding address。
+5. Stack traversal and materialization:
+   - `giy_traverse_stack_and_copy()` 不断 pop `g_gc_stack`。
+   - 对每个 young object：
+     1. 根据 object type 扫描 children；
+     2. 对 child young object 执行 reserve；
+     3. patch 当前 young object 内部字段为 child 的 forwarding address；
+     4. 扫描完成后，把当前 object 整体 copy/materialize 到 old。
+6. Root/FunctionTable patch:
+   - `giy_scan_roots_generational<GiYPatchTracer>(ctx)`
+   - `giy_patch_function_table_slots()`
+   - 当前 read-slot RSet 模式下 RSet slot 已在 reserve scan 时 patch，所以 `giy_patch_remembered_set_slots()` 直接 return。
+
+GC stack behavior:
+- `g_gc_stack` 是 LIFO stack/worklist。
+- 它存的是 young object 的 payload pointer，不是 header pointer。
+- 当前 48KB stack 对应 `49152 / 8 = 6144` entries。
+- 第一次发现 young object 时：
+  - `copy_for_minor(payload_ptr)` 在 old 区 reserve 目标地址；
+  - 把目标 payload address 写入 source header 的 `forwarding_pointer`；
+  - 把 source payload pointer push 到 `g_gc_stack`。
+- 如果同一个 object 再次被发现：
+  - 因为 `forwarding_pointer != 0`，直接返回已有目标地址；
+  - 不重复 push，不重复 reserve。
+- pop 时才真正扫描 children 和 copy object。
+- 因为是 LIFO，所以 traversal 近似 DFS，不是 Cheney 的 to-space scan pointer BFS。
+
+Why 128-bit NT store:
+- 当前代码只 include `<emmintrin.h>`，使用 SSE2:
+  - `_mm_stream_si64`
+  - `_mm_stream_si128`
+- 当前 build flags 没有 `-mavx` / `-mavx2`，因此 256-bit `_mm256_stream_si256` 不是当前 portable baseline。
+- 128-bit streaming store 只要求 16B 对齐；当前代码可通过先 stream 一个 8B tail/header piece 把目的地址调到 16B alignment。
+- 256-bit streaming store 通常要求 32B 对齐；当前 object allocation/layout 只稳定保证到 8/16B 级别，不能直接安全假设 32B alignment。
+- 很多 survivor object 很小，`<=256B` 已经直接走 `memcpy`；对这些对象使用 256-bit NT store 没意义。
+- 更宽 store 主要减少指令条数，但不保证提升真实带宽；还可能引入 AVX 编译要求、alignment padding、AVX frequency / transition cost。
+
+Conclusion:
+- 当前 128-bit NT store 是保守、容易保证 correctness、兼容 x86_64 baseline 的选择。
+- 256-bit NT store 不是不可以，但应该作为单独实验：
+  1. 增加 AVX2 build path；
+  2. 保证 old destination 32B alignment；
+  3. 处理 32B head/tail；
+  4. 分别测 total time、GC time、copy bandwidth、cache miss、CPU frequency/retired instructions。
+
+## 2026-05-20 - Senior GiY stack logic vs current GiY stack logic
+
+Question:
+- 师兄的 GiY 栈逻辑是否和当前 GiY 一样？
+
+Short answer:
+- 核心思想相同：
+  - 第一次发现 young object 时，不立即复制内容；
+  - 先 reserve old destination；
+  - 在 source header 写 forwarding pointer / `gc_ptr`；
+  - 把 source young object 放进显式 GC stack；
+  - 之后 pop stack，扫描 children，patch source object 内部引用，最后一次性 materialize/copy 到 old。
+- 但实现细节不一样。
+
+Senior DPU/Java code:
+- Stack item: young object header pointer。
+- Forwarding field: `ObjectHeader.gc_ptr`，保存 old data pointer。
+- Reserve function:
+  - `get_object_copy_handle()`
+  - `copy_for_minor()`
+- Traversal:
+  - `traverse_stack()`
+  - pop young header；
+  - 用 Java class table bitmap / array metadata 判断哪些 field 是 reference；
+  - 在 WRAM young source object 上 patch child pointers；
+  - 最后 `mram_write()` 整个 object 到 MRAM old。
+- Parallelism:
+  - 每个 tasklet 有 `GCStack gc_stack[NR_TASKLETS]`；
+  - 还有 shared stack / MRAM fallback 的设计；
+  - 需要 mutex 避免多个 tasklet 同时 reserve 同一个 object。
+
+Current GiY/eJS code:
+- Stack item: young object payload pointer。
+- Forwarding field: source header 的 `forwarding_pointer`，保存 old payload pointer。
+- Reserve function:
+  - `copy_for_minor(payload_ptr)`
+- Traversal:
+  - `giy_traverse_stack_and_copy()`
+  - pop young payload；
+  - 根据 JS cell type 扫描 children；
+  - JSObject 当前默认 conservatively 扫 `eprop`，也会处理 Shape / PropertyMap 等动态对象结构；
+  - 在 young source object 内 patch children；
+  - 最后 `giy_copy_live_object()` copy/materialize 到 old。
+- Parallelism:
+  - 当前 eJS GiY 是单 VM 进程中的一个 `g_gc_stack`；
+  - 没有师兄 DPU 代码那种 per-tasklet stack + shared stack work stealing。
+
+Conclusion:
+- 如果只看 GC algorithm principle：两者是同一类 GiY stack/worklist 思想。
+- 如果看工程实现：不完全一样。
+- 最大差异来自运行对象模型和执行平台：
+  - 师兄是 Java + class bitmap + DPU WRAM/MRAM + tasklets；
+  - 当前是 JavaScript + Shape/PropertyMap/eprop + CPU cache/DRAM + single local workspace。
+
+## 2026-05-20 - New GiY optimization proposal: Size-Binned GiY
+
+User idea:
+- 在 copy/promotion 前，对小对象和大对象做预判。
+- 让小对象和大对象进入不同的 old destination region。
+- 这样后续可以形成更连续的 destination write stream，并更方便使用 non-temporal store 批量 copy。
+
+Proposed name:
+- `GiY-SB`
+- Full name: `Size-Binned GiY`
+- More precise paper name: `Size-Binned Promotion for GiY`
+
+Important clarification:
+- CPU 上不存在“一条 NT 命令复制全部对象”的形式。
+- 实际实现会是一个 loop，连续执行 `_mm_stream_si128` / future `_mm256_stream_si256`。
+- 优化目标是让 destination addresses 按 size class 变得连续，从而让 NT store loop 更像顺序 streaming write。
+
+Recommended first implementation target:
+- 先不要改 mutator young allocation。
+- 先在 minor GC promotion/reservation 阶段做 size-binned old placement。
+- 原因：
+  1. 改 young allocation 会同时改变 nursery locality、fragmentation、GC frequency，变量太多；
+  2. promotion-time binning 更容易隔离“copy/materialization layout”本身的效果；
+  3. 对现有 GiY correctness 影响更可控。
+
+Correct high-level algorithm:
+1. Discovery phase:
+   - 不立即分配最终 old address。
+   - 扫 roots / FunctionTable / RSet。
+   - 扫 reachable young object graph。
+   - 只 mark/discover young object，并收集 object list。
+   - 不能 patch slot，因为 final old address 还没确定。
+
+2. Size classification:
+   - 根据 `ALIGN(header->size + sizeof(object_header))` 分类。
+   - Suggested initial bins:
+     - tiny: `<=64B`
+     - small/medium: `65B..256B`
+     - large: `>256B`
+   - 也可以第一版只用 two bins:
+     - small: `<=256B`
+     - large: `>256B`
+
+3. Address assignment:
+   - discovery 完成后已经知道每个 bin 的 total bytes。
+   - 从 `dram_space.free` 开始，按 bin 分配连续 old destination regions：
+     - tiny region
+     - small/medium region
+     - large region
+   - 给每个 source young object 写最终 `forwarding_pointer`。
+   - 最后一次性 advance `dram_space.free` / `available_bytes`。
+   - 这样 old generation 仍然是一个连续 promotion block，没有 hole。
+
+4. Materialization phase:
+   - 按 bin order 遍历 object list。
+   - 对每个 object：
+     1. 使用 patch/materialize tracer 扫描 children；
+     2. 要求所有 young children 都已经有 forwarding pointer；
+     3. 在 young source object 上 patch children；
+     4. 再 copy 到 final old destination。
+   - tiny/small objects:
+     - 可以先 memcpy 到 staging buffer；
+     - staging 达到 4KB/8KB 阈值后，用 NT store 顺序 flush 到 old tiny/small region。
+   - large objects:
+     - 直接按 old address order 使用 NT store copy。
+
+5. External patch phase:
+   - patch roots。
+   - patch FunctionTable slots。
+   - patch remembered-set slots。
+   - 当前 read-slot RSet 不能像普通 GiY 一样在 reserve scan 里立即 patch，因为 final forwarding address 当时还没确定。
+   - 因此 GiY-SB 需要单独的 RSet patch path：assignment 完成后再 patch。
+
+Required new components:
+- `GIY_SIZE_BINNED_PROMOTION` or `USE_GIY_SB` build flag。
+- New discover tracer:
+  - e.g. `GiYSBDiscoverTracer`
+  - 只 discover/mark，不 patch。
+- New materialize tracer:
+  - e.g. `GiYSBMaterializeTracer`
+  - patch source object fields；
+  - 如果发现 young child 没有 forwarding pointer，直接 assert/abort。
+- Object list:
+  - prototype can use a malloc-backed vector for correctness。
+  - production should account for this space inside GC Local Workspace or explicitly report it as external overhead。
+- Bin metadata:
+  - count / bytes / old begin / old cursor for each bin。
+- Staging buffer:
+  - 初始建议 8KB or 16KB。
+  - flush threshold 4KB or 8KB。
+
+Correctness invariants:
+- 在任何 external root/slot 被 patch 前，每个 live young object 必须已经有 final forwarding pointer。
+- copy 到 old 前，source object 内部 young pointers 必须已经 patch 成 old forwarding pointers。
+- old promotion block 必须连续、可被后续 old scan/major GC 线性解析。
+- RSet slot patch 必须发生在 final forwarding pointer assignment 之后。
+- 不能让 old object 中残留 young pointer。
+
+Risks:
+- Object-list metadata 可能很大。如果放进 GC Local Workspace，会减少 usable young；如果用 malloc，则性能比较时必须说明不是完全 local-workspace 方案。
+- size-binned old layout 可能改善 promotion copy locality，但可能破坏对象图 locality：parent 和 child 如果大小不同，会被放到不同 region，mutator 后续访问可能更差。
+- 当前 equal-young 实验显示 GiY 的主要 GC 瓶颈是 `scan_RS`，而不是 scavenge/copy。因此 GiY-SB 可能改善 Storage 这类 copy-heavy benchmark，但不一定解决 Havlak。
+- 小对象 staging 是 double copy：young -> staging -> old。只有当减少 cache pollution / 提高 streaming 写收益足够大时才值得。
+
+Evaluation plan:
+1. Instrument only:
+   - survivor size histogram；
+   - per-bin count/bytes；
+   - current reserve-order destination run length；
+   - materialized bytes by size。
+2. Prototype GiY-SB with malloc-backed object list:
+   - target correctness first。
+3. Smoke tests:
+   - small benchmarks / `a.sbc`；
+   - old-guard mode if available。
+4. Target benchmarks:
+   - Storage: expected best case；
+   - CD: mixed case；
+   - Havlak: expected hard case because RSet scan dominates。
+5. Full suite:
+   - compare against current GiY read-slot under same total workspace / same usable young when possible。
+6. Metrics:
+   - total time；
+   - business time；
+   - GC full/core；
+   - scan_RS；
+   - scavenge/materialization；
+   - minor GC count；
+   - GC cache misses；
+   - copy bytes by bin；
+   - staging flush count/bytes；
+   - NT bytes。
+
+Expected claim if successful:
+- `GiY-SB improves promotion/materialization locality by grouping survivors by size and streaming old writes in bin order.`
+- But it should not be claimed as solving GiY's RSet bottleneck unless scan_RS also improves.
+
+## 2026-05-20 - Evaluation of per-minor-GC small/large old-region reservation
+
+User idea:
+- 每次 minor GC 时，在目标 old 区中先区分出 small region / large region。
+- 这样 `copy_for_minor()` reserve 时就能根据对象大小直接决定去哪个 region。
+
+Evaluation:
+- 这个方向可以做，而且比完全两遍 discover 更接近当前 GiY 的 reserve-first 结构。
+- 但核心难点是：minor GC 一开始不知道本轮 small survivor bytes 和 large survivor bytes 各有多少。
+- 如果没有准确大小，直接在 old 区切 small/large region 会产生三个 correctness 风险：
+  1. small region overflow；
+  2. large region overflow；
+  3. small/large 中间留下 gap，破坏 old generation 的线性 object layout。
+
+Why gap is dangerous:
+- 当前 old/DRAM space 依赖线性 object layout。
+- 后续 old scan / major GC 会从 old start/free head 线性按 object header 解析。
+- 如果 small region 和 large region 中间有未初始化 hole，后续 scan 可能把 hole 当 object header，导致错误。
+- 所以不能简单留下空洞，除非实现 free-block/dummy-object header，并让所有 old scanner 正确跳过。
+
+Possible designs:
+
+1. Exact two-pass design:
+   - Pass 1: discover all live young objects and count per-bin bytes。
+   - Assign exact small/large regions。
+   - Pass 2: set forwarding pointers / patch / materialize。
+   - Correctness 最干净，但不像当前 `copy_for_minor()` 一样第一次遇到对象就能返回 final forwarding address。
+
+2. Predictive quota design:
+   - At minor GC start, use previous GC statistics predict small/large quotas。
+   - `copy_for_minor()` 根据 size 从 corresponding cursor reserve。
+   - If quota overflows, use overflow region after both bins or fallback to normal GiY allocation。
+   - Needs no-hole guarantee:
+     - either fill unused gap with free-block/dummy block；
+     - or allow overflow/fallback to consume gap；
+     - or compact/slide large region, which adds extra copy。
+
+3. Bidirectional region design:
+   - Reserve a promotion window。
+   - small allocates upward from low address；
+   - large allocates downward from high address。
+   - Problem: if cursors do not meet exactly, gap remains。
+   - Also old linear scan becomes complicated unless gaps are represented as valid skip blocks。
+
+4. Chunked bin design:
+   - small/large each request chunks from old as needed。
+   - Avoids predicting total size。
+   - But old layout becomes interleaved chunks, not one clean small region + large region。
+   - It may still improve locality if materialization follows chunk order, but less ideal。
+
+Recommended path:
+- Do not start with fully separated old regions requiring exact pre-sizing.
+- First implement profiling/prediction:
+  - per-minor-GC small/large survivor bytes；
+  - max/avg/P95 small bytes；
+  - overflow probability for candidate quotas。
+- Then prototype predictive quota with safe fallback:
+  - `small <= 256B` goes to small cursor；
+  - `large > 256B` goes to normal old cursor or large cursor；
+  - if small quota overflows, fallback to normal old allocation；
+  - never leave unparseable holes in old.
+
+Conclusion:
+- The idea is promising, but only safe if old-space layout remains linearly parseable.
+- The simplest correct first version is predictive small-region + fallback, not hard partition with holes.
+- If the user wants stronger region purity, exact two-pass binning is cleaner than one-pass prediction.
+
+## 2026-05-20 - Global old-space split for GiY-SB
+
+Question:
+- 能不能在程序最开始就把整个 old heap / DRAM heap 分成 small-old region 和 large-old region？
+- 这样每次 minor GC 就不需要临时切 small/large 区，也不需要担心每轮 promotion block 内部有 hole。
+
+Judgment:
+- 可以，而且这是比“每次 minor GC 临时切区”更干净的设计。
+- 它把问题从“每轮 GC 的 promotion block 是否有 hole”变成“old generation 是否支持多个 old subspaces”。
+- 只要所有 old scanner / major GC / allocation path 都知道 small-old 和 large-old 是两个独立线性区域，就不会有不可解析 hole。
+
+Design:
+- At initialization:
+
+```text
+old_small_begin ... old_small_free ... old_small_end
+old_large_begin ... old_large_free ... old_large_end
+```
+
+- Promotion/reserve:
+  - `align_bytes <= SMALL_OBJECT_MAX` -> allocate from `old_small_free`
+  - `align_bytes > SMALL_OBJECT_MAX` -> allocate from `old_large_free`
+- Each region is internally linear and parseable.
+- No per-minor-GC gaps are created.
+
+Advantages:
+- `copy_for_minor()` can decide final forwarding address immediately.
+- Current GiY reserve-first structure can mostly remain.
+- Small objects become more densely packed in old-small region.
+- Large objects are separated, so large copies can be streamed more directly.
+- It avoids needing exact per-minor-GC survivor size prediction.
+
+Required code changes:
+1. Add old-space subspace metadata:
+
+```c
+old_small_begin, old_small_free, old_small_end
+old_large_begin, old_large_free, old_large_end
+```
+
+2. Replace direct `dram_space.free` allocation in GiY `copy_for_minor()` with:
+
+```c
+giy_old_alloc_by_size(align_bytes)
+```
+
+3. Update `in_dram_space(ptr)` / old pointer tests if necessary:
+   - If small/large regions are both inside current `dram_space.begin..dram_space.end`, the broad range test may still work.
+   - But old scan must not scan the unused gap between small and large regions.
+
+4. Update old scan / major GC:
+   - scan `old_small_begin -> old_small_free`
+   - scan `old_large_begin -> old_large_free`
+   - do not assume one single `dram_space.begin -> dram_space.free` used range.
+
+5. Direct old allocations:
+   - If the runtime directly allocates large objects into old, it should also use the same size-based allocator.
+
+6. Statistics:
+   - per-region allocated bytes；
+   - per-region object count；
+   - small/large overflow；
+   - fragmentation / unused capacity；
+   - GC time and business time。
+
+Risks:
+- Fixed split ratio can be wrong.
+  - If small region fills but large region is empty, GC may trigger early even though total old space remains.
+  - Need fallback policy or adaptive split.
+- Mutator locality may change.
+  - Parent/child objects of different sizes may be placed far apart.
+- Major GC becomes more complex.
+  - It must either compact each region separately or rebuild regions based on size.
+- If current code assumes `dram_space.free` is the only old allocation frontier, this change is invasive.
+
+Recommended first prototype:
+- Make it GiY-only behind a flag:
+
+```text
+GIY_SPLIT_OLD_BY_SIZE=1
+GIY_SMALL_OBJECT_MAX=256
+GIY_OLD_SMALL_RATIO=50
+```
+
+- Start with fixed 50/50 split or 60/40 small/large.
+- 如果 small 区溢出：
+  - 原型方案 A：回退到 large/normal 区，并记录 overflow；
+  - 更严格的方案 B：触发 major GC；
+  - 第一次实验建议：先使用 fallback，并记录 overflow。
+
+更合适的名字：
+- `GiY-SO`
+  - 全称：`Split-Old GiY`
+- 如果和 size-binning/staging 结合：
+  - `GiY-SB` 更适合作为总称。
+  - 当前这个具体变体可以叫 `GiY-SB-SO`，也可以简单叫 `GiY-SO`。
+
+结论：
+- 全局 old-space split 是可行的，而且可能比每次 minor GC 临时切分更干净。
+- 它保留了“立刻确定 forwarding address”的性质，所以比严格 two-pass binning 更适合当前 GiY。
+- 主要代价是：所有 old-space scanner / allocation path 都需要理解 old 区现在有两个 region。
+
+## 2026-05-20 GiYSB 实装记录
+
+已经在 `GIY_SB=true` 编译选项后面实现了第一个 GiYSB 原型。
+
+名称：
+- `GiYSB`：GiY Small-object Batching，也就是 GiY 小对象批量搬运。
+
+编译选项：
+- `OPT_GC=giy`
+- `GIY_SB=true`
+- `GIYSB_STAGING_BYTES=8192`
+- `GIYSB_SMALL_OBJECT_MAX_BYTES=256`，默认值
+- `GIYSB_SMALL_OLD_RATIO=50`，默认值
+
+已经实现的设计：
+- 把 old/DRAM 空间切成两个连续区域：
+  - small-old 区：放 aligned total size `<=256B` 的对象；
+  - large-old 区：放更大的对象。
+- GiYSB 使用 FIFO worklist，而不是 GiY 原本的 LIFO stack。
+  - 原因：FIFO traversal 可以让处理顺序接近 reserve 顺序。
+  - 这样 reserve 到 small-old 的小对象，目标地址更容易连续。
+- 只有小对象使用 staging buffer。
+  - 小对象先从 young 复制到 GC Local Workspace 里的 8KB staging buffer。
+  - staging 满了以后，再通过现有 NT-copy 路径复制到 small-old。
+  - 最后的尾巴会在 traversal 结束时 flush。
+- 大对象仍然使用当前 GiY 的 direct copy 路径：
+  - small-old 对象基本绕开 `<=256B` 的直接 `memcpy`；
+  - 更大的对象仍然使用原来的直接 NT copy。
+
+Workspace 变化：
+- 原本 GiY896 local workspace：
+  - GC stack 48KB
+  - FT slot set 32KB
+  - aux 总量 80KB
+  - young after aux 约 604.24KB
+- GiYSB896 local workspace：
+  - GC stack 48KB
+  - FT slot set 32KB
+  - GiYSB staging 8KB
+  - aux 总量 88KB
+  - young after aux 约 596.24KB
+
+小测试：
+- `benchmarks/hello_world.sbc`：通过，没有发生 GC。
+- `benchmarks/Storage_StackMini.sbc`：通过。
+  - minor GC count：3030
+  - staged small objects：32,763,628
+  - staged small bytes：1762.85MB
+  - staging flushes：227,341
+- `benchmarks/Bounce_StackMini.sbc`：通过。
+  - minor GC count：96
+  - staged small objects：19,617
+  - staged small bytes：0.75MB
+  - staging flushes：273
+
+重要注意点：
+- 这个原型在 GiYSB 下把 GiY 的 traversal 顺序从 LIFO 改成 FIFO。
+- 这是为了 reserve-order 小对象批量搬运有意做的改变。
+- 因此比较对象不是“完全相同 GiY 加 staging”，而是“GiY 加 FIFO reserve-order small-object staging”。
+
+## 2026-05-21 GiYSB benchmark 结果
+
+已经实现并测试 GiYSB：
+- `OPT_GC=giy`
+- `GIY_SB=true`
+- `CACHE_SIZE_KB=896`
+- `GIY_GC_STACK_BYTES=49152`
+- `GIYSB_STAGING_BYTES=8192`
+- `GIYSB_SMALL_OBJECT_MAX_BYTES=256`
+- `GIYSB_SMALL_OLD_RATIO=50`
+
+相关文件：
+- `ejsvm/GiY.cc`
+- `ejsvm/giy_dram_manager.cc`
+- `ejsvm/common.mk`
+- `tools/run_giysb_896_benchmarks.sh`
+
+Workspace：
+- GiY896 baseline：
+  - GC stack 48KB
+  - FT slot set 32KB
+  - aux 总量 80KB
+  - young after aux 604.24KB
+- GiYSB896：
+  - GC stack 48KB
+  - FT slot set 32KB
+  - GiYSB staging 8KB
+  - aux 总量 88KB
+  - young after aux 596.24KB
+
+正确性：
+- full suite 已成功跑完。
+- 13/13 benchmarks status 都是 0。
+
+重要 profiling 修正：
+- 第一次 full run 的 GiYSB per-object counters 在 hot path 中是打开的。
+- 这不公平，因为 GiY baseline 的 detailed profiling 是关闭的。
+- 因此添加了 `GIYSB_PROFILE`，现在默认值是 `0`。
+- 性能比较使用第二次运行，也就是 `GiYSB profile: 0` 的结果。
+
+输出目录：
+- 第一次 debug/profile run：
+  - `/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysb_896_20260520_214615`
+- 可靠的 profile-off run：
+  - `/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysb_896_profile0_20260520_234139`
+- 调整后的 summary：
+  - `summary_adjusted_richards_repeat1.csv`
+
+Richards 说明：
+- 第一次 profile-off Richards 样本是异常值：
+  - 原始样本：1981.571s
+  - 重跑样本：1750.045s
+- 调整后的比较使用 `Richards_repeat1` 替换原来的 Richards 样本。
+
+调整后的总结果：
+
+| 指标 | GiY896 baseline | GiYSB896 调整后 | GiYSB - GiY |
+|---|---:|---:|---:|
+| 总时间 | 6597.105 s | 6655.960 s | +58.855 s (+0.892%) |
+| 业务时间 | 6454.527 s | 6489.367 s | +34.840 s (+0.540%) |
+| GC full time | 142.578 s | 166.593 s | +24.015 s (+16.843%) |
+| GC core time | 99.642 s | 122.534 s | +22.892 s (+22.974%) |
+| scan_RS | 24.817 s | 25.398 s | +0.581 s (+2.341%) |
+| scavenge | 74.311 s | 96.555 s | +22.244 s (+29.934%) |
+| Minor GC 次数 | 1,045,148 | 1,059,088 | +13,940 (+1.334%) |
+| GC cache misses | 162,734,227 | 150,658,028 | -12,076,199 (-7.421%) |
+| GC instructions | 631,647,661,430 | 786,304,319,303 | +154,656,657,873 (+24.485%) |
+
+结论：
+- GiYSB 是正确的，但这个第一版 8KB staging 设计没有变快。
+- 它让 GC cache misses 下降约 7.4%，说明 cache-locality 方向确实有效。
+- 但是它让 GC instructions 增加约 24.5%，scavenge 时间增加约 29.9%。
+- 最可能的主要原因是 double-copy 成本：
+  - 小对象先从 young 复制到 staging buffer；
+  - 然后 staging buffer 再通过 NT store 复制到 old。
+- split old-space 布局也可能轻微伤害业务时间，因为相关的小对象/大对象被分开放置了。
+- 最大的单项退化是 `Storage`：
+  - 总时间 +17.147s (+5.194%)；
+  - GC 时间 +16.816s (+39.381%)。
+
+下一步设计方向：
+- 不要无条件 staging 每一个小对象。
+- 需要考虑以下方案之一：
+  - 先记录小对象 metadata batch，只在确定能形成真正完整 8KB chunk 时才 staging；
+  - 对尾巴直接 copy，不走 staging；
+  - 避免把经常一起访问的 object type 强行拆到不同 old region；
+  - 或者对选定的 medium object 直接使用 NT-store，避免 young -> staging 的额外复制。
+
+## 2026-05-21 记录语言规则
+
+- 以后写入 `AIlog.md` 的实验记录、结论、设计说明必须使用中文。
+- 如果需要保留英文术语，可以保留术语本身，但解释和总结使用中文。
+
+## 2026-05-21 GC Local Workspace 是否能保证在 L2 cache 中
+
+问题：
+- 当前所谓的 GC Local Workspace，是否真的能尽量保证几乎都在 L2 cache 里？
+
+当前机器：
+- CPU：Intel Xeon W-2235
+- 每个 core 的 L2 cache：1MiB
+- L2 结构：16-way set associative，1024 sets，cache line 64B
+- L1d：每 core 32KB
+- L3：全 socket 共享约 8.3MiB
+
+当前代码实际做的事情：
+- `cache_space` 是通过 `malloc(CACHE_SIZE_KB * 1024)` 得到的一段普通虚拟内存。
+- GiY 的 GC stack、FT slot set、GiYSB staging buffer 等，是从 `cache_space.end` 往前切出来的。
+- 这只是在软件层面把这些结构放进同一个较小的地址范围里。
+- 当前没有使用任何硬件机制把这段空间 pin/lock 到 L2 cache。
+
+结论：
+- 不能严格保证 GC Local Workspace 常驻 L2。
+- 它只能提高“工作集大小适合 L2，因此大概率可以被 L2 容纳”的可能性。
+- `CACHE_SIZE_KB=896` 的意义是：把目标工作集控制在 1MiB L2 的约 87.5% 左右，减少容量 miss 的概率。
+- 但是硬件 cache 的实际命中还取决于：
+  - 物理地址到 cache set 的映射；
+  - L2 的 16-way associativity 是否发生冲突；
+  - OS 给 `malloc` 页分配的 physical page color；
+  - GC 过程中访问 old slot、Shape、PropertyMap、stack、代码、其他 runtime 数据造成的竞争；
+  - 同一个 physical core 上另一个 hyperthread 是否也在竞争 L2；
+  - cache replacement policy。
+
+关键细节：
+- `malloc` 返回的是连续虚拟地址，不代表连续物理地址。
+- L2 set index 使用物理地址位决定。
+- 普通 4KB page 只能固定 page 内 offset，不能控制完整的 L2 set 分布。
+- 因此，即使虚拟地址连续，physical page color 仍然可能造成某些 L2 set 压力更大。
+
+对 896KB 的判断：
+- 896KB 小于 1MiB，所以从容量上看是合理的。
+- 但是它已经接近 L2 容量上限。
+- 如果额外访问 young 之外的数据、old slots、shape/PM metadata，或者发生 set conflict，那么仍然可能把 GC Local Workspace 中的 line 挤出 L2。
+- 所以“896KB 预期在 L2 上”是一个合理实验假设，但不是硬件保证。
+
+更严谨的验证方法：
+- 不要只看总时间，要测 L2 相关 PMU counters。
+- 建议测：
+  - L2 references；
+  - L2 misses；
+  - L1D miss；
+  - LLC load/store miss；
+  - GC-only window 中的 miss rate。
+- 对 512KB、640KB、768KB、896KB、960KB、1024KB 做 sweep。
+- 如果 896KB 真的接近最佳，应该看到：
+  - 512/640 可能 minor GC 更多；
+  - 768/896 在总时间或 GC time 上较好；
+  - 960/1024 可能 L2 conflict/capacity miss 上升。
+
+目前应使用的表述：
+- 不要说“GC Local Workspace 被放进 L2 cache”。
+- 更准确的说法是：
+  - “GC Local Workspace is sized to fit within the per-core L2 cache budget.”
+  - 中文：GC Local Workspace 的大小被控制在每个 core 的 L2 cache budget 内，目的是提高它在 L2 中保持热数据的概率。
+
+## 2026-05-21 L2 set-associative 结构对 896KB workspace 的含义
+
+问题：
+- L2 是 `16-way set associative`、`1024 sets`、`64B cache line`。
+- 这是否意味着 workspace 很有可能几乎全部同时塞进 L2？
+
+计算：
+- L2 总容量：
+  - `16 ways * 1024 sets * 64B = 1,048,576B = 1MiB`
+- 每个 set 最多能同时容纳：
+  - `16 ways * 64B = 1024B`
+- 如果 workspace 是 896KB，并且物理地址到 set 的分布比较均匀：
+  - cache line 数量：`896KB / 64B = 14336 lines`
+  - 平均每个 set：`14336 / 1024 = 14 lines/set`
+  - L2 每个 set 有 16 ways，所以平均还剩 `2 ways/set`
+
+结论：
+- 从容量和平均 set 占用角度看，896KB 确实“很有可能”能大部分同时留在 1MiB L2 中。
+- 但它不是非常宽松的配置，因为平均每个 set 只剩 2 ways 给其他数据。
+- 如果 GC 过程中还频繁访问 old slot、Shape、PropertyMap、runtime stack、代码、RSet metadata 等，就可能把部分 workspace line 挤出 L2。
+- 如果物理页颜色/page coloring 不均匀，某些 set 的压力会超过平均值，也会导致 conflict miss。
+
+大小直觉：
+- 512KB：平均 8 lines/set，剩 8 ways，比较宽松。
+- 640KB：平均 10 lines/set，剩 6 ways。
+- 768KB：平均 12 lines/set，剩 4 ways。
+- 896KB：平均 14 lines/set，剩 2 ways，容量利用率高，但抗干扰能力弱。
+- 1024KB：平均 16 lines/set，理论上刚好填满 L2，几乎没有空间给其他数据，实际通常不稳。
+
+因此：
+- 896KB 是合理的“激进配置”。
+- 如果目标是最大化 young/local 空间，它值得测试。
+- 如果目标是让 workspace 更稳定地常驻 L2，768KB 可能更稳。
+- 最终不能只凭结构判断，要用 L2 miss / total time / GC time 的 sweep 实验验证。
+
+## 2026-05-21 当前 GiYSB 配置确认
+
+当前 GiYSB benchmark 使用的配置：
+- `OPT_GC=giy`
+- `GIY_SB=true`
+- `CACHE_SIZE_KB=896`
+- `GIY_RSET_READ_SLOT_AT_GC=true`
+- `GIY_GC_STACK_BYTES=49152`，也就是 48KB
+- `GIYSB_STAGING_BYTES=8192`，也就是 8KB
+- `GIYSB_SMALL_OBJECT_MAX_BYTES=256`
+- `GIYSB_SMALL_OLD_RATIO=50`
+- `GIYSB_PROFILE=0`，默认关闭 hot path 统计
+
+GC Local Workspace 结构：
+- GC stack：48KB，capacity 6144 entries
+- FT slot set：32KB，capacity 4096 entries
+- GiYSB staging buffer：8KB
+- edge log：0KB
+- JSObject layout cache：0KB
+- GiYOL staging/batch：0KB
+- aux 总量：88KB
+
+young/local 空间：
+- Young before aux：684.24KB
+- Young after aux：596.24KB
+
+GiYSB 策略：
+- old/DRAM space 按 50% / 50% 切成 small-old 和 large-old。
+- aligned total size `<=256B` 的对象 reserve 到 small-old。
+- 更大的对象 reserve 到 large-old。
+- GiYSB 使用 FIFO worklist，不使用 GiY 默认的 LIFO 顺序。
+- small-old 对象先进入 8KB staging buffer；staging 满了再 flush 到 old。
+- 大对象继续使用原 GiY direct copy / NT copy 路径。
+
+## 2026-05-21 新 GiYSB-LIFO/Tiny 方案思考
+
+问题：
+- 是否可以继续使用 GiY 原本的 LIFO traversal？
+- 只用一个尽可能小的表记录小于 64B 的对象。
+- 中对象正常 `memcpy`。
+- 大对象继续直接使用 non-temporal store。
+- 小对象最后统一按批进入 staging，再用 non-temporal store 写入 old。
+
+判断：
+- 可以，而且这个方向比当前第一版 GiYSB 更合理。
+- 当前 GiYSB 的主要问题是：
+  - 改成 FIFO，可能改变了 GiY 原来的 traversal locality；
+  - 对 `<=256B` 的对象都走 staging，范围太大；
+  - staging 导致 young -> staging -> old 的 double copy，instruction count 增加明显。
+- 新方案只处理 `<=64B` tiny object，可以更精确地针对“很小对象 direct memcpy 不划算、会污染 cache”的问题。
+
+推荐策略：
+- tiny object：
+  - `aligned total size <= 64B`
+  - reserve 到专门的 tiny-old region；
+  - 不立刻 copy；
+  - 记录到 tiny 表；
+  - 等 young traversal 全部结束后，按 reserve 顺序批量复制到 8KB staging；
+  - staging 满 8KB 后，用 NT store 写入 tiny-old。
+- medium object：
+  - `64B < aligned total size <= 256B`
+  - 扫描完成后立即 `memcpy` 到 old。
+- large object：
+  - `aligned total size > 256B`
+  - 扫描完成后直接使用现有 NT copy 路径。
+
+为什么可以保留 LIFO：
+- LIFO 只决定“扫描对象”的顺序。
+- tiny copy 的顺序可以通过 tiny 表单独保存。
+- `copy_for_minor()` 在 reserve tiny object 时把它追加到 tiny 表，这个顺序就是 reserve order。
+- traversal 仍然按 LIFO 扫描并 patch young source object。
+- tiny object 不在扫描时复制，而是在 stack 清空后统一复制。
+- 因为 young 区在 minor GC 结束前不会被回收，所以 tiny 表里的 source pointer 仍然有效。
+
+正确性条件：
+- tiny object 必须先完成扫描和 field patch，再复制到 old。
+- 因此 tiny 批量 copy 必须发生在 `giy_traverse_stack_and_copy()` 的最后，也就是 stack 清空之后。
+- root/RSet patch 之前 flush tiny object 更清楚。
+- medium/large object 可以继续扫描后立即 copy。
+- 如果 medium/large object 中的 field 指向 tiny object，它看到的是 tiny object 的 forwarding pointer；即使 tiny object 还没真正写入 old，也没有问题，因为 mutator 还没有恢复。
+
+表如何做到尽可能小：
+- 不建议存完整 `{dst, src, size}`，因为 64-bit 下至少 24B/entry。
+- 更好的设计是只存一个 32-bit entry：
+  - source offset：从 `cache_space.work_begin` 开始的 8-byte 单位 offset；
+  - size class：`aligned_bytes / 8`，范围 1..8。
+- destination 不需要存。
+  - 因为 tiny object 全部 reserve 到 tiny-old region；
+  - tiny 表按 reserve order 保存；
+  - flush 时从本次 tiny-old 起始地址顺序推进即可推导 dst。
+- 这样表大小约为：
+  - 32KB 表：8192 个 tiny objects；
+  - 64KB 表：16384 个 tiny objects；
+  - 96KB 表：24576 个 tiny objects。
+
+推荐第一次实现：
+- 先用 64KB tiny table。
+- staging buffer 仍然 8KB。
+- 如果 tiny table 满了：
+  - 后续 tiny object fallback 到 normal old；
+  - 扫描后直接 copy；
+  - 这样 correctness 不受影响，只是性能收益减少。
+
+Workspace 估算：
+- 当前 GiYSB：
+  - GC stack 48KB
+  - FT slot set 32KB
+  - staging 8KB
+  - aux 总量 88KB
+- 新 GiYSB-LIFO/Tiny，如果 tiny table 64KB：
+  - GC stack 48KB
+  - FT slot set 32KB
+  - staging 8KB
+  - tiny table 64KB
+  - aux 总量 152KB
+  - 在 896KB budget 下，young after aux 约为 `684.24KB - 152KB = 532.24KB`
+- 如果 tiny table 32KB：
+  - aux 总量 120KB
+  - young after aux 约 564.24KB
+  - 但 table overflow 风险更高。
+
+关于 256-bit / 更宽 NT store：
+- 当前代码主要使用 128-bit SSE2 NT store。
+- 256-bit AVX2 NT store 是可以考虑的，但必须处理：
+  - 编译参数，例如 `-mavx2`；
+  - 目标地址 32B 对齐；
+  - flush chunk 最好固定为 8KB，且 chunk start 保持 32B 对齐；
+  - tail 部分单独处理。
+- 为了公平和稳定，第一次实现建议先复用现有 128-bit NT copy 路径。
+- 如果 tiny batching 有收益，再单独测试 AVX2/256-bit NT store。
+
+总体结论：
+- 这个方案是当前 GiYSB 的合理下一版。
+- 它保留 GiY 的 LIFO 核心原则，只把 tiny object 的 materialization 延迟。
+- 它比“所有 <=256B 对象都 staging”更保守，应该能减少 double-copy 成本。
+- 是否真正变快需要 benchmark 验证，重点看：
+  - scavenge time 是否下降；
+  - GC instructions 是否低于当前 GiYSB；
+  - cache misses 是否仍然比 GiY baseline 少；
+  - tiny table overflow 率是否可接受。
+
+## 2026-05-21 GiYSB-LIFO/Tiny32 实装记录
+
+根据新的决定，已经把 GiYSB 改成第二版：
+- 保留 GiY 原本的 LIFO traversal。
+- 只把 `aligned total size <=64B` 的 tiny object 延迟 materialization。
+- tiny object reserve 到 small/tiny old region。
+- tiny object source 信息记录到 GC Local Workspace 上的 tiny table。
+- tiny table 大小先使用 32KB。
+- staging buffer 仍然是 8KB，也在 GC Local Workspace 上。
+- medium object 和 large object 不进 tiny table：
+  - `64B < size <=256B` 继续扫描后直接 `memcpy`；
+  - `>256B` 继续走现有 direct NT copy。
+
+tiny table 设计：
+- 每个 entry 是 32-bit。
+- entry 保存：
+  - young source offset；
+  - size class。
+- 不保存 destination pointer。
+- 原因：
+  - tiny object reserve 到 tiny-old region；
+  - tiny table 按 reserve order 记录；
+  - flush 时可以从本次 tiny-old 起点顺序推出 destination。
+
+当前配置：
+- `CACHE_SIZE_KB=896`
+- `GIY_GC_STACK_BYTES=49152`
+- `GIYSB_STAGING_BYTES=8192`
+- `GIYSB_TINY_TABLE_BYTES=32768`
+- `GIYSB_TINY_OBJECT_MAX_BYTES=64`
+- `GIYSB_SMALL_OLD_RATIO=50`
+- `GIYSB_PROFILE=0`
+
+当前 GC Local Workspace：
+- GC stack：48KB
+- FT slot set：32KB
+- GiYSB staging：8KB
+- GiYSB tiny table：32KB
+- aux 总量：120KB
+- Young before aux：684.24KB
+- Young after aux：564.24KB
+
+正确性小测试：
+- `benchmarks/hello_world.sbc`：通过。
+- `benchmarks/Storage_StackMini.sbc`：通过。
+
+性能测试规则：
+- 按用户要求，性能 benchmark 中不同时测 cache miss 率。
+- 增加运行环境开关 `EJS_DISABLE_GC_PMU=1`。
+- benchmark 脚本会用 `EJS_DISABLE_GC_PMU=1` 禁用 GC PMU counter，避免 cache counter 给性能测试加入额外噪音。
+- 如果之后需要 cache miss，需要单独开一轮实验，不能和性能实验混在一起。
+
+## 2026-05-21 GiYSB-LIFO/Tiny32 full benchmark 结果
+
+benchmark 规则：
+- 对比对象：
+  - 标准 GiY896
+  - GiYSB-LIFO/Tiny32 896
+- 两边都使用：
+  - `CACHE_SIZE_KB=896`
+  - `GIY_RSET_READ_SLOT_AT_GC=true`
+  - `GIY_GC_STACK_BYTES=49152`
+  - `EJS_DISABLE_GC_PMU=1`
+- 按用户要求，本轮性能 benchmark 不测 cache miss，不启用 PMU counter。
+
+输出目录：
+- `/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysb_tiny32_vs_giy_896_20260521_025038`
+- `summary.csv`
+
+正确性：
+- 标准 GiY：13/13 benchmarks status 0。
+- GiYSB-LIFO/Tiny32：13/13 benchmarks status 0。
+
+Workspace：
+
+| 配置 | Young before aux | Young after aux | Aux total |
+|---|---:|---:|---:|
+| GiY896 | 684.24KB | 604.24KB | 80KB |
+| GiYSB-LIFO/Tiny32 | 684.24KB | 564.24KB | 120KB |
+
+GiYSB-LIFO/Tiny32 的 aux 结构：
+- GC stack：48KB
+- FT slot set：32KB
+- staging buffer：8KB
+- tiny table：32KB
+- aux 总量：120KB
+
+总结果：
+
+| 指标 | GiY896 | GiYSB-LIFO/Tiny32 | 差值 |
+|---|---:|---:|---:|
+| 总时间 | 6597.502s | 6641.444s | +43.942s (+0.666%) |
+| 业务时间 | 6461.690s | 6477.450s | +15.760s (+0.244%) |
+| GC full time | 135.812s | 163.994s | +28.182s (+20.751%) |
+| GC core time | 100.276s | 126.671s | +26.395s (+26.322%) |
+| scan_roots | 0.496s | 0.546s | +0.050s (+10.081%) |
+| scan_RS | 24.933s | 25.673s | +0.740s (+2.968%) |
+| scavenge | 74.843s | 100.451s | +25.608s (+34.216%) |
+| minor GC count | 1,045,148 | 1,119,336 | +74,188 (+7.098%) |
+| forward operations | 1,675,117,365 | 1,676,555,574 | +1,438,209 (+0.086%) |
+| total alloc bytes | 305448.10MB | 305448.04MB | 基本相同 |
+
+per benchmark 结果：
+
+| benchmark | GiY total | GiYSB total | total 差值 | GC 差值 | scavenge 差值 | minor GC 差值 |
+|---|---:|---:|---:|---:|---:|---:|
+| Bounce | 304.172s | 304.219s | +0.047s (+0.015%) | +0.015s | +0.012s | +224 |
+| CD | 481.071s | 483.169s | +2.098s (+0.436%) | +2.121s | +1.823s | +7,698 |
+| DeltaBlue | 133.039s | 134.971s | +1.932s (+1.452%) | +0.509s | +0.432s | +1,100 |
+| Havlak | 803.309s | 800.679s | -2.630s (-0.327%) | +6.993s | +6.110s | +15,965 |
+| List | 185.858s | 186.464s | +0.606s (+0.326%) | +0.001s | +0.000s | +34 |
+| Mandelbrot | 397.728s | 399.682s | +1.954s (+0.491%) | +0.335s | +0.028s | +18,028 |
+| NBody | 642.687s | 645.774s | +3.087s (+0.480%) | +0.928s | +0.255s | +22,403 |
+| Permute | 807.262s | 817.296s | +10.034s (+1.243%) | +0.000s | +0.000s | +2 |
+| Queens | 217.194s | 216.142s | -1.052s (-0.484%) | +0.006s | +0.001s | +77 |
+| Richards | 1729.929s | 1737.225s | +7.296s (+0.422%) | +0.014s | +0.004s | +150 |
+| Sieve | 236.637s | 237.788s | +1.151s (+0.486%) | +0.077s | +0.031s | +1,428 |
+| Storage | 328.561s | 346.875s | +18.314s (+5.574%) | +17.183s | +16.912s | +7,072 |
+| Towers | 330.055s | 331.160s | +1.105s (+0.335%) | +0.000s | +0.000s | +7 |
+
+分析：
+- GiYSB-LIFO/Tiny32 正确，但没有比标准 GiY 快。
+- 总时间慢 0.666%，主要来自 GC 时间增加。
+- GC 时间增加 20.751%，其中主要是 scavenge 增加 34.216%。
+- minor GC 次数增加 7.098%，这是因为 tiny table 额外占用 32KB workspace，使 young after aux 从 604.24KB 降到 564.24KB。
+- forward operations 基本不变，说明活对象图规模没有明显变化；主要变化是 GC 频率和 copy/materialization 成本。
+- `Storage` 是最大退化来源：
+  - total +18.314s；
+  - GC +17.183s；
+  - scavenge +16.912s。
+- `Havlak` 和 `Queens` 总时间略微变快，但 GC 时间仍然变慢；这更像业务时间波动或布局影响，不代表 GC 优化成功。
+
+结论：
+- 32KB tiny table 版本比第一版 GiYSB 更符合 GiY 原则，因为它保留 LIFO，而且只处理 tiny object。
+- 但是性能上仍然没有成功。
+- 目前瓶颈不是 RSet，而是：
+  - tiny table 占用 workspace 导致 young 变小；
+  - tiny object 仍然存在 young -> staging -> old 的 double copy；
+  - staging flush 增加了 scavenge 成本。
+
+下一步建议：
+- 不建议马上换 64KB tiny table，因为 64KB 会进一步减少 young 空间，大概率增加 minor GC 次数。
+- 更值得先做的是 tiny table overflow/profile 的单独非性能测试，确认 32KB 是否真的不够。
+- 如果 32KB 没有大量 overflow，就不应该换 64KB。
+- 之后可以尝试：
+  - 只在 tiny batch 累积到接近 8KB 时才 staging；
+  - 尾巴直接 memcpy，不走 staging；
+  - 对 tiny object 只做 reserve-order old placement，不做 staging；
+  - 或者减少 tiny table entry 成本/使用更小 table。
+
+## 2026-05-21 GiYSB 当前 size class 和批量 copy 策略说明
+
+这里的 `size_class` 不是 JavaScript 的 class，也不是对象的语义类型。
+它只是 GiYSB tiny table 里用来压缩记录的“对象大小编码”。
+
+当前 tiny table 的一条记录是 32 bit：
+
+```c
+entry = (offset_units << 4) | size_class;
+```
+
+含义：
+- `offset_units`：对象 payload 相对 `cache_space.work_begin` 的偏移，单位是 8 字节。
+- `size_class`：对象总大小的 8 字节单位数，即 `align_bytes / 8`。
+
+为什么需要 `size_class`：
+- flush tiny table 的时候，只知道源对象在哪里还不够，还必须知道这个对象要 copy 多少字节。
+- tiny object 当前限制为不超过 64B，所以 `size_class` 最大是 8，可以放进低 4 bit。
+- 这样每个 tiny object 只需要 4 字节记录，而不是记录完整的 `src + dst + size`。
+- destination 不单独记录，因为 tiny object 按 reserve 顺序连续放进 tiny-old 区，flush 时可以从 `g_giysb_tiny_batch_begin` 顺序推出目标地址。
+
+当前批量 copy 策略：
+1. reserve 阶段：
+   - 如果对象 `align_bytes <= 64B`，并且 tiny-old 有空间、tiny table 也有空间，就把它记录到 tiny table。
+   - 同时在 tiny-old 区提前 reserve 目标地址，并设置 forwarding pointer。
+   - 如果 tiny table 满了或者编码失败，就 fallback 到普通 old 区，之后直接 copy。
+2. 扫描阶段：
+   - GiYSB 仍然使用 GiY 原来的 LIFO GC stack。
+   - 每个对象被 pop 出来以后，先扫描 children，并在 young 源对象里修正引用字段。
+   - 如果这个对象的目标地址属于 tiny-old，就暂时不 copy。
+   - 如果不是 tiny object，就立刻用原来的 `giy_copy_live_object` copy。
+3. tiny table flush 阶段：
+   - 当 LIFO 扫描全部结束以后，GiYSB 才顺序读取 tiny table。
+   - 用 `offset_units` 重建源对象地址。
+   - 用 `size_class * 8` 得到 copy 大小。
+   - 先把 tiny object 从 young 源对象 copy 到 8KB staging buffer。
+   - staging buffer 满了，或者下一个对象放不下时，就把 staging buffer 一次性 flush 到 tiny-old 区。
+   - flush 时调用现有的 `giy_copy_live_object`；大于 256B 的 staging chunk 会走当前已有的 non-temporal store 路径。
+   - 最后的尾巴也会 flush；如果尾巴不大，可能仍然走普通 memcpy。
+
+需要注意：
+- 当前“批量”的对象只包括 tiny object，即总大小不超过 64B 的对象。
+- 中对象和大对象没有进入 tiny table，仍然在扫描时直接 materialize 到 old 区。
+- 扫描顺序仍然是 LIFO；tiny object 的最终 copy 顺序是 reserve 顺序。
+- 现在的 non-temporal store 仍然使用当前已有的 128-bit 路径，还不是 256-bit AVX2 路径。
+
+## 2026-05-21 关于 256-bit NT store 和公平比较 young space 的判断
+
+当前机器是 Intel Xeon W-2235，支持 AVX2 和 AVX-512。
+当前 `giy_copy_live_object` 的 non-temporal copy 仍然使用 128-bit `_mm_stream_si128`，也就是每次 16B。
+
+256-bit 是否可能提高性能：
+- 有可能，但不是一定。
+- 对 GiYSB 来说，staging buffer flush 通常是较大的连续 chunk，例如接近 8KB，这种场景更可能从 256-bit `_mm256_stream_si256` 得到收益。
+- 对标准 GiY 来说，很多对象是单个 object 直接 copy，如果对象本身不大，256-bit 的收益可能很小。
+- 256-bit 可以减少 store 指令数量和循环次数，但真正瓶颈可能是内存写带宽、write-combining buffer、读源对象成本或扫描成本。
+- 不能一开始就上 512-bit，因为 AVX-512 更可能带来降频，反而污染实验。
+- 如果做，建议先做 AVX2 256-bit，不要直接做 AVX-512。
+
+实现 256-bit 时需要注意：
+- `_mm256_stream_si256` 要求目标地址 32B 对齐。
+- 当前代码只处理到 16B 对齐，因此需要增加 32B 对齐前缀处理。
+- 如果目标地址无法安全对齐到 32B，应该 fallback 到现有 128-bit 路径。
+- 这个优化应该放在公共的 `giy_copy_live_object` 里，让 GiY 和 GiYSB 都使用同一个 copy primitive。
+- 不应该只给 GiYSB 单独开 256-bit，否则会把“copy primitive 优化”和“GiYSB 算法优化”混在一起。
+
+关于公平比较 young space：
+- 主实验应该固定总的 GC Local Workspace budget，例如两边都是 896KB。
+- 在这个设定下，GiYSB 因为需要 staging buffer 和 tiny table，所以 young space 变小，这是 GiYSB 必须付出的真实空间成本。
+- 因此主结果不应该强行让 GiY 和 GiYSB 的 young space 一样，否则可能把 GiYSB 的额外元数据成本隐藏掉。
+- 但是为了分析原因，可以做一个额外的 ablation：让标准 GiY 也人为扣掉同样大小的 dummy workspace，使 GiY 和 GiYSB 的 young after aux 完全相同。
+- 这个 equal-young 实验适合回答“在相同 young 大小下，GiYSB 的批量 copy 本身有没有收益”。
+
+推荐报告方式：
+1. 主实验：固定总 workspace，例如 896KB，比较真实 end-to-end 性能。
+2. 辅助实验：固定 young after aux，隔离分析 GiYSB copy 策略本身。
+3. 如果实现 256-bit，GiY 和 GiYSB 都必须使用同一个 256-bit copy primitive，然后再重复主实验和辅助实验。
+
+## 2026-05-21 为什么 GiYSB 批量 copy 仍然可能有 256-bit 对齐问题
+
+先纠正一个概念：GiYSB 的批量 copy 不是复制到 young 区。
+当前流程是：
+- young 源对象 -> staging buffer；
+- staging buffer -> old/tiny-old 区。
+
+对齐问题主要发生在第二段，也就是用 non-temporal store 把 staging buffer 写回 old/tiny-old 区的时候。
+
+原因：
+- 256-bit streaming store，也就是 `_mm256_stream_si256`，要求目标地址 32B 对齐。
+- 当前堆对象只保证 8B 对齐，因为 `ALIGN` 使用的是 `sizeof(uintptr_t)`。
+- GiYSB tiny-old 的 `small_free` 也是按对象大小推进，而 tiny object 的大小可能是 24B、32B、40B、48B、56B、64B。
+- 所以即使 tiny object 在 old 区是连续排布的，也不代表每一批 batch 的起始地址一定是 32B 对齐。
+
+例子：
+- 假设 tiny-old batch 起始地址是 `0x...10`，它是 16B 对齐，但不是 32B 对齐。
+- 对 128-bit NT store 来说这通常可以接受。
+- 但对 256-bit NT store 来说，这个地址不能直接使用 `_mm256_stream_si256`。
+
+GiYSB 比标准 GiY 好的地方：
+- GiYSB staging flush 的目标地址是一大段连续 old/tiny-old 区。
+- 一旦把开头处理到 32B 对齐，后面的大部分 8KB chunk 就可以连续使用 256-bit NT store。
+- 标准 GiY 经常一个对象一个对象 copy，每个对象的目标地址都可能重新面对对齐问题。
+
+但 GiYSB 仍然不能忽略对齐：
+- 连续不等于 32B 对齐。
+- malloc 起始地址不一定保证 32B。
+- old/tiny-old 的 split 边界当前也只向 8B 对齐。
+- tiny object 总大小只保证 8B 对齐，不保证 32B 对齐。
+
+如果实现 AVX2 256-bit NT store，正确方式应该是：
+- 先检查目标地址是否 32B 对齐。
+- 如果没有对齐，先用 8B/16B store 或 memcpy 处理前缀，让目标地址推进到 32B 对齐。
+- 中间大段用 `_mm256_stream_si256`。
+- 尾巴用现有 128-bit/64-bit/普通 memcpy 处理。
+- 如果 chunk 太小，或者对齐成本太高，就直接 fallback 到现有 128-bit 路径。
+
+## 2026-05-21 256-bit 对齐到底看 src 还是 target
+
+对 `_mm256_stream_si256` 来说，最关键的是 target，也就是写入目标地址必须 32B 对齐。
+source 可以使用 `_mm256_loadu_si256` 从不对齐地址读取，所以 source 不一定需要 32B 对齐。
+
+“看指针末尾”只能判断当前地址是否对齐，不能改变地址。
+如果 target 地址不是 32B 对齐，例如低 5 bit 是 16，那么不能直接从这里开始执行 `_mm256_stream_si256`。
+必须先处理前面的 16B，让 target 指针前进到下一个 32B 边界。
+
+示例：
+
+```text
+dst = 0x...10
+dst & 31 = 16
+prefix = 32 - 16 = 16
+```
+
+处理方式：
+1. 先用普通 memcpy、64-bit store 或 128-bit store 写掉前 16B。
+2. 然后 `dst += 16`，这时 `dst` 变成 32B 对齐。
+3. 中间的大段才用 `_mm256_stream_si256`。
+4. 最后的不足 32B 尾巴再用普通方式处理。
+
+所以前缀处理不是为了“判断对齐”，而是为了“移动到对齐边界”。
+
+对 GiYSB 来说：
+- `staging buffer -> old/tiny-old` 的 target 是 old/tiny-old 地址。
+- 因此 256-bit NT store 主要看 old/tiny-old 的目标地址对齐。
+- staging buffer 的 source 地址可以不对齐，只要使用 unaligned load。
+- 但如果 staging buffer 也能 32B 对齐，会更好，因为 load 也可能更快；只是它不是 correctness 的硬要求。
+
+## 2026-05-21 为什么不能直接跳到 target 的对齐地址开始写
+
+如果 target 地址不是 32B 对齐，不能简单地“跳到下一个 32B 对齐地址”开始写。
+原因是 GC 的 reserve 阶段已经确定了对象或者 batch 的真实目标地址。
+这个目标地址前面的非对齐部分也是对象内容的一部分，通常包含对象 header 或第一个对象的开头。
+
+例子：
+
+```text
+dst = 0x1010
+next 32B aligned dst = 0x1020
+prefix = 16B
+```
+
+正确 copy 需要做到：
+
+```text
+src[0..15]   -> 0x1010..0x101f
+src[16..]    -> 0x1020..后面
+```
+
+如果直接从 `0x1020` 开始写，有两种错误：
+
+1. `src[0..] -> 0x1020..`
+   - 数据整体向后移动 16B。
+   - forwarding pointer/root/slot 仍然指向 `0x1010 + header` 对应的对象位置。
+   - 对象 header 和 payload 位置全部错位。
+
+2. `src[16..] -> 0x1020..`
+   - `0x1010..0x101f` 这 16B 没有被写入。
+   - 对象开头丢失，通常会直接破坏 header。
+
+所以前缀处理不是“填充无意义空间”，而是把 batch 开头那一段真实数据写到它应该在的位置。
+
+另一种可行设计是在 reserve 阶段就强制让 old/tiny-old 的 batch 起点 32B 对齐。
+这样 copy 时可以少处理前缀。
+但是这必须在分配/保留目标地址时完成，不能在 copy 阶段临时跳过。
+否则 GC 中已经保存的 forwarding pointer、root 更新、slot 更新都会指向错误位置。
+
+结论：
+- copy 阶段跳到对齐地址是不正确的。
+- 如果要避免前缀 copy，必须在 reserve 阶段插入 padding，使对象或 batch 的真实目标地址本来就是 32B 对齐。
+- 这会带来空间浪费和布局复杂度，需要作为单独设计权衡。
+
+## 2026-05-21 实装 256-bit NT store 并公平测试 GiY/GiYSB
+
+本次改动：
+- 在 `giy_copy_live_object` 中加入 AVX2 256-bit non-temporal store 路径。
+- 中间大段使用 `_mm256_stream_si256`，一次写 32B。
+- source 使用 `_mm256_loadu_si256`，所以 source 不要求 32B 对齐。
+- target 必须 32B 对齐；如果 target 不是 32B 对齐，就先用 64-bit/128-bit 小段 streaming store 把 target 推进到 32B 边界。
+- 尾巴使用 128-bit/64-bit 路径处理。
+- 如果 target 连 8B 对齐都不满足，则 fallback 到普通 `memcpy`。
+- `GIY_NT_COPY_BITS=256` 时自动给 C++ 编译加 `-mavx2`。
+- `OPT_GC=giy` 或 `OPT_GC=giyol` 默认使用 `GIY_NT_COPY_BITS=256`。
+- benchmark 脚本中也显式传入 `GIY_NT_COPY_BITS=256`，避免结果不清楚。
+
+验证：
+- 单独构建 GiY 256-bit：成功。
+- 单独构建 GiYSB 256-bit：成功。
+- `giy_gc_probe.sbc` smoke test：status 0。
+- full-suite benchmark：GiY 13/13 status 0，GiYSB 13/13 status 0。
+- 输出中确认两边都是 `NT copy width: 256 bits`。
+
+实验配置：
+- 输出目录：`build.debug/benchmarks/out_giysb_tiny32_vs_giy_nt256_896_20260521_122911`
+- CPU：Intel Xeon W-2235
+- workspace budget：896KB
+- GC stack：48KB
+- RSet：read-slot-at-GC
+- GiYSB staging buffer：8KB
+- GiYSB tiny table：32KB
+- tiny object max：64B
+- PMU/cache counter：禁用
+
+Workspace：
+
+| 配置 | Young before aux | Young after aux | Aux total |
+|---|---:|---:|---:|
+| GiY896-NT256 | 684.24KB | 604.24KB | 80KB |
+| GiYSB-Tiny32-NT256 | 684.24KB | 564.24KB | 120KB |
+
+总结果：
+
+| 指标 | GiY896-NT256 | GiYSB-Tiny32-NT256 | 差值 |
+|---|---:|---:|---:|
+| 总时间 | 6686.968s | 6674.211s | -12.757s (-0.191%) |
+| 业务时间 | 6552.102s | 6506.925s | -45.177s (-0.690%) |
+| GC full time | 134.866s | 167.286s | +32.420s (+24.039%) |
+| GC core time | 100.738s | 129.247s | +28.509s (+28.300%) |
+| scan_roots | 0.517s | 0.568s | +0.051s (+9.865%) |
+| scan_RS | 24.934s | 25.847s | +0.913s (+3.662%) |
+| scavenge | 75.288s | 102.831s | +27.543s (+36.584%) |
+| minor GC count | 1,045,148 | 1,119,336 | +74,188 (+7.098%) |
+| forward operations | 1,675,117,365 | 1,676,555,592 | +1,438,227 (+0.086%) |
+| total alloc bytes | 305448.10MB | 305448.04MB | 基本相同 |
+
+per benchmark 差异：
+
+| benchmark | GiY total | GiYSB total | total 差值 | GC 差值 | scavenge 差值 | minor GC 差值 |
+|---|---:|---:|---:|---:|---:|---:|
+| Bounce | 305.218s | 304.832s | -0.386s (-0.126%) | +0.035s | +0.015s | +224 |
+| CD | 490.671s | 484.981s | -5.690s (-1.160%) | +2.450s | +1.897s | +7,698 |
+| DeltaBlue | 132.910s | 134.026s | +1.116s (+0.840%) | +0.563s | +0.449s | +1,100 |
+| Havlak | 802.511s | 803.807s | +1.296s (+0.161%) | +8.563s | +6.850s | +15,965 |
+| List | 186.408s | 186.491s | +0.083s (+0.045%) | +0.004s | +0.000s | +34 |
+| Mandelbrot | 424.575s | 430.730s | +6.155s (+1.450%) | +0.606s | +0.025s | +18,028 |
+| NBody | 678.078s | 645.467s | -32.611s (-4.809%) | +1.724s | +0.277s | +22,403 |
+| Permute | 814.932s | 813.404s | -1.528s (-0.188%) | +0.000s | +0.000s | +2 |
+| Queens | 217.051s | 216.228s | -0.823s (-0.379%) | +0.004s | +0.001s | +77 |
+| Richards | 1737.317s | 1737.172s | -0.145s (-0.008%) | +0.014s | +0.002s | +150 |
+| Sieve | 237.352s | 237.327s | -0.025s (-0.011%) | +0.068s | +0.023s | +1,428 |
+| Storage | 329.736s | 348.803s | +19.067s (+5.783%) | +18.389s | +18.004s | +7,072 |
+| Towers | 330.209s | 330.943s | +0.734s (+0.222%) | +0.000s | +0.000s | +7 |
+
+和上一轮 128-bit 结果的粗略比较：
+
+| 配置 | 指标 | 128-bit | 256-bit | 差值 |
+|---|---|---:|---:|---:|
+| GiY | 总时间 | 6597.502s | 6686.968s | +89.466s (+1.356%) |
+| GiY | GC full | 135.812s | 134.866s | -0.946s (-0.697%) |
+| GiY | scavenge | 74.843s | 75.288s | +0.445s (+0.595%) |
+| GiYSB | 总时间 | 6641.444s | 6674.211s | +32.767s (+0.493%) |
+| GiYSB | GC full | 163.994s | 167.286s | +3.292s (+2.007%) |
+| GiYSB | scavenge | 100.451s | 102.831s | +2.380s (+2.369%) |
+
+分析：
+- 256-bit NT store 的 correctness 没问题，GiY 和 GiYSB 都能完整跑完。
+- 但这次结果没有证明 256-bit 更快。
+- 在 256-bit 公平比较中，GiYSB 的总时间看起来比 GiY 快 0.191%，但这是业务时间差异抵消了 GC 退化。
+- 从 GC 指标看，GiYSB 仍然明显更慢：GC full +24.039%，scavenge +36.584%。
+- minor GC 次数仍然多 7.098%，原因没有变化：GiYSB 的 staging buffer 和 tiny table 多占 40KB workspace，使 young after aux 从 604.24KB 降到 564.24KB。
+- `Storage` 仍然是最大退化来源，几乎解释了大部分 GC 增量。
+- `NBody` 的总时间大幅变快，但 GC 时间反而变慢，因此更像业务时间波动，不应该用它证明 GiYSB 的 GC 优化成功。
+
+结论：
+- 256-bit NT store 已经可以作为 GiY/GiYSB 的统一 copy primitive 使用。
+- 但是它没有解决 GiYSB 当前的核心问题。
+- 当前 GiYSB 的瓶颈仍然是：
+  1. 额外 workspace 让 young 变小，minor GC 次数增加；
+  2. tiny object 经过 young -> staging -> old 的 double copy；
+  3. staging/tiny table 管理成本增加 scavenge 时间。
+- 下一步如果继续优化 GiYSB，不应该只扩大 store width；更应该减少 staging 的 double copy 或减少 tiny table 对 workspace 的占用。
+
+## 2026-05-21 关于“复制 young 中相近对象的连续 span，把小缝隙当碎片”的方案
+
+这个想法是有价值的。
+它可以看作一种新的 GiY/GiYSB 方向：不是把 tiny object 先 copy 到 staging buffer，而是在 young 区找出彼此距离很近的 live object cluster，然后把整个 source span 直接 non-temporal copy 到 old 区。
+
+基本思想：
+
+```text
+young:
+[live A][small gap][live B][small gap][live C]
+
+old:
+[live A][filler/padding][live B][filler/padding][live C]
+```
+
+这样可以把当前 GiYSB 的：
+
+```text
+young -> staging -> old
+```
+
+变成：
+
+```text
+young span -> old span
+```
+
+潜在优点：
+- 可以去掉 staging buffer 的 double copy。
+- source 和 target 都是连续区间，更适合 NT store。
+- 如果 young 中 live object 本来就靠得很近，复制少量 gap 可能比逐个小对象 copy 更便宜。
+- old 中保持 young allocation locality，可能对后续 mutator locality 有帮助。
+
+但是 correctness 上有一个非常重要的问题：
+- 不能把 gap 中的原始垃圾字节直接留给 old-space scanner。
+- 如果 old/major GC 以后线性扫描 old 区，它会把 gap 里的旧 header 或随机内容当作真实对象。
+- 如果 gap 里恰好是 dead object，它里面可能还有已经失效的 young pointer，major GC 扫描它会产生严重错误。
+
+所以 gap 不能只是“随便复制过去的垃圾”。
+它必须满足其中一种条件：
+1. 把 gap 改写成合法 filler object / padding object；
+2. 或者给 old 区增加 skip map / span metadata，让 major GC 知道哪些字节不是对象；
+3. 或者 major GC 的 old scan 逻辑能识别并跳过这些 gap。
+
+最推荐的是 filler object：
+- gap 足够大时，写一个无 pointer 的 filler header；
+- filler 的 size 覆盖整个 gap；
+- major GC 扫描到 filler 时直接跳过。
+
+这个方案的核心 trade-off：
+- 节省 staging double copy；
+- 增加 old-space padding 浪费；
+- 增加复制的无用 gap bytes；
+- 增加 live object source-order clustering 的计划成本。
+
+是否值得做，取决于两个比例：
+
+```text
+gap_bytes / live_bytes
+span_bytes 是否足够大到值得 NT store
+```
+
+建议阈值：
+- `max_gap_bytes`: 32B 或 64B 起步；
+- `max_gap_ratio`: gap 不超过 live bytes 的 10% 到 20%；
+- `min_span_for_nt`: 至少 2KB 或 4KB 才使用 span NT copy；
+- 小于阈值的 cluster 直接 fallback 到原来的逐对象 copy。
+
+实现难点：
+- 当前 GiYSB 在发现对象时就 reserve 目标 old 地址，并写 forwarding pointer。
+- 但 span copy 需要按 young source address 排序，把一组对象一起放进同一个 old span。
+- 这意味着不能完全沿用当前 reserve-order forwarding 设计。
+
+比较合理的新实现路线：
+1. 第一阶段只 mark live object，并收集 live object header/size，不立刻确定最终 old 地址。
+2. 按 young source address 排序 live object。
+3. 根据 gap threshold 形成 span clusters。
+4. 为每个 span 一次性 reserve old 区。
+5. 给 span 内每个 live object 设置 forwarding pointer：
+   - `dst = span_old_base + (src - span_young_base)`
+6. 扫描/patch live object 内部引用、root、RSet。
+7. 对大 span 执行 `young span -> old span` 的 NT copy。
+8. 对 span 内 gap 写 filler object 或记录 skip metadata。
+9. 不适合 span copy 的对象走原来的直接 copy。
+
+这个方案可以命名为 `GiYSC`：GiY Span Copy。
+
+推荐下一步：
+- 不要马上完整实现。
+- 先做一个 profiling/simulation 模式：
+  - 在 minor GC 中收集 live object source address 和 size；
+  - 不改变当前 copy 行为；
+  - 只计算如果使用 span copy，会形成多少 span、gap bytes 有多少、可 NT copy 的 span bytes 有多少。
+- 如果结果显示很多 live object 在 young 中确实距离很近，而且 gap ratio 很低，再实装 GiYSC。
+
+当前判断：
+- 这个方向比继续扩大 staging buffer 更有研究价值。
+- 它直接针对当前 GiYSB 最大问题：staging double copy。
+- 但必须解决 filler/skip metadata，否则把 gap 直接复制进 old 区会破坏 major GC 正确性。
+
+## 2026-05-21 为什么 GiYSB 的 GC 更慢但 business 看起来更快
+
+首先要注意：当前报告里的 `Business logic` 不是独立测量出来的 mutator 时间。
+在 `giy_dram_manager.cc` 中，它是这样计算的：
+
+```c
+business_wall = total_elapsed_wall - total_gc_full_wall;
+```
+
+也就是说：
+- `Total execution` 是整个程序 wall time。
+- `GC overhead(full)` 是 minor GC 函数包住的 wall time。
+- `Business logic` 是二者相减得到的残差。
+
+因此 `business` 变快不一定说明业务代码真的被 GiYSB 优化了。
+
+这次 256-bit 结果中：
+- GiYSB GC full 比 GiY 慢 `+32.420s`。
+- 但是 total 比 GiY 快 `-12.757s`。
+- 所以 residual business 必然显示为 `-45.177s`。
+
+per benchmark 看，business 变快主要来自少数项目：
+
+| benchmark | business 差值 | total 差值 | GC 差值 |
+|---|---:|---:|---:|
+| NBody | -34.335s | -32.611s | +1.724s |
+| CD | -8.140s | -5.690s | +2.450s |
+| Havlak | -7.267s | +1.296s | +8.563s |
+| Storage | +0.678s | +19.067s | +18.389s |
+
+这说明：
+- GC 变慢是真实且一致的，主要体现在 `Storage`、`Havlak`、`CD` 等。
+- business 变快并不均匀，主要被 `NBody`、`CD`、`Havlak` 几项拉动。
+- 尤其 `NBody` 的 GC 明明变慢，但 total 大幅变快，这更像运行波动、二进制布局变化、CPU 频率/调度变化，或者对象布局影响 mutator cache locality，而不能直接归因于 GC copy 优化。
+
+GC 变慢的直接原因仍然清楚：
+1. GiYSB 多占 40KB workspace：
+   - GiY young after aux：604.24KB
+   - GiYSB young after aux：564.24KB
+2. young 变小导致 minor GC 次数增加：
+   - GiY：1,045,148
+   - GiYSB：1,119,336
+   - 增加 74,188 次，也就是 +7.098%
+3. tiny object 经过 `young -> staging -> old`，存在 double copy。
+4. tiny table 记录、flush staging、判断 tiny destination 都会增加 scavenge 成本。
+
+business 可能变快的几个合理解释：
+1. 统计定义问题：
+   - business 是残差，不是独立 mutator 计时。
+   - total 或 GC 任意一边有波动，都会被放大到 business 上。
+2. 运行波动：
+   - 当前 full-suite 每项只跑一次。
+   - NBody 一项就贡献了约 `-34.335s` business 差异，足以改变 aggregate 结论。
+3. 二进制布局变化：
+   - GiYSB 是不同编译宏生成的二进制。
+   - 即使 mutator 逻辑几乎一样，代码布局、函数地址、分支布局、I-cache 行为也可能变化。
+4. 对象布局变化：
+   - GiYSB 会把 tiny object 聚到 tiny-old/small-old 区。
+   - 这可能让某些 benchmark 的后续 old object 访问更集中，从而使 mutator 访问看起来更快。
+   - 但这目前只是可能性，尚未被 cache/mutator 专门实验确认。
+5. 更小 young 的副作用：
+   - GiYSB 的 young 更小，GC 更频繁。
+   - 这可能让 mutator 经常在更小的 young working set 上运行，某些场景下反而提高 cache locality。
+   - 代价就是 GC 次数和 GC 时间增加。
+
+当前判断：
+- 不能说“GiYSB 让业务代码稳定变快”。
+- 更稳妥的说法是：这次单次 full-suite 中，GiYSB 的 residual business time 更低，但 GC time 明确更高。
+- 对论文或报告来说，应该把 total time 和 GC time 分开报告，不要用 residual business 证明优化成功。
+
+下一步如果要确认原因：
+1. 对关键项目至少重复 3 次或 5 次，使用 median，而不是单次结果。
+2. 单独看 `NBody`、`CD`、`Havlak`、`Storage`。
+3. 做 equal-young 实验，分离“young 变小导致 GC 更多”和“GiYSB copy 策略本身”的影响。
+4. 如果要解释 mutator 为什么快，需要单独做 mutator cache/locality 测量，但不要混入性能基准 run。
+
+## 2026-05-21 当前 GiYSB 数据结构分布
+
+当前配置是 `GiYSB-Tiny32-NT256`：
+- `CACHE_SIZE_KB=896`
+- `GIY_GC_STACK_BYTES=49152`
+- `GC_FT_SLOT_SET_BYTES=32768`
+- `GIYSB_STAGING_BYTES=8192`
+- `GIYSB_TINY_TABLE_BYTES=32768`
+- `GIYSB_TINY_OBJECT_MAX_BYTES=64`
+- `GIY_RSET_READ_SLOT_AT_GC=1`
+- `GIY_NT_COPY_BITS=256`
+
+需要区分两个概念：
+- 按我们讨论的广义概念，GC Local Workspace / cache-local budget 是整块 896KB。
+- 代码输出里的 `Aux total=120KB` 是狭义辅助区，只包含 GC stack、FT slot set、GiYSB staging、tiny table，不包含 remembered set。
+
+当前 896KB 内部从低地址到高地址大致是：
+
+| 区域 | 大小 | 作用 |
+|---|---:|---|
+| init/static cache area | 约 19.76KB | 初始化阶段已经放在 cache/local 区的对象，`cache_space.begin .. work_begin` |
+| young allocation area | 564.24KB | minor GC 之间的新对象分配区 |
+| GiYSB tiny table | 32KB | 记录 tiny object 的源偏移和 size class，容量 8192 条 |
+| GiYSB staging buffer | 8KB | tiny object 批量 copy 的中转 buffer |
+| GC LIFO stack | 48KB | GiY/GiYSB minor GC 遍历 young object graph 的 worklist |
+| FT slot set | 32KB | 记录需要 patch 的特殊 slot 地址集合 |
+| RSet hash table | 64KB | remembered set 去重/查询用 hash table |
+| RSet buffer | 128KB | read-slot 模式下保存 old->young slot 地址，容量 16384 条 |
+
+数值核对：
+
+```text
+896KB
+- RSet buffer 128KB
+- RSet hash 64KB
+- init/static area 约 19.76KB
+= Young before aux 约 684.24KB
+
+Young before aux 684.24KB
+- GC stack 48KB
+- FT slot set 32KB
+- GiYSB staging 8KB
+- GiYSB tiny table 32KB
+= Young after aux 564.24KB
+```
+
+当前 `Aux total=120KB` 的组成：
+
+| Aux 结构 | 大小 |
+|---|---:|
+| GC stack | 48KB |
+| FT slot set | 32KB |
+| GiYSB staging buffer | 8KB |
+| GiYSB tiny table | 32KB |
+| edge log | 0KB |
+| JSObject layout cache | 0KB |
+| GiYOL staging/batch | 0KB |
+| 合计 | 120KB |
+
+不在 896KB local/cache budget 里的部分：
+- `dram_space` / old generation：由大块 `malloc` 分配，GiYSB 会按 `GIYSB_SMALL_OLD_RATIO=50%` 分成 small/tiny old 和 large/normal old。
+- `g_giysb_old`、`g_giysb_profile`、各种 pointer/counter 变量：只是全局元数据，本身不占用 cache/local budget；它们指向的 staging/tiny table backing storage 才在 workspace 里。
+
+GiYSB old 区逻辑：
+- tiny object：`align_bytes <= 64B`，优先 reserve 到 small/tiny old 区，并记录 tiny table，稍后经 staging 批量写入。
+- 非 tiny object：reserve 到 large/normal old 区，扫描后直接 materialize。
+- old 区不是 GC Local Workspace，它是目标老年代空间。
+
+## 2026-05-21 GiY vs GiYSB 的 GC 对比、原因分析和下一步优化方案
+
+比较对象：
+- GiY896-NT256
+- GiYSB-Tiny32-NT256
+- 两边都使用 `GIY_NT_COPY_BITS=256`
+- 两边都使用 read-slot RSet
+- 两边都是 896KB local/cache budget
+- PMU/cache counter 禁用
+- full-suite：13/13 benchmarks 全部 status 0
+
+结构差异：
+
+| 项目 | GiY | GiYSB |
+|---|---:|---:|
+| RSet buffer | 128KB | 128KB |
+| RSet hash | 64KB | 64KB |
+| GC stack | 48KB | 48KB |
+| FT slot set | 32KB | 32KB |
+| staging buffer | 0KB | 8KB |
+| tiny table | 0KB | 32KB |
+| Aux total | 80KB | 120KB |
+| Young after aux | 604.24KB | 564.24KB |
+
+GC 总体对比：
+
+| 指标 | GiY | GiYSB | 差值 |
+|---|---:|---:|---:|
+| GC full time | 134.866s | 167.286s | +32.420s (+24.039%) |
+| GC core time | 100.738s | 129.247s | +28.509s (+28.300%) |
+| scan_roots | 0.517s | 0.568s | +0.051s (+9.865%) |
+| scan_RS | 24.934s | 25.847s | +0.913s (+3.662%) |
+| scavenge | 75.288s | 102.831s | +27.543s (+36.584%) |
+| minor GC count | 1,045,148 | 1,119,336 | +74,188 (+7.098%) |
+| forward operations | 1,675,117,365 | 1,676,555,592 | +1,438,227 (+0.086%) |
+| total alloc bytes | 305448.10MB | 305448.04MB | 基本相同 |
+
+关键判断：
+- GiYSB 的 GC 退化主要来自 `scavenge`。
+- `scavenge` 增加了 27.543s，占 GC full 增量 32.420s 的约 85%。
+- `scan_roots` 和 `scan_RS` 也变慢，但不是主因。
+- forward operations 只增加 0.086%，说明活对象图规模几乎没有变化。
+- total alloc bytes 基本相同，说明 workload 本身没有明显变化。
+
+按 GC 次数和每次 GC 成本拆分：
+- GiY 平均 GC full pause 约 `134.866s / 1,045,148 = 0.129ms`。
+- GiYSB 平均 GC full pause 约 `167.286s / 1,119,336 = 0.149ms`。
+- GiYSB 不只是 GC 次数更多，每次 GC 本身也更重。
+
+粗略分解：
+- 因为 young 变小导致 minor GC 次数增加，约贡献 `9.6s` GC full 增量。
+- 剩下约 `22.8s` 来自每次 GC 内部成本变高。
+- 对 scavenge 也类似：
+  - 频率增加大约解释 `5.3s`。
+  - 每次 scavenge 更重解释约 `22.2s`。
+
+所以不能只说“young 变小导致 GC 变慢”。
+更准确地说：
+1. young 变小导致 GC 次数增加；
+2. GiYSB 的 staging/tiny table 逻辑让每次 scavenge 本身也更贵。
+
+per benchmark 中 GC 退化最大的项目：
+
+| benchmark | GC 差值 | scavenge 差值 | minor GC 差值 |
+|---|---:|---:|---:|
+| Storage | +18.389s | +18.004s | +7,072 |
+| Havlak | +8.563s | +6.850s | +15,965 |
+| CD | +2.450s | +1.897s | +7,698 |
+| NBody | +1.724s | +0.277s | +22,403 |
+
+`Storage` 是最重要的退化来源：
+- GC +18.389s；
+- scavenge +18.004s；
+- 说明它主要卡在 GiYSB 的 object materialization/copy 流程。
+
+为什么当前 GiYSB GC 更慢：
+
+1. tiny table + staging 占用 40KB workspace
+   - GiY young after aux：604.24KB
+   - GiYSB young after aux：564.24KB
+   - young 变小 40KB，minor GC 次数增加 7.098%。
+
+2. tiny object 发生 double copy
+   - GiY 对 tiny object：通常直接 `young -> old`，而且因为 <=64B，会走普通 memcpy。
+   - GiYSB 对 tiny object：`young -> staging -> old`。
+   - 这会增加一次读写和一次 table/staging 管理成本。
+   - 对 <=64B 的 tiny object 来说，直接 memcpy 本来就很便宜，batch NT store 不一定能弥补 double copy。
+
+3. 256-bit store width 不是当前瓶颈
+   - 256-bit 已经统一给 GiY 和 GiYSB 使用。
+   - 结果没有证明 256-bit 能明显降低 GC 时间。
+   - 当前瓶颈更像是 staging/tiny table 的额外路径，而不是 store 指令宽度。
+
+4. table 解码和 flush 管理有额外成本
+   - 每个 tiny object 都要写 tiny table。
+   - flush 时要重新读 entry、解码 offset/size_class、重建 source address、维护 staging cursor。
+   - 这些都发生在 scavenge 阶段。
+
+5. old placement 可能帮助 mutator locality，但不一定帮助 GC
+   - GiYSB 把 tiny object 聚到 small/tiny old 区。
+   - 这可能让某些 benchmark 的业务访问更集中。
+   - 但对 GC 来说，它增加了 reserve/copy 管理成本。
+
+下一步优化方案：
+
+方案 1：先做 profiling，确认 tiny table 是否真的需要 32KB
+- 开 `GIYSB_PROFILE=true` 跑代表 benchmark，不作为性能结果。
+- 重点看：
+  - 每次 GC tiny table 最大使用量；
+  - tiny table overflow 次数；
+  - staged bytes；
+  - staging full flush / tail flush 比例。
+- 如果 32KB 很少用满，就把 tiny table 降到 8KB 或 16KB。
+- 预期收益：回收 16KB 到 24KB young space，减少 minor GC 次数。
+
+方案 2：做 adaptive staging
+- 当前所有 tiny object 都先进 staging。
+- 改成：
+  - 如果一个 batch 累积不到阈值，例如 2KB 或 4KB，就不要 staging，直接 memcpy 到 old。
+  - 只有 batch 足够大时才 staging + NT store。
+- 预期收益：减少小 batch/tail 的 double copy。
+
+方案 3：尾巴直接 copy，不再 staging
+- 当前最后一个 tail flush 即使很小，也已经经历了 `young -> staging`。
+- 可以改成：
+  - full 8KB batch 继续 staging + NT；
+  - 最后的不足阈值 tail 直接从 young copy 到 old。
+- 这需要 flush 时根据 tiny table 顺序重建 dst cursor，但现在已经可以通过 `g_giysb_tiny_batch_begin` 推出目标地址。
+
+方案 4：尝试 direct streaming tiny sequence，取消 staging buffer
+- 保留 tiny table。
+- flush 时按 reserve order 读取 source object。
+- target old 地址是连续的，所以可以直接按 dst cursor 顺序写 old。
+- 这样路径变成 `young -> old`，不经过 staging。
+- 如果 target 连续且能处理 32B 对齐，可以仍然尝试 streaming store。
+- 风险：source 是分散的，很多小对象直接 NT store 可能不如普通 memcpy，需要实验。
+
+方案 5：做 GiYSB-PlaceOnly 对照
+- 只保留 old 区 small/large 分区。
+- 不使用 tiny table。
+- 不使用 staging buffer。
+- tiny object 仍然直接 copy，但 old placement 按 small/large 分区。
+- 目的：分离“old placement 是否有价值”和“staging batch 是否有价值”。
+- 如果 PlaceOnly 变快，说明当前 staging/tiny table 是主要问题。
+- 如果 PlaceOnly 也不快，说明 small/large old placement 本身收益有限。
+
+方案 6：只在 reserve 阶段做 32B batch 对齐
+- 对 tiny-old batch 起点做 32B 对齐 padding。
+- 这可以减少 256-bit NT store 的前缀处理。
+- 但这不是主优化，因为当前主要问题不是前缀对齐，而是 double copy 和 workspace 成本。
+
+推荐优先级：
+1. 非性能 profiling：确认 tiny table/staging 是否过大，以及 tail flush 是否很多。
+2. 实现 GiYSB-PlaceOnly，对照判断 old placement 本身有没有价值。
+3. 实现 adaptive staging：小 batch/tail 直接 copy，大 batch 才 staging。
+4. 再考虑 direct streaming tiny sequence。
+5. 最后再细调 32B 对齐和 table entry 压缩。
+
+当前结论：
+- GiYSB 的方向还可以继续探索，但当前 Tiny32 + staging 的实现没有在 GC 时间上成功。
+- 最大问题不是 128-bit/256-bit store 宽度，而是“为了批量 copy 付出的空间成本和 double copy 成本超过了收益”。
+
+## 2026-05-21：关于 young 区对象聚合程度与 old 区连续性的思考
+
+问题：
+- 如果想把 young 区里位置比较近的 live objects 作为一个 span 直接 NT store 到 old 区，首先要知道这些对象在 young 区到底有没有聚集。
+- 另外，即使 young 区中对象是聚集的，也需要解释怎样保证它们搬到 old 区后仍然有一定连续性。
+
+判断 young 区聚合程度的方法：
+- 不能凭感觉判断，应该在 minor GC 中做 profiling。
+- 在对象被发现为 live object 时，记录它的 young 源地址和对象大小。
+- GC 结束前，把这些 live object 按 young 源地址排序。
+- 计算相邻 live object 之间的 gap：
+  - `gap = next_object_start - current_object_end`
+- 统计：
+  - live object 数量；
+  - live bytes；
+  - gap bytes；
+  - 可以形成多少个 span；
+  - 每个 span 的总大小；
+  - 每个 span 中 gap 占比；
+  - 多少字节可以被大块 NT store 覆盖。
+
+可以使用的初始阈值：
+- `max_gap <= 32B` 或 `64B` 时，把相邻对象合并进同一个 span。
+- `gap_ratio <= 10% ~ 20%` 时，认为这个 span 的浪费可以接受。
+- `span_size >= 2KB` 或 `4KB` 时，才值得使用大块 NT store。
+- 如果 span 太小，仍然使用普通 GiY copy。
+
+如何保证 old 区也连续：
+- old 区连续性不是自然发生的，而是 reserve 策略决定的。
+- 如果决定对一个 young span 做 span copy，就需要一次性在 old 区 reserve 一整段连续空间：
+  - `old_span_base = reserve_old(span_size)`
+- 然后每个对象的新地址通过偏移计算：
+  - `dst = old_span_base + (src - young_span_base)`
+- 这样可以保持 young 区 span 内的相对布局。
+
+关键正确性问题：
+- young span 中间的 gap 不能直接作为普通垃圾留在 old 区。
+- 如果 old 区扫描器以后按对象 header 顺序扫描 old 区，那么 gap 中的随机数据可能会被误认为对象 header，导致错误。
+- 因此 gap 必须被明确处理：
+  - 方法一：写入 filler/padding object，让 GC 能够识别并跳过；
+  - 方法二：让 old 区扫描逻辑支持跳过这些 gap；
+  - 方法三：只在 gap 很小且能够安全填充时启用 span copy。
+
+当前建议：
+- 先实现 profiling/simulation，不直接改变 GC 行为。
+- 先回答几个问题：
+  - young 区 live objects 是否真的聚集；
+  - gap 总量是否足够小；
+  - 能形成多大的 span；
+  - span copy 理论上可以替代多少 staging copy；
+  - filler/padding 带来的空间浪费是否可以接受。
+- 如果 profiling 结果显示 live objects 经常形成大 span，并且 gap 占比低，再正式实现 GiYSC。
+
+暂定名称：
+- `GiYSC`，意思是 GiY Span Copy。
+
+当前判断：
+- 这个方案有研究价值，因为它可能避免 GiYSB 当前最大的问题：`young -> staging -> old` 的 double copy。
+- 但是它比 staging 更依赖对象布局。
+- 它是否有效，必须先通过 profiling 证明 young 区 live objects 确实有足够聚合性。
+
+## 2026-05-21：扫描顺序与地址顺序不一致时如何做 span copy
+
+问题：
+- minor GC 扫描对象时，扫描顺序通常是对象图顺序，也就是从 roots 出发，根据引用关系遍历。
+- 这个顺序不等于 young 区中的物理地址顺序。
+- 因此，即使两个对象在 young 区物理上很近，它们也可能在扫描过程中相隔很久才被发现。
+- 如果沿用当前 GiY 的做法：发现对象时立刻 reserve old 地址，那么 old 区布局会跟扫描顺序走，而不是跟 young 地址顺序走。
+- 所以不能自然保证“young 相近的对象在 old 也相近”。
+
+结论：
+- 如果想让 young 地址相近的 live objects 在 old 区也相近，必须把“发现对象”和“决定 old 地址”解耦。
+- 当前 GiY/GiYSB 的 reserve-on-discovery 方式不适合直接实现严格的 young-address-order placement。
+
+方案 A：两阶段 placement，最正确但成本最高
+- 第一阶段：扫描对象图，只记录 live objects，不立刻决定最终 old 地址。
+- 记录内容包括 young 源地址、对象大小、是否 live。
+- 第二阶段：按 young 源地址排序，形成 span。
+- 第三阶段：为每个 span 在 old 区一次性 reserve 连续空间。
+- 第四阶段：给每个 live object 设置 forwarding pointer。
+- 第五阶段：重新扫描或线性遍历 live objects，更新引用并 copy。
+- 优点：布局最干净，最能保证 young 相近 -> old 相近。
+- 缺点：需要额外表、排序、可能需要第二次扫描，GC 成本较高。
+
+方案 B：按 young region/page 分桶，比较适合先做实验
+- 把 young 区切成固定大小 region，例如 2KB、4KB 或 8KB。
+- 扫描时不按全局地址排序，只把 live object 记录进它所在的 region bucket。
+- GC 后按 region 地址顺序处理 bucket。
+- 对 live density 高、gap 小的 region，整段 reserve old 空间并做 span copy。
+- 对不满足条件的 region，回退普通 GiY copy。
+- 优点：不需要完整排序，表结构可以比较小，容易 profiling。
+- 缺点：region 内仍然需要处理 gap/filler；低密度 region 不能受益。
+
+方案 C：old 区预留 young-region 镜像空间
+- 对某个 young region，如果判断值得 span copy，就在 old 区 reserve 一段同样大小或近似大小的连续空间。
+- 对象目标地址通过 offset 计算：
+  - `dst = old_region_base + (src - young_region_base)`
+- 这样可以保证这个 region 内 young 近则 old 近。
+- 缺点：如果 region live density 低，会浪费 old 空间。
+- 因此必须设置 live density/gap ratio 阈值。
+
+方案 D：维持当前扫描顺序，只优化 copy，不保证 old 地址顺序
+- 仍然在发现对象时 reserve old 地址。
+- 只尝试把连续发现的小对象 staging 或 batch copy。
+- 优点：实现简单。
+- 缺点：不能解决“物理地址相近但扫描顺序不相近”的根本问题。
+
+当前最推荐的路线：
+- 先做方案 B 的 profiling/simulation。
+- 也就是按 young region 分桶，统计每个 region 的 live density 和 gap ratio。
+- 暂时不改变对象移动行为。
+- 如果发现很多 region 的 live density 高，并且 gap 小，再实现 region/span copy。
+
+原因：
+- 完整两阶段 placement 理论上最正确，但会显著改变当前 GiY 的结构。
+- region bucket 是折中方案：它承认扫描顺序和地址顺序不同，但用 young 地址把对象重新组织起来。
+- 这样可以在不过早付出完整排序成本的情况下，判断 GiYSC 是否真的有价值。
+
+## 2026-05-21：方案 B，young region bucket 的详细设计
+
+核心思想：
+- 不再试图让扫描顺序等于地址顺序。
+- 扫描对象时仍然按照对象图顺序发现 live objects。
+- 但是每发现一个 live young object，就根据它在 young 区的物理地址，把它记录到对应的 young region bucket。
+- GC 扫描结束后，再按 young region 的地址顺序分析这些 bucket。
+- 这样可以判断哪些 young region 里 live objects 足够密集，适合 span copy。
+
+基础划分：
+- 把 young 区按固定大小切成 region。
+- 初始建议：
+  - region size = 4KB 或 8KB。
+  - 4KB 更细，能更准确判断局部聚合；
+  - 8KB 表更小，管理成本更低。
+- 对于当前 896KB local workspace、约 564KB~604KB young 来说：
+  - 4KB region 大约 141~151 个；
+  - 8KB region 大约 70~76 个。
+
+每个 region bucket 需要统计的信息：
+- `live_count`：这个 region 里发现了多少 live objects。
+- `live_bytes`：live objects 总字节数。
+- `min_addr`：第一个 live object 的地址。
+- `max_end`：最后一个 live object 的结束地址。
+- `span_bytes = max_end - min_addr`。
+- `gap_bytes = span_bytes - live_bytes`。
+- `gap_ratio = gap_bytes / span_bytes`。
+
+如果要进一步精确，需要记录对象列表：
+- `src_header_offset`：对象 header 相对 young_start 的 offset。
+- `object_size`：对象总大小，包括 header。
+- 可选：对象在 region 内的 offset。
+
+判断一个 region 是否适合 span copy：
+- `live_count >= 2`，至少要有多个对象。
+- `span_bytes >= 2KB` 或 4KB，否则 NT store 收益可能不够。
+- `gap_ratio <= 10% ~ 20%`，gap 不能太多。
+- `max_gap <= 32B` 或 64B，避免中间出现很大的洞。
+- 如果不满足条件，就回退普通 GiY copy。
+
+profiling-only 版本：
+- 仍然使用当前 GiY/GiYSB 的真实复制策略。
+- 额外记录 live object 到 region bucket。
+- GC 结束后只输出统计：
+  - 每次 minor GC 有多少 region 满足 span copy 条件；
+  - 可 span copy 的 live bytes；
+  - 会浪费的 gap bytes；
+  - 预计可以替代多少 staging copy。
+- 这个版本不会影响正确性，适合先验证 idea。
+
+真正实现 span copy 的版本：
+- 必须把“发现对象”和“分配 old 地址”解耦。
+- 第一阶段：mark/collect。
+  - 从 roots、RSet、stack 出发扫描 live young objects。
+  - 发现对象后只标记为 live，并记录到对应 region bucket。
+  - 不立即决定最终 old 地址。
+- 第二阶段：region planning。
+  - 按 young region 地址顺序处理 bucket。
+  - 对密集 region 分配一整段 old 空间。
+  - 对稀疏 region 使用普通 per-object reserve。
+- 第三阶段：设置 forwarding pointer。
+  - 对 span-copy region：
+    - `dst = old_region_base + (src - region_span_start)`
+  - 对普通对象：
+    - `dst = reserve_old(object_size)`
+- 第四阶段：patch references。
+  - 扫描 roots、RSet、以及 live objects 内部引用。
+  - 把所有 young 指针改成对应 forwarding pointer。
+- 第五阶段：copy。
+  - span-copy region：对连续 span 使用 NT store。
+  - 普通对象：沿用 GiY 的 per-object copy。
+  - gap 部分必须写成 filler/padding，或者让 old 扫描器能跳过。
+
+重要正确性问题：
+- 当前 GiY 是发现对象时立刻设置 forwarding pointer，并立刻更新引用。
+- 如果改成 region bucket + span copy，forwarding pointer 要等 planning 后才能确定。
+- 因此真正实现版本需要额外的 patch references 阶段，不能只在当前代码上简单加一个 bucket。
+
+推荐开发顺序：
+1. 先做 profiling-only：低风险，回答 young 区是否真的聚集。
+2. 如果 profiling 显示可 span copy 的 bytes 很多，再实现 planning。
+3. 先只对满足严格条件的 region 启用 span copy，其余全部 fallback GiY。
+4. 加入 filler/padding object，保证 old 区扫描正确。
+5. 再跑完整 benchmarks，看是否减少 scavenge 时间。
+
+当前判断：
+- 方案 B 的价值在于用 young 地址重新组织对象，避免扫描顺序破坏物理聚合性。
+- 但真正实现后，它已经不是一个小改动，而是接近一个两阶段 evacuating GC。
+- 所以最合理的第一步一定是 profiling-only。
+
+## 2026-05-21：方案 B 是否会导致对象图扫描次数过多
+
+用户提出的问题：
+- 如果用 young region bucket + span copy，是否需要多次扫描对象图？
+- 这样会不会多出太多操作，反而抵消优化收益？
+
+判断：
+- 这个担心是正确的。
+- 如果采用最朴素的两阶段 evacuation：
+  1. 第一次扫描对象图，发现 live objects；
+  2. 按 young 地址规划 old 地址；
+  3. 第二次扫描 roots/RSet/live objects，更新所有引用；
+  4. 再执行 copy；
+- 那么 live object 的字段很可能会被扫描两次。
+- 对 GiY 来说，这非常危险，因为 GiY 的目标本来就是降低 GC 搬迁成本，多一次对象图扫描可能直接抵消 span copy 的收益。
+
+当前 GiY 的基准：
+- 当前 GiY 基本是在一次对象图遍历中完成：
+  - 发现 live object；
+  - 给它 reserve old 地址；
+  - 设置 forwarding pointer；
+  - 扫描它的字段；
+  - 更新 young reference；
+  - copy object。
+- 所以它的优势是结构简单、扫描次数少。
+
+更可接受的改法：
+- 不应该真的做完整的“扫描对象图两次”。
+- 更合理的是：
+  1. 第一次，也是唯一一次对象图扫描时，发现 live objects；
+  2. 同时把需要以后 patch 的 slot 记录下来；
+  3. GC 图遍历结束后，根据 region bucket 决定 old 地址；
+  4. 遍历 slot log，而不是重新扫描对象图，更新指针；
+  5. 最后执行 span copy 或普通 copy。
+
+这里的 slot log / edge log 含义：
+- 当扫描到一个字段时，如果这个字段保存的是 young object 指针，先不立刻写最终 old 地址。
+- 而是记录这个字段的位置：
+  - root slot；
+  - remembered set slot；
+  - object 内部 field slot。
+- 等所有对象的 forwarding pointer 都确定后，再根据这些 slot 位置把指针修正。
+- 这样避免第二次扫描整个对象图。
+
+这个折中方案的成本：
+- live object 字段扫描：仍然 1 次。
+- 额外成本：
+  - 写 live object 的 region bucket 记录；
+  - 写需要 patch 的 slot log；
+  - 最后遍历 slot log 做 pointer update；
+  - 做 region planning。
+- 这比完整第二次扫描对象图便宜，但仍然比当前 GiY 重。
+
+结论：
+- 如果目标是最高性能，不能接受“完整扫描对象图两次”。
+- 方案 B 真正可行的版本应该是：
+  - 一次对象图扫描；
+  - region bucket 记录 live objects；
+  - slot log 记录需要修正的引用位置；
+  - planning 后只遍历 slot log，不重扫对象图。
+- 但是这仍然会增加元数据和写入操作，所以必须先 profiling 证明 young 地址聚合性足够强。
+
+当前建议：
+- 暂时不要直接实现完整 GiYSC。
+- 先实现 profiling-only：
+  - 不改变 GC 行为；
+  - 不增加第二次对象图扫描；
+  - 只统计 young region 聚合程度。
+- 如果 profiling 显示 span copy 的潜在覆盖字节很多，再考虑 slot log 版本。
+
+## 2026-05-21：低扫描成本版本 GiYSC-LazyMirror
+
+目标：
+- 尽量实现“young 区相近对象在 old 区也相近，并且可以 span/region NT store”的想法。
+- 但不能额外线性扫描整个 young 区。
+- 也不能完整扫描对象图两次。
+- 尽量保留当前 GiY 的一次对象图遍历结构。
+
+核心想法：
+- 把 young 区切成固定大小 region，例如 4KB 或 8KB。
+- 不在 GC 开始时扫描 young。
+- 当 GC 正常遍历对象图、第一次发现某个 young region 中的 live object 时，才为这个 young region 在 old 区分配一个对应的 old mirror region。
+- 之后这个 young region 内的所有 live object 的目标地址都通过固定偏移计算：
+  - `dst = old_region_base + (src - young_region_base)`
+- 这样不需要等所有对象发现完再排序，也不需要第二次扫描对象图才能确定 forwarding pointer。
+
+为什么它能减少扫描：
+- 对象图仍然只扫描一次。
+- 不额外线性扫描 young。
+- 不需要全局排序 live objects。
+- 每个对象被发现时，就能立刻知道自己的 old 地址。
+- 引用更新仍然可以沿用当前 GiY 的方式。
+
+基本流程：
+1. GC 开始时清空 region 映射表。
+2. 正常从 roots/RSet/stack 出发扫描对象图。
+3. 发现一个 young live object。
+4. 计算它属于哪个 young region：
+   - `rid = (src - young_start) / REGION_SIZE`
+5. 如果这个 region 还没有 old mirror region：
+   - 在 old 区 reserve 一整段连续 region 空间；
+   - 记录 `region_map[rid].old_base`；
+   - 标记这个 region 已经 active。
+6. 计算 object 的目标地址：
+   - `dst = old_base + (src - young_region_base)`
+7. 立刻设置 forwarding pointer。
+8. 正常扫描对象字段，更新引用。
+9. copy 阶段不再逐对象 staging；可以在 region 结束时或 GC 结束时，把 active region 的必要 span 从 young 直接 NT store 到 old。
+
+关键优势：
+- forwarding pointer 可以在第一次发现对象时立即确定。
+- 因此不需要 slot log，也不需要第二次 patch roots/fields。
+- old 区连续性由 region mirror 保证：
+  - young region 内地址相近；
+  - old mirror region 内也地址相近。
+- 如果把整个 region 或 region 内 min_live 到 max_live 的 span copy 到 old，就可以实现连续 NT store。
+
+主要代价：
+- old 区可能浪费空间。
+- 因为 old mirror region 保留了 young region 内的 gap。
+- 如果一个 4KB region 里只有 200B live object，却 reserve 4KB old mirror，就很浪费。
+
+降低浪费的方法：
+- 不一定 reserve 整个 4KB region。
+- 可以在第一次发现 region 时先进入 pending mode。
+- 对这个 region 记录：
+  - `min_addr`
+  - `max_end`
+  - `live_bytes`
+  - `live_count`
+- 但是如果想立刻给 forwarding pointer，就必须能立刻算出 dst。
+- 因此最简单可靠的版本是整 region mirror。
+- 更复杂的版本可以把 region 分成 subregion，例如 1KB 或 2KB mirror，降低浪费。
+
+推荐配置：
+- 第一版建议：
+  - region size = 4KB；
+  - 只对 live density 高的 region 启用 mirror/span copy；
+  - 但是 live density 只有 GC 后才知道，所以第一版可以先做 profiling。
+- 如果直接实现功能版：
+  - region size 可以先用 2KB，减少误分配浪费；
+  - 当第一次发现对象时，为其所在 2KB subregion reserve old mirror；
+  - copy 时对 active subregion 做 NT store。
+
+filler/padding 问题：
+- 如果直接把整个 young region/subregion 复制到 old，gap 中会包含原来的 dead object 或无效数据。
+- 这对 old 区扫描是不安全的。
+- 因此不能直接把 gap 当成普通 old 内容。
+- 必须有一种处理：
+  1. 在 old mirror region 中为 gap 写 filler object；
+  2. 或者 old major GC 扫描时通过 region bitmap/valid object table 只扫描 live object；
+  3. 或者 copy 时只复制 live object，gap 位置写合法 padding。
+
+为了减少 filler 成本：
+- 可以不复制整个 region。
+- 只复制从 `min_live_addr` 到 `max_live_end` 的 span。
+- span 内 gap 写 filler。
+- span 前后的空白不使用，不纳入 old 有效对象区。
+
+与当前 GiY/GiYSB 的关系：
+- 当前 GiYSB 用 tiny table + staging：
+  - 优点是 old 目标连续；
+  - 缺点是 `young -> staging -> old` double copy。
+- GiYSC-LazyMirror 的目标是：
+  - 不 staging；
+  - 不排序；
+  - 不二次扫描对象图；
+  - 用 region mirror 保证 young 近则 old 近。
+
+风险：
+- old 空间利用率可能下降。
+- 如果 live objects 在 young region 中很稀疏，浪费会很大。
+- 如果需要写很多 filler object，GC 时间可能仍然上升。
+- 如果 JavaScript 对象布局本来不按 young 地址聚集，这个方案收益会有限。
+
+当前推荐开发路线：
+1. 先做 profiling-only 的 LazyMirror 模拟：
+   - 不改变 copy 行为；
+   - 只统计如果使用 1KB/2KB/4KB mirror，会 reserve 多少 old 空间、浪费多少 gap、覆盖多少 live bytes。
+2. 如果 2KB 或 4KB mirror 的浪费比例可以接受，再实现功能版。
+3. 功能版先只对满足条件的 region/subregion 启用：
+   - `live_bytes >= 1KB`
+   - `gap_ratio <= 20%`
+   - `live_count >= 2`
+4. 不满足条件的对象全部回退当前 GiY copy。
+
+当前判断：
+- 这是一个不怎么扫描 young 区、也不需要完整二次对象图扫描的方案。
+- 它用 old mirror region 解决“发现对象时就要知道 forwarding pointer”的问题。
+- 它的核心 tradeoff 是：用一定 old 空间浪费，换取低扫描成本和无 staging copy。
+
+## 2026-05-21：只对高密度 region 使用 LazyMirror 的折中方案
+
+新的问题：
+- LazyMirror 的优点是发现对象时就能确定 forwarding pointer，不需要二次扫描对象图。
+- 但如果第一次发现某个 young region 的 live object 就立刻 reserve old mirror region，可能会浪费很多 old 空间。
+- 用户希望只对相对更密集的区域使用 mirror/span copy。
+
+核心矛盾：
+- 要判断 live density，需要先看到足够多 live objects。
+- 但当前 GiY 在第一次发现对象时就需要返回 forwarding pointer。
+- 如果等到 GC 后再判断 density，forwarding pointer 就不能立即确定。
+- 因此“完全准确地只选高密度 region”和“一次扫描、立即 forwarding”之间存在冲突。
+
+推荐折中：Hot Candidate Region
+- 不要对第一次出现的 region 立即分配完整 mirror。
+- 先把 region 放入 candidate 状态。
+- candidate 状态下只记录少量统计信息：
+  - `live_count`
+  - `live_bytes`
+  - `min_off`
+  - `max_end`
+  - `gap_estimate`
+- 当某个 region 在当前 minor GC 中表现出足够高密度时，才升级为 mirror-active。
+
+问题：candidate 阶段的对象怎么办？
+- 如果 candidate 阶段还没有 mirror old base，就不能用 mirror offset 算 forwarding pointer。
+- 有三个选择：
+
+选择 A：candidate 阶段对象走普通 GiY，之后对象才走 mirror
+- 第一次、第二次发现的对象直接普通 GiY reserve/copy。
+- 如果 region 后来达到密度阈值，就从之后发现的对象开始启用 mirror。
+- 优点：
+  - 不需要 slot log；
+  - 不需要二次扫描；
+  - forwarding pointer 可以立即返回；
+  - 实现最简单。
+- 缺点：
+  - 同一个 young region 中，早期对象可能不在 mirror region 中；
+  - span copy 覆盖率下降；
+  - old 区连续性不是完美镜像。
+- 这是最适合第一版实现的功能方案。
+
+选择 B：candidate 阶段对象先进入小 pending list，激活后统一决定地址
+- 每个 candidate region 保留少量 pending object 记录，例如最多 8 或 16 个。
+- 在 pending 期间不立即 patch 引用，而是需要记录 slot log。
+- 如果 region 达到阈值，pending objects 一起进入 mirror。
+- 如果达不到阈值，pending objects 回退普通 GiY。
+- 优点：
+  - mirror 覆盖率更高；
+  - 高密度 region 的布局更完整。
+- 缺点：
+  - 需要 slot log 或延迟 patch；
+  - 实现复杂；
+  - 容易增加 GC 成本。
+- 不推荐作为第一版。
+
+选择 C：使用上一轮 minor GC 的密度历史做预测
+- 为每个 young region 记录上一轮或最近几轮的 live density。
+- 下一次 minor GC 开始时，如果某个 region 历史上经常 dense，就允许它第一次发现对象时直接 mirror。
+- 优点：
+  - forwarding pointer 仍然可以立即确定；
+  - 不需要等待本轮 GC 观察到足够多对象。
+- 缺点：
+  - young 区每次 GC 后会被清空，下一轮 allocation pattern 可能不同；
+  - 历史预测不一定可靠。
+- 可以作为后续优化，而不是第一版。
+
+第一版推荐方案：
+- 使用选择 A：candidate 阶段普通 GiY，达到阈值后 region 升级为 mirror-active。
+- 这不是完美 span copy，但它避免了稀疏 region 的大空间浪费。
+- 它也保持了当前 GiY 的一次扫描和立即 forwarding 结构。
+
+具体状态机：
+- `COLD`：
+  - region 第一次出现；
+  - 不分配 mirror；
+  - 对象走普通 GiY；
+  - 更新 region 统计。
+- `CANDIDATE`：
+  - region 已有多个 live objects；
+  - 继续普通 GiY；
+  - 继续统计 live density。
+- `MIRROR_ACTIVE`：
+  - region 达到密度阈值；
+  - 分配 old mirror subregion；
+  - 后续属于该 region 的对象使用 mirror 地址；
+  - GC 后对 active span 做直接 copy/NT store。
+- `DISABLED`：
+  - region 明显稀疏，或 gap 太大；
+  - 本轮 GC 后续对象全部普通 GiY。
+
+初始阈值建议：
+- region size：2KB。
+- 激活条件：
+  - `live_count >= 4`；
+  - `live_bytes >= 256B` 或 512B；
+  - `observed_span = max_end - min_off`；
+  - `gap_ratio = (observed_span - live_bytes) / observed_span <= 25%`；
+  - `max_observed_gap <= 64B`。
+- 禁用条件：
+  - `observed_span >= 1KB` 但 `live_bytes < 128B`；
+  - 或 `gap_ratio > 50%`；
+  - 或出现特别大的 gap。
+
+减少 mirror 浪费的方法：
+- 不 mirror 整个 2KB region。
+- 激活时只为从 `activation_min_off` 到 region 末尾，或者从当前对象附近开始的 subspan 分配 old 空间。
+- 更实际的第一版：
+  - region size = 2KB；
+  - mirror granularity = 512B 或 1KB subregion；
+  - 只对达到阈值的 subregion mirror。
+- 这样即使预测错误，最大浪费也限制在 512B 或 1KB 级别。
+
+更推荐的低浪费结构：Subregion Mirror
+- 把 young region 再切成 512B 或 1KB subregion。
+- 判断密度时以 subregion 为单位。
+- 第一次发现对象时只记录 subregion 统计，不立即 mirror。
+- subregion 达到阈值后才激活 mirror。
+- old mirror 也只 reserve 对应 subregion 的大小。
+- 这样可以显著降低空间浪费。
+
+当前最推荐实现路线：
+1. 先做 profiling-only：
+   - 模拟 512B、1KB、2KB subregion；
+   - 统计如果采用 Hot Candidate 规则，会激活多少 subregion；
+   - 统计 mirror waste、covered live bytes、fallback live bytes。
+2. 如果结果好，再做功能版：
+   - candidate 阶段对象普通 GiY；
+   - active subregion 后续对象 mirror；
+   - 不引入 slot log；
+   - 不二次扫描对象图。
+3. 如果第一版显示有效，再考虑 pending list + slot log，提高覆盖率。
+
+当前判断：
+- 如果必须只对高密度区域启用，又不想多扫描，那么不能追求完美。
+- 最现实的方案是 Hot Candidate Subregion：
+  - 先观察少量 live object；
+  - 达到阈值后才启用 mirror；
+  - 早期对象回退普通 GiY；
+  - 后续对象享受 mirror/span copy。
+- 这牺牲一部分覆盖率，换来低扫描成本和低空间浪费。
+
+## 2026-05-21：当前 GiYSB 方案与下一步真正可能提升性能的优化
+
+当前 GiYSB 的具体方案：
+- 当前版本可以理解为 `GiYSB-Tiny32-NT256`。
+- local workspace 总预算是 896KB。
+- young 可分配空间约 564.24KB。
+- GC stack 是 48KB。
+- FT slot set 是 32KB。
+- RSet buffer 是 128KB，RSet hash 是 64KB。
+- GiYSB 额外使用：
+  - staging buffer：8KB；
+  - tiny table：32KB；
+  - tiny object 阈值：64B；
+  - NT store 宽度：256-bit。
+- old 区被分成 small/tiny old 与 normal/large old，当前 small old ratio 是 50%。
+
+当前 GiYSB 的搬迁逻辑：
+- GC 扫描仍然沿用 GiY 的 LIFO 对象图遍历。
+- 发现 live object 后：
+  - 如果对象总大小小于等于 64B，并且 tiny table 与 small old 还有空间：
+    - 在 small old 中 reserve 目标地址；
+    - 把对象源地址和 size class 记录进 tiny table；
+    - 不立即 copy；
+  - 否则：
+    - 走普通 GiY copy 路线；
+    - 大对象继续直接 copy/NT store 到 old。
+- 对象图扫描结束后：
+  - 遍历 tiny table；
+  - 把 tiny objects 先 `young -> staging`；
+  - staging 满了或结束时，再 `staging -> old`，大块时使用 256-bit NT store。
+
+当前结果判断：
+- GiYSB 的 GC 时间明显变慢。
+- 主要原因不是 NT store 宽度，而是：
+  1. tiny table + staging 多占 40KB workspace，使 young 变小，minor GC 次数增加；
+  2. tiny object 路径变成 `young -> staging -> old`，存在 double copy；
+  3. tiny table 编码/解码、flush、staging 管理增加额外工作；
+  4. 64B 以下对象本来很小，普通 memcpy 可能已经很便宜，staging 的固定成本不一定能抵消。
+
+当前最可能真正提升性能的优化方向：
+
+方向 1：GiYSB-PlaceOnly
+- 只保留 old 区 small/large placement。
+- 去掉 tiny table。
+- 去掉 staging buffer。
+- tiny object 也直接 copy 到 small old。
+- 目的：
+  - 单独验证“small/large old 分区”是否有收益；
+  - 如果 PlaceOnly 变快，说明 staging 是主要负担；
+  - 如果 PlaceOnly 不快，说明 old placement 本身收益有限。
+- 这是最应该优先做的对照。
+
+方向 2：Adaptive Staging
+- 不再所有 tiny object 都 staging。
+- 只有当本轮 GC 中 tiny batch 足够大时才 staging。
+- 例如：
+  - batch 累计超过 4KB 才启用 staging + NT；
+  - 小于 4KB 的 tail 直接 `young -> old` memcpy；
+  - tiny object 数量太少的 GC 完全不 staging。
+- 目的：
+  - 避免小 batch 为了 staging 付出 double copy。
+
+方向 3：缩小 tiny table
+- 当前 tiny table 是 32KB，容量 8192 entries。
+- 这可能过大，并且直接挤占 young。
+- 应该测试 8KB / 16KB tiny table。
+- 如果 overflow 很少，缩小 table 可以恢复 young 空间，减少 minor GC 次数。
+
+方向 4：Direct Tiny Streaming
+- 保留 tiny table，但取消 staging buffer。
+- flush 时按 reserve order 直接把 tiny objects 写到 old。
+- 目标路径变成：
+  - `young -> old`
+- 不再经过 staging。
+- 风险：
+  - source 是分散小对象，直接 NT store 未必快；
+  - 但它可以直接验证 double copy 是否是核心瓶颈。
+
+方向 5：GiYSC/Span Copy 先做 profiling
+- 如果想从根本上解决 staging 问题，可以研究 young 地址相近对象的 span copy。
+- 但这个方向实现复杂，涉及 old gap/filler/descriptor。
+- 当前不应该马上功能实现。
+- 应该先做 profiling-only：
+  - 统计 young live objects 的聚合程度；
+  - 估算 span copy 可覆盖字节；
+  - 估算 gap 浪费。
+
+当前最推荐的下一步：
+1. 先实现并测试 GiYSB-PlaceOnly。
+2. 再实现 Adaptive Staging：
+   - 小 batch 直接 copy；
+   - 大 batch 才 staging + NT。
+3. 同时把 tiny table 从 32KB 降到 8KB/16KB 做测试。
+4. 如果这些都不能改善 GC 时间，再转向 GiYSC profiling。
+
+当前结论：
+- 当前 GiYSB 的核心问题是为了批量 NT store 付出了过高的空间成本和 double copy 成本。
+- 真正可能提升性能的方向不是继续加大 staging，也不是只调 NT 宽度。
+- 更可能有效的是：
+  - 减少 staging 使用频率；
+  - 减少 workspace 占用；
+  - 先验证 old placement 是否本身有价值；
+  - 只在 batch 足够大时才使用 staging。
+
+## 2026-05-21：采用 Adaptive Staging 并缩小 tiny table
+
+用户判断：
+- 方案二是正确方向：只有在值得的时候才使用 staging 优化。
+- tiny table 也应该缩小，避免占用过多 local workspace。
+
+本次修改：
+- GiYSB 默认 tiny table 从 32KB 改为 16KB。
+- 新增宏：
+  - `GIYSB_TINY_STAGING_MIN_BYTES`
+  - 默认值是 4KB。
+- 含义：
+  - tiny batch/chunk 大于等于 4KB 时，才使用 `young -> staging -> old`。
+  - 小于 4KB 的 tiny chunk 直接 `young -> old`，不再经过 staging。
+- staging buffer 仍然是 8KB。
+- tiny object 阈值仍然是 64B。
+- NT store 仍然是 256-bit。
+
+新的 tiny flush 逻辑：
+- GC 扫描阶段仍然记录 tiny object 到 tiny table。
+- GC 扫描结束后按 reserve 顺序处理 tiny table。
+- tiny table 被切成若干 chunk。
+- 如果 chunk 达到 `GIYSB_TINY_STAGING_MIN_BYTES`：
+  - 先复制到 staging；
+  - 再用 `giy_copy_live_object` 批量写入 old；
+  - 大块时可使用 256-bit NT store。
+- 如果 chunk 小于阈值：
+  - 逐对象直接 `young -> old` copy；
+  - 避免小 batch 的 double copy。
+
+这样做的原因：
+- 当前实验显示 GiYSB 的主要问题是 staging 的固定成本和 double copy。
+- 对小 batch 使用 staging 很可能不划算。
+- 只有当 batch 足够大时，staging 才可能把分散的小对象整理成连续写入，从而抵消 double copy 成本。
+- tiny table 从 32KB 缩到 16KB，可以把 16KB 还给 young 区，降低 minor GC 次数压力。
+
+当前新的实验配置名称建议：
+- `GiYSB-Tiny16-Adaptive-NT256`
+
+当前配置：
+- local workspace：896KB。
+- GC stack：48KB。
+- FT slot set：32KB。
+- RSet buffer：128KB。
+- RSet hash：64KB。
+- GiYSB staging：8KB。
+- GiYSB tiny table：16KB。
+- tiny staging min：4KB。
+- tiny object max：64B。
+- NT store：256-bit。
+
+预期：
+- GC 时间应该比原来的 `GiYSB-Tiny32-NT256` 更好。
+- 主要改善来源应该是：
+  - 更少的小 batch double copy；
+  - 更大的 young 区；
+  - 更少的 minor GC 压力。
+- 但如果 tiny table 缩小后 overflow 明显增加，收益可能被抵消，需要后续用 profile 或 benchmarks 验证。
+
+## 2026-05-21：重新 benchmark 的公平性设置
+
+用户要求：
+- 改完 GiYSB 之后，需要重新跑 benchmarks。
+- 要尽量排除测量噪音。
+- 不能让某一个配置多做额外测量、额外 cache 统计或额外大量打印。
+
+本次 benchmark 设置：
+- 对比对象：
+  - `giy896`
+  - `giysb_tiny16_adaptive_896`
+- 两边都使用：
+  - `CACHE_SIZE_KB=896`
+  - `GIY_GC_STACK_BYTES=49152`
+  - `GIY_RSET_READ_SLOT_AT_GC=true`
+  - `GIY_NT_COPY_BITS=256`
+- GiYSB 额外使用：
+  - `GIY_SB=true`
+  - `GIYSB_STAGING_BYTES=8192`
+  - `GIYSB_TINY_TABLE_BYTES=16384`
+  - `GIYSB_TINY_OBJECT_MAX_BYTES=64`
+  - `GIYSB_TINY_STAGING_MIN_BYTES=4096`
+- 不打开 `GIYSB_PROFILE`。
+- 运行时设置 `EJS_DISABLE_GC_PMU=1`，不做 cache/PMU 测量。
+- benchmark 脚本已改成：
+  - 先构建两个配置；
+  - 再按 benchmark 交错运行两个配置；
+  - 避免先跑完一整组再跑另一整组造成时间漂移偏置。
+
+说明：
+- 这次性能 benchmark 不测 cache miss。
+- cache miss 如果之后需要，会单独跑，不能混进性能测试。
+
+## 2026-05-21：GiYSB-Tiny16-Adaptive-NT256 full suite 结果
+
+输出目录：
+- `/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysb_tiny16_adaptive_vs_giy_nt256_896_20260521_175640`
+
+公平性设置：
+- 两边都使用 896KB local workspace。
+- 两边都使用 `GIY_NT_COPY_BITS=256`。
+- 两边都使用 `GIY_RSET_READ_SLOT_AT_GC=true`。
+- 两边都使用 `GIY_GC_STACK_BYTES=49152`。
+- 运行时设置 `EJS_DISABLE_GC_PMU=1`。
+- 没有运行 perf/cache miss 测量。
+- 没有打开 `GIYSB_PROFILE`。
+- benchmark 顺序改成按 benchmark 交错运行：
+  - 例如先 `Bounce/GiY`，再 `Bounce/GiYSB`，然后进入 `CD/GiY`。
+- 这样避免先跑完一整组再跑另一整组造成时间漂移偏置。
+
+配置：
+- `giy896`
+  - young after aux：604.24KB
+  - aux total：80KB
+- `giysb_tiny16_adaptive_896`
+  - young after aux：580.24KB
+  - aux total：104KB
+  - staging：8KB
+  - tiny table：16KB
+  - tiny staging min：4KB
+  - tiny object max：64B
+
+总体结果，GiYSB-Tiny16-Adaptive 相对 GiY：
+- total execution：
+  - GiY：6747.473s
+  - GiYSB：6637.195s
+  - 差异：-110.278s，-1.634%
+- real time：
+  - GiY：6752.030s
+  - GiYSB：6641.960s
+  - 差异：-110.070s，-1.630%
+- business residual：
+  - GiY：6612.249s
+  - GiYSB：6475.665s
+  - 差异：-136.584s，-2.066%
+- GC overhead：
+  - GiY：135.224s
+  - GiYSB：161.530s
+  - 差异：+26.306s，+19.454%
+- GC core：
+  - GiY：100.935s
+  - GiYSB：125.620s
+  - 差异：+24.685s，+24.456%
+- scavenge：
+  - GiY：75.501s
+  - GiYSB：99.243s
+  - 差异：+23.742s，+31.446%
+- scan_RS：
+  - GiY：24.914s
+  - GiYSB：25.765s
+  - 差异：+0.851s，+3.416%
+- minor GC count：
+  - GiY：1,045,148
+  - GiYSB：1,088,977
+  - 差异：+43,829，+4.194%
+- forward operations：
+  - GiY：1,675,117,369
+  - GiYSB：1,676,418,380
+  - 差异：+1,301,011，+0.078%
+
+每个 benchmark 的主要差异，GiYSB-Tiny16-Adaptive 相对 GiY：
+
+| benchmark | total 差异 | GC 差异 | scavenge 差异 | minor GC 差异 |
+|---|---:|---:|---:|---:|
+| Bounce | -16.729s | -0.005s | +0.009s | +131 |
+| CD | +2.082s | +2.231s | +1.899s | +4,492 |
+| DeltaBlue | +0.029s | +0.518s | +0.459s | +650 |
+| Havlak | -33.698s | +7.894s | +6.706s | +9,249 |
+| List | -0.396s | +0.001s | +0.001s | +20 |
+| Mandelbrot | -24.416s | +0.313s | +0.017s | +10,523 |
+| NBody | -29.067s | +0.698s | +0.217s | +13,071 |
+| Permute | -1.156s | +0.000s | +0.000s | +2 |
+| Queens | -14.034s | -0.001s | +0.001s | +45 |
+| Richards | -7.668s | +0.006s | +0.001s | +88 |
+| Sieve | +0.740s | +0.033s | +0.021s | +1,428 |
+| Storage | +13.984s | +14.618s | +14.410s | +4,126 |
+| Towers | +0.051s | +0.000s | +0.001s | +4 |
+
+和旧 `GiYSB-Tiny32-NT256` 的历史结果相比：
+- total execution：
+  - 旧 GiYSB：6674.211s
+  - 新 GiYSB：6637.195s
+  - 改善：-37.016s，-0.555%
+- GC overhead：
+  - 旧 GiYSB：167.286s
+  - 新 GiYSB：161.530s
+  - 改善：-5.756s，-3.441%
+- GC core：
+  - 旧 GiYSB：129.247s
+  - 新 GiYSB：125.620s
+  - 改善：-3.627s，-2.806%
+- scavenge：
+  - 旧 GiYSB：102.831s
+  - 新 GiYSB：99.243s
+  - 改善：-3.588s，-3.489%
+- minor GC count：
+  - 旧 GiYSB：1,119,336
+  - 新 GiYSB：1,088,977
+  - 减少：-30,359，-2.712%
+
+解释：
+- 新方案确实改善了旧 GiYSB：
+  - tiny table 从 32KB 缩到 16KB，young 从 564.24KB 恢复到 580.24KB；
+  - minor GC 次数减少；
+  - 小于 4KB 的 tiny batch 不再 staging，减少了一部分 double copy；
+  - 因此 GC overhead、GC core、scavenge 都比旧 GiYSB 下降。
+- 但是新 GiYSB 的 GC 仍然比 GiY 慢：
+  - young 仍然比 GiY 小 24KB；
+  - minor GC 仍然多 4.194%；
+  - scavenge 仍然多 31.446%；
+  - Storage 和 Havlak 是主要 GC 退化来源。
+- aggregate 总时间显示 GiYSB 比 GiY 快 1.634%，但这主要来自 business residual 下降，而不是 GC 变快。
+- business residual 是 `total - GC`，不是独立测量的 mutator time。
+- 因此不能把“总时间更快”直接解释成 GC 优化成功。
+
+当前合理结论：
+- Adaptive staging + 16KB tiny table 是正确方向，因为它相对旧 GiYSB 明确减少了 GC 开销。
+- 但它还没有解决核心问题：
+  - GiYSB 相对 GiY 的 GC 仍然更慢；
+  - 主要损失仍在 scavenge；
+  - Storage 和 Havlak 说明 tiny staging/direct copy 路径仍有较大结构成本。
+- 下一步应该继续减少 staging 和 tiny table 成本，而不是继续调 NT store 宽度。
+
+下一步建议：
+- 做 `GiYSB-PlaceOnly`：
+  - 保留 small/large old placement；
+  - 去掉 tiny table；
+  - 去掉 staging；
+  - 验证 old placement 本身是否有价值。
+- 再测试 8KB tiny table：
+  - 如果 overflow 不严重，可以进一步恢复 young 空间。
+- 对 Storage/Havlak 做一次非性能 profiling：
+  - 打开 `GIYSB_PROFILE` 只用于诊断；
+  - 统计 staged/direct tiny bytes、staging flush 次数、tiny table 最大占用；
+  - 不能把这个 profile run 当作性能结果。
+
+## 2026-05-22：准备 GiY equal-young 实验
+
+目的：
+- 用户希望把 GiY 的 young 区大小调整到和当前 GiYSB 一样。
+- 然后只重新跑一次 GiY benchmarks。
+- 再和当前已经跑完的 `GiYSB-Tiny16-Adaptive-NT256` 结果比较。
+
+当前 GiYSB 配置的 young：
+- `GiYSB-Tiny16-Adaptive-NT256`
+- local workspace：896KB。
+- young after aux：580.24KB。
+- aux total：104KB。
+
+当前普通 GiY 的 young：
+- local workspace：896KB。
+- young after aux：604.24KB。
+- aux total：80KB。
+
+需要让 GiY 少 24KB young：
+- 604.24KB - 580.24KB = 24KB。
+- 24KB = 24576B。
+
+本次代码准备：
+- 新增 GiY 专用 padding 宏：
+  - `GIY_LOCAL_PADDING_BYTES`
+  - 默认值：0。
+- 该 padding 只占用 GiY 的 GC local workspace。
+- 它不参与 GC 逻辑，不记录对象，不做扫描，不做额外测量。
+- 目的只是把 GiY 的 young 空间缩小到和 GiYSB 一致。
+
+实验配置：
+- `giy896_equal_giysb_young`
+- `CACHE_SIZE_KB=896`
+- `GIY_GC_STACK_BYTES=49152`
+- `GIY_LOCAL_PADDING_BYTES=24576`
+- `GIY_NT_COPY_BITS=256`
+- `GIY_RSET_READ_SLOT_AT_GC=true`
+- `EJS_DISABLE_GC_PMU=1`
+
+公平性说明：
+- 这个实验在 young 大小上公平。
+- 但是它不是和 GiYSB 同一轮交错运行，而是使用当前已有 GiYSB 结果作为对照。
+- 因此总时间仍可能包含时间窗口噪音。
+- GC 内部指标和 minor GC 次数更适合作为主要分析依据。
+
+新增脚本：
+- `tools/run_giy_equal_giysb_young_benchmarks.sh`
+
+## 2026-05-22：GiY equal-young benchmark 结果
+
+输出目录：
+- `/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_equal_giysb_young_nt256_896_20260522_001944`
+
+对照 GiYSB 结果目录：
+- `/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysb_tiny16_adaptive_vs_giy_nt256_896_20260521_175640`
+
+状态：
+- `giy896_equal_giysb_young`：13/13 benchmark status 0。
+- 对照 `giysb_tiny16_adaptive_896`：13/13 benchmark status 0。
+
+young 空间确认：
+- GiY equal-young：
+  - young before aux：684.24KB
+  - young after aux：580.24KB
+  - aux total：104KB
+- GiYSB-Tiny16-Adaptive：
+  - young before aux：684.24KB
+  - young after aux：580.24KB
+  - aux total：104KB
+- 结论：
+  - 这次 young 大小完全一致。
+  - local workspace 占用也完全一致。
+
+总体结果，GiYSB 相对 GiY equal-young：
+- total execution：
+  - GiY equal-young：6633.370s
+  - GiYSB：6637.195s
+  - 差异：+3.825s，+0.058%
+- real time：
+  - GiY equal-young：6637.910s
+  - GiYSB：6641.960s
+  - 差异：+4.050s，+0.061%
+- business residual：
+  - GiY equal-young：6496.602s
+  - GiYSB：6475.665s
+  - 差异：-20.937s，-0.322%
+- GC overhead：
+  - GiY equal-young：136.768s
+  - GiYSB：161.530s
+  - 差异：+24.762s，+18.105%
+- GC core：
+  - GiY equal-young：101.359s
+  - GiYSB：125.620s
+  - 差异：+24.261s，+23.936%
+- scavenge：
+  - GiY equal-young：75.397s
+  - GiYSB：99.243s
+  - 差异：+23.846s，+31.627%
+- scan_RS：
+  - GiY equal-young：25.419s
+  - GiYSB：25.765s
+  - 差异：+0.346s，+1.361%
+- minor GC count：
+  - GiY equal-young：1,088,977
+  - GiYSB：1,088,977
+  - 差异：0，0.000%
+- forward operations：
+  - GiY equal-young：1,676,418,378
+  - GiYSB：1,676,418,380
+  - 差异：+2，约等于 0。
+- total alloc bytes：
+  - 两边都是 305448.160MB。
+
+每个 benchmark 的主要差异，GiYSB 相对 GiY equal-young：
+
+| benchmark | total 差异 | GC 差异 | scavenge 差异 | minor GC 差异 |
+|---|---:|---:|---:|---:|
+| Bounce | +2.145s | +0.002s | +0.009s | 0 |
+| CD | +5.368s | +1.930s | +1.857s | 0 |
+| DeltaBlue | +1.171s | +0.450s | +0.460s | 0 |
+| Havlak | +12.881s | +7.300s | +6.845s | 0 |
+| List | -0.014s | +0.001s | +0.001s | 0 |
+| Mandelbrot | +1.470s | +0.268s | +0.035s | 0 |
+| NBody | +1.352s | +0.287s | +0.176s | 0 |
+| Permute | -11.970s | +0.000s | +0.000s | 0 |
+| Queens | +0.689s | -0.001s | +0.000s | 0 |
+| Richards | -2.199s | -0.001s | +0.001s | 0 |
+| Sieve | +0.853s | -0.031s | -0.004s | 0 |
+| Storage | +13.587s | +14.557s | +14.465s | 0 |
+| Towers | -21.508s | +0.000s | +0.001s | 0 |
+
+和普通 GiY 的关系：
+- 普通 GiY 的 young after aux 是 604.24KB。
+- equal-young GiY 的 young after aux 是 580.24KB。
+- 把 GiY young 缩小到和 GiYSB 一样后：
+  - minor GC count 从 1,045,148 增加到 1,088,977；
+  - 增加 43,829 次，正好和之前 GiYSB 相对普通 GiY 多出来的次数一致。
+- 这说明：
+  - GiYSB 之前 minor GC 次数更多，主要确实是因为 young 更小；
+  - 当 young 大小完全一致后，GiY 和 GiYSB 的 minor GC 次数完全一致。
+
+关键解释：
+- young 大小公平以后，GiYSB 仍然 GC 慢 24.762s。
+- 这说明 GiYSB 的 GC 慢，并不主要来自 minor GC 次数更多。
+- 主要来自每次 GC 内部的 scavenge/materialization 成本。
+- scavenge 慢 23.846s，几乎解释了全部 GC overhead 差异。
+- Storage 和 Havlak 是最主要来源：
+  - Storage：GC +14.557s，scavenge +14.465s。
+  - Havlak：GC +7.300s，scavenge +6.845s。
+
+当前合理结论：
+- 这次实验排除了 “GiYSB 只是因为 young 更小所以 GC 慢” 这个解释。
+- young 大小确实会影响 minor GC 次数，但不是 GiYSB 当前 GC 慢的根本原因。
+- 根本原因仍然是 GiYSB tiny path 的额外搬迁成本：
+  - tiny table 记录/解码；
+  - staging 或 adaptive direct copy 分支；
+  - small old placement 判断；
+  - 小对象路径在 Storage/Havlak 中没有抵消额外成本。
+
+关于总时间：
+- GiYSB 总时间只比 GiY equal-young 慢 3.825s，约 +0.058%。
+- 这个差距非常小，基本可以认为总时间接近。
+- 但是 GiYSB 的 GC 明确更慢，而 business residual 更快 20.937s。
+- business residual 不是独立测量的 mutator 时间，且这次 GiY 和 GiYSB 不是同一轮交错运行。
+- 因此总时间只能作为参考，不能作为证明 GiYSB 更优的主要依据。
+
+下一步判断：
+- 如果研究目标是降低 GC 时间，当前 GiYSB 仍未成功。
+- 下一步最应该做的是 `GiYSB-PlaceOnly`：
+  - 去掉 tiny table；
+  - 去掉 staging；
+  - 只保留 small/large old placement；
+  - 验证 old placement 本身是否有收益。
+- 如果 PlaceOnly 的 GC 接近 GiY，说明 tiny table/staging 是主要问题。
+- 如果 PlaceOnly 仍然慢，说明 small/large old placement 本身也有成本或收益不足。
+
+## 2026-05-22：关于 GiYSB 的 business residual 为什么看起来更快
+
+这次重新检查了 `business_sec` 的定义。当前解析脚本里的 `business_sec` 不是运行时单独打点得到的 mutator 时间，而是：
+
+```text
+business_sec = total_execution_sec - gc_overhead_sec
+```
+
+所以它更准确的名字应该是“非 GC 残差时间”。
+
+在 equal-young 对比里：
+- GiY equal-young business residual：6496.602s
+- GiYSB business residual：6475.665s
+- GiYSB 看起来快 20.937s，约 -0.322%。
+
+但是这个现象不能直接解释为“GiYSB 让业务代码真的更快了”，原因如下：
+
+1. 这不是独立测量值，而是 total 减去 GC 得到的残差。
+2. GiY equal-young 和 GiYSB 不是同一轮交错运行，total/business 更容易受到运行时噪音、CPU 频率、系统负载影响。
+3. business residual 的优势主要来自少数 benchmark：
+   - Towers：GiYSB business residual 快 21.508s，但 GC 时间几乎没有差异。
+   - Permute：GiYSB 快 11.970s，但 GC 时间也几乎没有差异。
+   - 这两项更像运行噪音或时间窗口差异，而不是 GiYSB 的 GC 策略带来的稳定收益。
+4. Storage 中 GiYSB 的 business residual 快 0.970s，但 GC 慢 14.557s，说明总时间仍然变慢；这种情况不能说优化成功。
+
+仍然存在一个可能的真实原因：GiYSB 的 small/large old placement 会改变对象进入 old 区后的物理布局。业务阶段访问 old 对象时，可能因为小对象更集中而稍微改善 cache/TLB 局部性。但是这目前只是可能性，还没有被直接证明。
+
+当前最可信的解释：
+- normal GiY vs GiYSB 时，business residual 大幅变快的一部分可能来自 young 变小导致 GC 次数更多、对象更频繁被扫描/搬迁/预热，以及运行噪音。
+- equal-young 后，minor GC 次数完全一致，GiYSB 仍然 business residual 快 20.937s，但这个差距主要由 Towers/Permute 这种 GC 几乎无关的项拉动，因此更应该视为噪音或残差口径问题。
+- 因此，现在不能把 business residual 变快作为 GiYSB 成功的证据。当前更可靠的事实是：GiYSB 的 GC/scavenge 明确变慢。
+
+如果要确认 business residual 是否真的有意义，后续应该：
+- 做 A/A 测试，先测同一个配置重复运行时 business residual 的自然波动范围。
+- 做多轮 interleaved A/B 测试，用 median 或 geometric mean，而不是只看一次 full suite。
+- 最好增加真正的 mutator-only timer，或者至少在报告中明确说明 business residual 是 total - GC 的推导值。
+
+## 2026-05-22：GC 论文和 GC 开发者最关心的指标
+
+一般 GC 论文不会只看一个指标。最核心的判断通常分成两层：
+
+第一层是应用整体性能，也就是 end-to-end execution time / throughput。原因是 GC 优化最终必须服务于整个程序。如果 GC 时间变短，但是程序总时间变长，论文中很难说这是实际有效的优化。
+
+第二层是 GC 自身成本，也就是 GC time / pause time / collection time / allocation throughput / copied bytes / promoted bytes / memory footprint 等。原因是这些指标能解释为什么总时间变化，并能证明优化是否真的作用在 GC 本身。
+
+对 GC 开发者和优化者来说，最关心的量通常是：
+- total execution time：最终用户真正感受到的整体性能。
+- throughput：单位时间完成多少工作，常用于 benchmark 总体评价。
+- GC time / GC overhead：程序花在 GC 上的总时间和比例。
+- pause time：单次停顿时间，尤其是 interactive / latency-sensitive 场景。
+- allocation rate / allocation throughput：分配路径是否变快。
+- copied bytes / promoted bytes / scanned bytes：GC 实际搬运和扫描了多少数据。
+- GC frequency：minor/major GC 次数。
+- memory footprint：为了换取速度额外用了多少空间。
+- cache miss / memory bandwidth：如果论文主题和 cache/locality 有关，这些是解释性指标，不一定是主指标。
+
+对当前 GiY/GiYSB 研究来说，最应该报告的是：
+1. 总运行时间：说明最终效果。
+2. GC overhead / GC core / scavenge / scan_RS：说明优化是否真的改善了 GC。
+3. minor GC 次数、forward operations、allocated bytes：说明比较是否公平。
+4. local workspace 大小、young size、auxiliary structure 大小：说明空间成本是否公平。
+5. cache miss 率：作为解释 GiY locality 效果的辅助证据，不能和普通性能测试混在一起测。
+
+当前论文叙述上应该避免只说 business residual，因为它是 total - GC 推导出来的残差，不是独立测量的业务时间。主结论应该优先基于 total time 和 GC time。
+
+## 2026-05-22：向导师汇报 GiYSB 的推荐说法
+
+GiYSB 的汇报重点应该是：它是一个实验性优化，用来验证“把小对象延迟并批量复制”是否能提高 GiY 的 old 区写入效率。
+
+推荐解释顺序：
+
+1. 背景：
+   - GiY 的目标是让 minor GC 时的工作数据尽量停留在 GC Local Workspace 里。
+   - 但是普通 GiY 在对象晋升时基本是发现一个对象就复制一个对象。
+   - 对大量 tiny object 来说，这会产生很多很小、很碎的 copy/store。
+
+2. GiYSB 的想法：
+   - 对小于 64B 的 tiny object，先不立刻复制数据。
+   - 先 reserve old 区目标地址，并把源地址、目标地址、大小记录到 tiny table。
+   - 等 tiny table 或 staging 条件满足后，把一批 tiny object 放进 8KB staging buffer。
+   - staging 到一定大小后，用 256-bit non-temporal store 写入 old 区。
+   - 中等对象和大对象不走 tiny table，避免所有对象都付出记录成本。
+
+3. 当前配置：
+   - local workspace：896KB。
+   - RSet buffer：128KB。
+   - RSet hash/index：64KB。
+   - GC stack：48KB。
+   - FT slot set：32KB。
+   - GiYSB staging buffer：8KB。
+   - GiYSB tiny table：16KB。
+   - tiny object 阈值：64B。
+   - staging 启动阈值：4KB。
+   - NT store 宽度：256-bit。
+   - GiYSB young after aux：580.24KB。
+
+4. 性能汇报方式：
+   - 先报告总时间。
+   - 再报告 GC overhead / GC core / scavenge。
+   - 再报告 minor GC 次数和 forward operations，用来证明是否公平。
+   - 不把 business residual 作为主结论，因为它是 total - GC 的推导值。
+
+5. 和普通 GiY 896KB 的结果：
+   - GiYSB 总时间快 110.278s，约 -1.634%。
+   - 但是 GiYSB GC overhead 慢 26.306s，约 +19.454%。
+   - GiYSB scavenge 慢 23.742s，约 +31.446%。
+   - GiYSB minor GC 多 43,829 次，约 +4.194%。
+   - 这个结果不能直接说明 GiYSB 成功，因为 GiYSB 的 young 更小。
+
+6. equal-young 公平实验：
+   - 把 GiY young 缩小到和 GiYSB 完全一致，都是 580.24KB。
+   - minor GC 次数完全一致，都是 1,088,977。
+   - forward operations 几乎完全一致。
+   - 这说明比较已经排除了 young size 导致 GC 次数不同的问题。
+
+7. equal-young 结果：
+   - GiYSB 总时间只慢 3.825s，约 +0.058%，整体几乎持平。
+   - 但是 GiYSB GC overhead 慢 24.762s，约 +18.105%。
+   - GiYSB scavenge 慢 23.846s，约 +31.627%。
+   - 因此，当前 GiYSB 的问题不是 GC 次数，而是每次 GC 内部 tiny path/materialization 的额外成本。
+
+8. 当前结论：
+   - GiYSB 的设计思想合理，但当前实现没有降低 GC 时间。
+   - tiny table + staging + adaptive direct copy 的成本超过了批量 NT store 带来的收益。
+   - Storage 和 Havlak 是主要退化来源。
+   - 下一步应做 GiYSB-PlaceOnly：去掉 tiny table 和 staging，只保留 small/large old placement，验证 old 区布局本身是否有价值。
+
+## 2026-05-22：为什么当前 GiYSB 的 GC 时间更慢，以及更可能有效的修改方向
+
+当前 equal-young 实验已经排除了 young size 的影响：
+- GiY equal-young 和 GiYSB 的 young after aux 都是 580.24KB。
+- minor GC count 都是 1,088,977。
+- forward operations 几乎完全一样。
+- 但 GiYSB 的 GC overhead 多 24.762s，+18.105%。
+- GiYSB 的 scavenge 多 23.846s，+31.627%。
+
+所以当前 GC 慢的主要来源不是 GC 次数，也不是 RSet：
+- scan_RS 只多 0.346s，+1.361%。
+- 绝大部分差异来自 scavenge。
+
+代码路径上的原因：
+
+1. 普通 GiY 的对象复制路径很短。
+   - `copy_for_minor` reserve old 地址。
+   - scavenge 扫描对象后，立刻调用 `giy_copy_live_object` 复制。
+   - 对小于等于 256B 的对象，`giy_copy_live_object` 直接 `memcpy`，不会使用 NT store。
+
+2. GiYSB 对 tiny object 增加了额外步骤。
+   - tiny object 小于 64B 时，先 reserve 到 small old 区。
+   - 不立刻复制，而是把 young offset 和 size class 记录进 tiny table。
+   - scavenge 遍历对象时，如果发现目标是 tiny destination，就跳过立即复制。
+   - scavenge 结束后再 flush tiny table。
+
+3. staging 路径会造成二次数据移动。
+   - 第一次：young object -> staging buffer，使用 `memcpy`。
+   - 第二次：staging buffer -> old 区，使用 `giy_copy_live_object`，可能触发 256-bit NT store。
+   - 对小于 64B 的对象来说，原本普通 GiY 只需要一次 small memcpy。
+   - GiYSB 为了凑成大块 NT store，反而多了一次读写和一次额外遍历。
+
+4. direct tiny fallback 也不等价于普通 GiY。
+   - 虽然小于 4KB 的 chunk 会 direct copy，不进入 staging。
+   - 但它仍然先写 tiny table，之后再 decode tiny table，再复制。
+   - 普通 GiY 是扫描完当前对象后马上复制，这时对象内容更可能还在 L1/L2。
+   - GiYSB 延迟到整轮 LIFO traversal 后再复制，可能失去这种时间局部性。
+
+5. tiny table 本身也有成本。
+   - 每个 tiny object 都要判断大小、判断 small old 空间、压缩 entry、写 table。
+   - flush 时还要重新 decode entry、计算 src header、计算 size。
+   - 这些操作对 64B 以下对象来说比例很高。
+
+6. 256-bit NT store 不一定适合 tiny object。
+   - NT store 的优势是大块、连续、不希望污染 cache 的写入。
+   - tiny object 本身太小。
+   - 即使 staging 后变成连续写，前面已经付出了 young->staging 的额外 copy 成本。
+   - 当前结果说明这个交换不划算。
+
+数据上也支持这个判断：
+- GiYSB scavenge 总共慢 23.846s。
+- 主要来自：
+  - Storage：scavenge +14.465s。
+  - Havlak：scavenge +6.845s。
+  - CD：scavenge +1.857s。
+- 这些 benchmark 很可能产生大量需要扫描和复制的小对象，因此 tiny path 的额外成本被放大。
+
+当前更可能真正提高性能的方向：
+
+1. 优先做 `GiYSB-PlaceOnly`。
+   - 去掉 tiny table。
+   - 去掉 staging。
+   - 保留 small/large old-space placement。
+   - tiny object 仍然立即复制。
+   - 目的：单独验证“old 区按大小分区”是否有收益。
+   - 这是最干净的下一步，因为它能把 layout effect 和 batching effect 分开。
+
+2. 如果 PlaceOnly 不慢，再考虑加非常保守的 batching。
+   - 不要默认对所有 tiny object batching。
+   - 只在上一轮 GC 证明 tiny survivor bytes 足够大时开启。
+   - 只在 chunk 明显大于 staging 成本时开启，例如 16KB 或更高，而不是 4KB。
+   - 否则直接走普通 GiY 的 memcpy。
+
+3. 不建议继续扩大 tiny table 或 staging buffer。
+   - 这会继续减少 young space。
+   - 还会增加 workspace 辅助结构成本。
+   - 当前问题不是 table 不够大，而是每个 tiny object 的机制成本太高。
+
+4. 可以尝试 type-aware tiny batching。
+   - 指针很多、扫描时已经读取 body 的 tiny object 不适合延迟复制。
+   - pointer-free 或 body 很少被扫描的 tiny object，才可能更适合延迟。
+   - 这样可以避免 Storage/Havlak 这种 pointer-rich benchmark 被 tiny path 拖慢。
+
+5. 如果目标是 NT store，应该主要作用于中大对象或真正连续的大块。
+   - 普通 GiY 已经对小对象用 memcpy。
+   - NT store 更适合 256B 以上甚至更大的对象。
+   - 对 64B 以下对象强行 staging 成大块，目前看并不划算。
+
+当前判断：
+- GiYSB 的“批量 tiny copy”不是没有道理，但当前成本模型太乐观。
+- 真正更可能成功的路线是：先做 PlaceOnly，证明 old layout 本身有没有收益；然后只对少数明确值得的对象启用 batching。
+
+## 2026-05-22：GiYSB PlaceOnly 实装和 full-suite benchmark 结果
+
+根据上面的判断，实装了新的 GiYSB 选项：
+
+```text
+GIYSB_TINY_BATCH=0
+```
+
+这个选项的含义：
+- 仍然使用 GiYSB 的 small/large old-space split。
+- 不再分配 tiny table。
+- 不再分配 staging buffer。
+- 不再延迟 tiny object 的复制。
+- 对象仍然在 scavenge 中立即复制，和普通 GiY 的 materialization 时机一致。
+
+这次测试了两个 PlaceOnly 变体：
+
+1. `giysb_place_tiny64_equal_896`
+   - `GIYSB_TINY_BATCH=0`
+   - `GIYSB_SMALL_OBJECT_MAX_BYTES=64`
+   - 只有 `<=64B` 的对象进入 small old 区。
+
+2. `giysb_place_256_equal_896`
+   - `GIYSB_TINY_BATCH=0`
+   - `GIYSB_SMALL_OBJECT_MAX_BYTES=256`
+   - `<=256B` 的对象进入 small old 区。
+
+公平性设置：
+- 三组都使用 `CACHE_SIZE_KB=896`。
+- 三组都使用 `GIY_GC_STACK_BYTES=49152`，也就是 48KB。
+- 三组都使用 `GIY_NT_COPY_BITS=256`。
+- 三组都使用 `GIY_LOCAL_PADDING_BYTES=24576`，也就是 24KB padding。
+- 因此三组的 young after aux 都是 580.24KB。
+- 三组的 aux total 都是 104KB。
+- 没有启用 cache miss/perf 测量。
+- 使用 `EJS_DISABLE_GC_PMU=1`。
+- full suite 13 个 benchmark 全部正常结束，status 都是 0。
+
+输出目录：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysb_placeonly_equal_young_896_20260522_024809
+```
+
+aggregate 结果，两个 PlaceOnly 变体相对 `giy896_equal_young`：
+
+| 指标 | GiY equal | PlaceTiny64 差异 | Place256 差异 |
+|---|---:|---:|---:|
+| total execution | 6651.224s | -36.167s (-0.544%) | -56.506s (-0.850%) |
+| business residual | 6513.874s | -37.556s (-0.577%) | -56.735s (-0.871%) |
+| GC overhead | 137.350s | +1.389s (+1.011%) | +0.229s (+0.167%) |
+| GC core | 101.478s | +1.631s (+1.607%) | +0.314s (+0.309%) |
+| scan roots | 0.535s | +0.028s (+5.234%) | +0.003s (+0.561%) |
+| scan_RS | 25.380s | +0.221s (+0.871%) | +0.243s (+0.957%) |
+| scavenge | 75.561s | +1.382s (+1.829%) | +0.069s (+0.091%) |
+| minor GC count | 1,088,977 | 0 | 0 |
+| forward operations | 1,676,418,379 | -4 | +1 |
+| total alloc bytes | 305448.160MB | 0 | 0 |
+
+最关键结论：
+- `Place256` 的 GC overhead 只比 GiY equal 多 0.229s，约 +0.167%。
+- `Place256` 的 scavenge 只多 0.069s，约 +0.091%。
+- 这个差距基本可以认为和 GiY 持平。
+- 和之前 `GiYSB-Tiny16-Adaptive` 相比，这是巨大改善。
+
+对比之前 `GiYSB-Tiny16-Adaptive` 的 equal-young 结果：
+
+| 方案 | total 相对 equal GiY | GC overhead 相对 equal GiY | scavenge 相对 equal GiY |
+|---|---:|---:|---:|
+| Tiny16-Adaptive | +3.825s | +24.762s | +23.846s |
+| PlaceTiny64 | -36.167s | +1.389s | +1.382s |
+| Place256 | -56.506s | +0.229s | +0.069s |
+
+这说明：
+- Tiny16-Adaptive 的 GC 退化基本来自 tiny table/staging/materialization 延迟。
+- 去掉 tiny batching 后，GC 退化几乎消失。
+- old-space 按大小分区本身没有造成明显 GC 问题。
+- 在这次数据里，`<=256B` 放入 small old 比只放 `<=64B` 更好。
+
+关键 benchmark：
+
+Havlak：
+- Tiny16-Adaptive 之前 scavenge 大约多 6.845s。
+- 这次 PlaceTiny64 scavenge 只多 0.985s。
+- 这次 Place256 scavenge 只多 0.333s。
+
+Storage：
+- Tiny16-Adaptive 之前 scavenge 大约多 14.465s。
+- 这次 PlaceTiny64 scavenge 多 0.370s。
+- 这次 Place256 scavenge 反而少 0.281s。
+
+因此，现在最好的优化方向不是继续扩大 tiny table 或 staging buffer，而是：
+
+```text
+GiYSB-PlaceOnly256
+```
+
+推荐下一步：
+1. 把 `GIYSB_TINY_BATCH=0` 作为新的 GiYSB 优化主线。
+2. 默认使用 `GIYSB_SMALL_OBJECT_MAX_BYTES=256`。
+3. 保留 immediate copy，不做 tiny table/staging。
+4. 如果之后还想重新引入 batching，必须非常保守：
+   - 只在 survivor tiny bytes 很大时启用；
+   - batch 阈值至少应该高于 4KB，例如从 16KB 或 32KB 起测；
+   - 优先只考虑 pointer-free 或扫描成本低的对象；
+   - 默认路径仍然应该是 immediate memcpy。
+
+当前推荐给导师的说法：
+- “之前的 GiYSB-Tiny16-Adaptive 证明了 naive tiny batching 成本太高。”
+- “新的 PlaceOnly 实验证明，old-space placement 本身并不是问题。”
+- “`PlaceOnly256` 基本保持了 GiY 的 GC 时间，同时总时间在这次 full suite 中略好。”
+- “下一步应以 PlaceOnly256 作为新的 baseline，再研究是否存在非常保守、按收益触发的 batching 条件。”
+
+## 2026-05-22：记录遗漏复查，以及给导师汇报的短版说法
+
+用户指出上一条回答没有把“如何向导师汇报、下一步怎么说”的短版内容写入 `AIlog.md`。复查结果如下：
+
+- PlaceOnly 的实装、full-suite 结果、关键数据、推荐方向已经写入上一节。
+- 但是上一条回复中给出的“导师汇报用短版说法”没有作为单独条目追加。
+- 这是流程错误。用户已经多次明确要求重要结论必须写入 `AIlog.md`，以后在给最终结论前必须检查是否已经追加记录。
+
+这类错误对当前代码结论的影响：
+
+- 代码和 benchmark 结论不是只靠口头判断得出的。
+- 本轮 PlaceOnly 测试已经完成 full suite，13 个 benchmark 全部 `status=0`。
+- 三组配置的 young after aux、aux total、minor GC count、allocated bytes 都一致。
+- 因此性能结论本身仍有实验依据。
+- 但是记录遗漏说明工作流程不够严格，不能忽视。后续每次给出实验结论、设计结论、导师汇报材料前，都要同步更新 `AIlog.md`。
+
+给导师汇报时可以使用的短版说法：
+
+```text
+This week I separated two effects in GiYSB:
+1. tiny-object batching
+2. size-based old-space placement
+
+The previous GiYSB-Tiny16-Adaptive design used a tiny table and staging buffer
+to batch small objects before copying them to old space.
+The result showed that this batching mechanism was too expensive:
+GC overhead increased by about 24.8 seconds,
+and scavenge time increased by about 23.8 seconds.
+
+Then I implemented GiYSB-PlaceOnly.
+This version removes the tiny table and staging buffer,
+keeps immediate copying,
+and only keeps size-based old-space placement.
+
+With PlaceOnly256, the GC time became almost the same as normal GiY:
+GC overhead increased by only 0.229 seconds,
+and scavenge increased by only 0.069 seconds.
+
+So the main problem was not old-space placement.
+The main problem was the tiny batching mechanism.
+```
+
+中文理解：
+
+```text
+我把 GiYSB 拆成两个部分来验证：
+一个是 tiny object batching，
+另一个是按照对象大小放置到 old 区。
+
+实验结果说明，之前慢的主要原因不是 old 区分成 small/large，
+而是 tiny table 和 staging buffer 这套 batching 机制成本太高。
+
+去掉 batching，只保留 PlaceOnly256 之后，
+GC 时间几乎回到了普通 GiY 的水平。
+```
+
+下一步计划的短版说法：
+
+```text
+Next, I will use GiYSB-PlaceOnly256 as the new baseline.
+I will first analyze whether size-based old-space placement improves locality.
+If I reintroduce batching later, it should be much more conservative:
+only enabled when the expected copied bytes are large enough,
+and only for object types where batching is likely to pay off.
+```
+
+中文理解：
+
+```text
+下一步我会把 GiYSB-PlaceOnly256 当作新的 baseline。
+我先分析按照对象大小放置到 old 区是否真的改善 locality。
+如果之后重新引入 batching，也不能像之前一样默认对 tiny object 全部启用；
+必须只在预计收益足够大的时候启用。
+```
+
+最短结论：
+
+```text
+The first batching design was too expensive.
+The new result shows that size-based placement is the more promising direction.
+My next step is to build on PlaceOnly256 and study when placement or batching is actually profitable.
+```
+
+## 2026-05-22：GiYSB 核心代码位置和核心思想
+
+GiYSB 的核心代码主要在 `ejsvm/GiY.cc`，不是一个独立的新 GC 文件。
+
+最核心的几部分：
+
+1. 编译开关和参数：
+   - `USE_GIYSB`
+   - `GIYSB_TINY_BATCH`
+   - `GIYSB_SMALL_OBJECT_MAX_BYTES`
+   - `GIYSB_TINY_OBJECT_MAX_BYTES`
+   - `GIYSB_STAGING_BYTES`
+   - `GIYSB_TINY_TABLE_BYTES`
+
+2. old 区按大小拆分的数据结构：
+   - `GiYSBOldSpace`
+   - 里面有 `small_begin/small_free/small_end`
+   - 也有 `large_begin/large_free/large_end`
+   - 意思是把 old 区逻辑上拆成 small old 和 large old。
+
+3. old 区初始化：
+   - `giysb_ensure_old_space()`
+   - 它按照 `GIYSB_SMALL_OLD_RATIO` 把 `dram_space` 拆成 small 区和 large 区。
+
+4. 最核心的 reserve 策略：
+   - `giysb_reserve_old_object()`
+   - 这个函数决定一个 live young object 将来被 promoted 到 old 区的哪里。
+   - 如果是当前推荐的 PlaceOnly 路径，也就是 `GIYSB_TINY_BATCH=0`：
+     - `align_bytes <= GIYSB_SMALL_OBJECT_MAX_BYTES` 的对象进入 small old。
+     - 其他对象进入 large old。
+     - 对象仍然立即 copy，不经过 tiny table 和 staging buffer。
+   - 如果是旧的 tiny batching 路径，也就是 `GIYSB_TINY_BATCH=1`：
+     - `<=64B` 的 tiny object 会先记录到 tiny table。
+     - 复制本体会被延迟。
+     - 之后通过 `giysb_flush_tiny_table()`、`giysb_stage_tiny_chunk()`、`giysb_flush_staging()` 批量 materialize。
+     - 实验结果显示这条路径成本太高，所以现在不推荐作为主线。
+
+5. 和 minor GC 的连接点：
+   - `copy_for_minor()`
+   - 普通 GiY 在这里直接从 `dram_space.free` reserve old 地址。
+   - GiYSB 在这里调用 `giysb_reserve_old_object()`，让 old 地址按照对象大小被分配到 small old 或 large old。
+   - 然后设置 `forwarding_pointer`，并把对象放入 `gc_stack`。
+
+6. 真正复制对象的位置：
+   - 在 scavenge/materialization 循环中，先用 `giy_process_young_node<GiYReserveTracer>()` 扫描对象内部引用并更新 child forwarding。
+   - 当前推荐的 `GIYSB_TINY_BATCH=0` 路径会继续调用 `giy_copy_live_object()` 立即把对象复制到 old。
+   - 只有旧的 `GIYSB_TINY_BATCH=1` 路径才会对 tiny object 跳过立即复制，最后统一 flush tiny table。
+
+一句话总结：
+
+```text
+GiYSB 的核心不是改变对象图扫描方式，而是改变 young object 被提升到 old 区时的 reserve 地址策略：小对象集中放到 small old，大对象放到 large old；当前推荐版本保留 immediate copy，不再使用 tiny table/staging。
+```
+
+对当前研究最重要的判断：
+
+```text
+当前最应该看的核心函数是 giysb_reserve_old_object()。
+它决定 GiYSB 和普通 GiY 的真正差别。
+copy_for_minor() 是它接入 GC 流程的位置。
+giy_copy_live_object() 是实际复制字节的位置。
+```
+
+## 2026-05-22：`giysb_reserve_old_object()` 代码解释
+
+`giysb_reserve_old_object()` 是 GiYSB 的核心 reserve 函数。
+
+它的职责不是复制对象，而是：
+
+```text
+给一个即将从 young 区 promoted 到 old 区的对象，决定并预留 old 区里的目标地址。
+```
+
+参数含义：
+
+```text
+payload_ptr:
+  源对象在 young/cache space 里的 payload 地址。
+  注意它不是 header 地址，header 在 payload_ptr 前面。
+
+align_bytes:
+  这个对象完整复制时需要占用的字节数。
+  它包含 object_header，并且已经做过对齐。
+
+deferred_tiny:
+  输出参数。
+  用来告诉调用者：这个 tiny object 是否采用了延迟复制。
+  当前推荐的 GIYSB_TINY_BATCH=0 路径中，它始终保持 false。
+```
+
+函数开头：
+
+```text
+giysb_ensure_old_space();
+*deferred_tiny = false;
+```
+
+意思是：
+- 确保 old 区已经被拆成 small old 和 large old。
+- 默认认为对象不会延迟复制。
+
+如果 `GIYSB_TINY_BATCH=1`：
+
+```text
+<= GIYSB_TINY_OBJECT_MAX_BYTES 的 tiny object
+并且 small old 还有空间
+并且 tiny table 还有空间
+```
+
+那么：
+- 在 small old 里 reserve 目标地址。
+- 把源对象信息记录到 tiny table。
+- 推进 `small_free`。
+- 设置 `deferred_tiny = true`。
+- 返回目标 header 地址。
+
+这条路径的含义是：
+
+```text
+先 reserve old 地址，但暂时不复制对象本体。
+之后再通过 tiny table/staging buffer 批量 materialize。
+```
+
+如果 `GIYSB_TINY_BATCH=0`，也就是当前推荐的 PlaceOnly 路径：
+
+```text
+align_bytes <= GIYSB_SMALL_OBJECT_MAX_BYTES
+```
+
+并且 small old 还有空间，那么：
+- 直接在 small old reserve。
+- 推进 `small_free`。
+- 更新 `dram_space.available_bytes`。
+- 返回目标 header 地址。
+
+这条路径不会使用 tiny table，也不会使用 staging buffer。
+它只是改变 old 区放置位置，对象之后仍然立即复制。
+
+如果前面的 small/tiny 条件不满足，就进入 `reserve_large`：
+
+```text
+在 large old 里 reserve 目标地址。
+推进 large_free。
+更新 dram_space.available_bytes。
+返回目标 header 地址。
+```
+
+如果 large old 也没有空间，就说明当前 DRAM old space 不够，程序打印错误并退出。
+
+一句话总结：
+
+```text
+giysb_reserve_old_object() 做的是 size-based old-space reservation：
+小对象优先进入 small old；
+其他对象进入 large old；
+只有旧的 GIYSB_TINY_BATCH=1 路径才会额外启用 tiny table 和延迟复制。
+```
+
+## 2026-05-22：`copy_for_minor()` 代码解释，以及 `(void) giysb_deferred_tiny`
+
+`copy_for_minor()` 的名字容易误导。
+
+在当前 GiY/GiYSB 代码里，它的主要职责不是马上复制对象内容，而是：
+
+```text
+1. 判断这个 young object 是否已经有 forwarding pointer。
+2. 如果已经有，直接返回旧的 forwarding pointer，避免重复 reserve 和重复扫描。
+3. 如果还没有，计算对象复制到 old 区需要的对齐后大小。
+4. 在 old 区 reserve 一个目标地址。
+5. 把目标 payload 地址写入源对象 header 的 forwarding_pointer。
+6. 把源对象 payload_ptr push 到 GC stack，等待后面扫描 children 并 materialize。
+7. 返回 forwarding pointer。
+```
+
+普通 GiY 和 GiYSB 的关键区别在第 4 步：
+
+```text
+普通 GiY：
+  dest_hdr = dram_space.free;
+  dram_space.free += align_bytes;
+
+GiYSB：
+  dest_hdr = giysb_reserve_old_object(...);
+```
+
+也就是说，GiYSB 通过 `copy_for_minor()` 接入 minor GC 流程，但是具体 old 地址放在哪里，由 `giysb_reserve_old_object()` 决定。
+
+`hdr->forwarding_pointer = (uintptr_t)(dest_hdr + 1);`
+
+这里存的是目标对象的 payload 地址，不是 header 地址。
+因为运行时对象引用通常指向 payload，所以 forwarding pointer 也保持 payload pointer 的形式。
+
+`gc_stack_push(payload_ptr);`
+
+这里 push 的是源对象的 young payload 地址。
+后面的 scavenge 会 pop 出这个源对象，扫描它内部的引用，把 child reference 也 forward，然后再把对象内容复制到 old。
+
+`(void) giysb_deferred_tiny;` 的含义：
+
+```text
+这个变量当前在 copy_for_minor() 里没有被使用。
+写 (void) giysb_deferred_tiny; 是为了明确告诉编译器：
+“我知道这个变量现在没有用，这是有意的。”
+```
+
+这样可以避免 unused variable 警告。
+如果编译选项把 warning 当作 error，这种写法可以避免编译失败。
+
+为什么会出现这个变量但又没有使用：
+
+```text
+giysb_reserve_old_object() 通过 deferred_tiny 告诉调用者：
+这个对象是否走了 tiny batching 延迟复制。
+
+但是当前 copy_for_minor() 没有直接用这个布尔值。
+旧的 tiny batching 路径在后面的 materialization 阶段，
+通过 giysb_is_tiny_destination() 判断目标地址是否在 tiny/small 范围内，
+从而决定是否跳过立即复制。
+
+当前推荐的 GIYSB_TINY_BATCH=0 路径中，
+deferred_tiny 永远保持 false，也完全不需要使用。
+```
+
+因此，这行代码不是逻辑需要，而是工程上抑制编译器 unused warning 的写法。
+
+可以改进的地方：
+
+```text
+如果之后确定不再使用 GIYSB_TINY_BATCH=1，
+可以考虑把 deferred_tiny 参数从 giysb_reserve_old_object() 删除。
+
+如果还保留 tiny batching 实验路径，
+保留这个参数也可以，但最好让后续逻辑真正使用它，
+或者用更明确的返回结构表达 reserve 结果。
+```
+
+## 2026-05-22：GiY 与当前 GiYSB-PlaceOnly256 的逐 benchmark 时间数据
+
+数据来源：
+
+```text
+build.debug/benchmarks/out_giysb_placeonly_equal_young_896_20260522_024809/summary.csv
+```
+
+这里的 GiYSB 指当前推荐的主线配置：
+
+```text
+giysb_place_256_equal_896
+GIYSB_TINY_BATCH=0
+GIYSB_SMALL_OBJECT_MAX_BYTES=256
+CACHE_SIZE_KB=896
+GIY_GC_STACK_BYTES=49152
+GIY_LOCAL_PADDING_BYTES=24576
+GIY_NT_COPY_BITS=256
+EJS_DISABLE_GC_PMU=1
+```
+
+表中：
+
+```text
+端到端时间 = total_execution_sec
+GC 时间 = gc_overhead_sec
+delta = GiYSB - GiY
+```
+
+| Benchmark | GiY 端到端(s) | GiYSB 端到端(s) | 端到端差值(s) | 端到端差值% | GiY GC(s) | GiYSB GC(s) | GC差值(s) | GC差值% |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 304.227 | 304.588 | +0.361 | +0.119% | 0.158 | 0.161 | +0.003 | +1.899% |
+| CD | 483.997 | 483.146 | -0.851 | -0.176% | 14.840 | 14.740 | -0.100 | -0.674% |
+| DeltaBlue | 134.007 | 133.165 | -0.842 | -0.628% | 3.506 | 3.558 | +0.052 | +1.483% |
+| Havlak | 827.149 | 792.719 | -34.430 | -4.162% | 56.697 | 57.211 | +0.514 | +0.907% |
+| List | 186.302 | 186.177 | -0.125 | -0.067% | 0.021 | 0.020 | -0.001 | -4.762% |
+| Mandelbrot | 398.946 | 398.317 | -0.629 | -0.158% | 6.951 | 6.765 | -0.186 | -2.676% |
+| NBody | 645.904 | 644.997 | -0.907 | -0.140% | 11.327 | 11.512 | +0.185 | +1.633% |
+| Permute | 823.598 | 811.390 | -12.208 | -1.482% | 0.002 | 0.002 | +0.000 | +0.000% |
+| Queens | 218.030 | 218.130 | +0.100 | +0.046% | 0.042 | 0.046 | +0.004 | +9.524% |
+| Richards | 1732.580 | 1731.028 | -1.552 | -0.090% | 0.144 | 0.144 | +0.000 | +0.000% |
+| Sieve | 236.865 | 237.046 | +0.181 | +0.076% | 1.010 | 1.058 | +0.048 | +4.752% |
+| Storage | 333.364 | 327.949 | -5.415 | -1.624% | 42.647 | 42.357 | -0.290 | -0.680% |
+| Towers | 326.255 | 326.066 | -0.189 | -0.058% | 0.005 | 0.005 | +0.000 | +0.000% |
+| **合计** | **6651.224** | **6594.718** | **-56.506** | **-0.850%** | **137.350** | **137.579** | **+0.229** | **+0.167%** |
+
+结论：
+
+```text
+当前 GiYSB-PlaceOnly256 的端到端时间比 GiY 快 56.506s，约快 0.850%。
+但 GC 时间比 GiY 慢 0.229s，约慢 0.167%。
+也就是说，这次数据里 GiYSB 的主要收益不来自 GC 时间变短，而来自非 GC/business 部分略微变快。
+```
+
+## 2026-05-22：GiYSB staging 版本的逐 benchmark 时间数据
+
+用户指出上一节给的是 GiYSB-PlaceOnly256，不是“真正的 staging 版本”。
+这里重新记录 staging 版本，也就是：
+
+```text
+giysb_tiny16_adaptive_896
+GIYSB_TINY_BATCH=1
+GIYSB_STAGING_BYTES=8192
+GIYSB_TINY_TABLE_BYTES=16384
+GIYSB_TINY_OBJECT_MAX_BYTES=64
+GIYSB_TINY_STAGING_MIN_BYTES=4096
+GIY_NT_COPY_BITS=256
+EJS_DISABLE_GC_PMU=1
+```
+
+数据来源：
+
+```text
+build.debug/benchmarks/out_giysb_tiny16_adaptive_vs_giy_nt256_896_20260521_175640/summary.csv
+build.debug/benchmarks/out_giy_equal_giysb_young_nt256_896_20260522_001944/summary.csv
+```
+
+先记录同一轮交错运行的原始数据。
+注意：这组原始数据里，GiY 的 young after aux 是 604.24KB，GiYSB staging 的 young after aux 是 580.24KB。
+所以这组数据适合看“当时完整配置”的结果，但不是 young 大小完全公平的结果。
+
+| Benchmark | GiY端到端(s) | GiYSB staging端到端(s) | 端到端差值(s) | 端到端差值% | GiY GC(s) | GiYSB staging GC(s) | GC差值(s) | GC差值% |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 322.988 | 306.259 | -16.729 | -5.179% | 0.173 | 0.168 | -0.005 | -2.890% |
+| CD | 487.558 | 489.640 | +2.082 | +0.427% | 14.589 | 16.820 | +2.231 | +15.292% |
+| DeltaBlue | 134.088 | 134.117 | +0.029 | +0.022% | 3.434 | 3.952 | +0.518 | +15.084% |
+| Havlak | 842.406 | 808.708 | -33.698 | -4.000% | 56.112 | 64.006 | +7.894 | +14.068% |
+| List | 187.218 | 186.822 | -0.396 | -0.212% | 0.023 | 0.024 | +0.001 | +4.348% |
+| Mandelbrot | 425.122 | 400.706 | -24.416 | -5.743% | 6.429 | 6.742 | +0.313 | +4.869% |
+| NBody | 674.536 | 645.469 | -29.067 | -4.309% | 10.826 | 11.524 | +0.698 | +6.447% |
+| Permute | 807.587 | 806.431 | -1.156 | -0.143% | 0.002 | 0.002 | +0.000 | +0.000% |
+| Queens | 231.119 | 217.085 | -14.034 | -6.072% | 0.044 | 0.043 | -0.001 | -2.273% |
+| Richards | 1737.544 | 1729.876 | -7.668 | -0.441% | 0.151 | 0.157 | +0.006 | +3.974% |
+| Sieve | 236.935 | 237.675 | +0.740 | +0.312% | 0.990 | 1.023 | +0.033 | +3.333% |
+| Storage | 330.330 | 344.314 | +13.984 | +4.233% | 42.445 | 57.063 | +14.618 | +34.440% |
+| Towers | 330.042 | 330.093 | +0.051 | +0.015% | 0.006 | 0.006 | +0.000 | +0.000% |
+| **合计** | **6747.473** | **6637.195** | **-110.278** | **-1.634%** | **135.224** | **161.530** | **+26.306** | **+19.454%** |
+
+再记录 equal-young 对比。
+这里 GiY 通过 `GIY_LOCAL_PADDING_BYTES=24576` 把 young after aux 也调成 580.24KB。
+这组更适合解释 GC 本身是否变快。
+注意：GiY equal-young 和 GiYSB staging 不是同一轮交错运行，所以总时间仍可能有时间窗口噪音；GC 内部指标更可信。
+
+| Benchmark | GiY equal-young端到端(s) | GiYSB staging端到端(s) | 端到端差值(s) | 端到端差值% | GiY equal-young GC(s) | GiYSB staging GC(s) | GC差值(s) | GC差值% |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 304.114 | 306.259 | +2.145 | +0.705% | 0.166 | 0.168 | +0.002 | +1.205% |
+| CD | 484.272 | 489.640 | +5.368 | +1.108% | 14.890 | 16.820 | +1.930 | +12.962% |
+| DeltaBlue | 132.946 | 134.117 | +1.171 | +0.881% | 3.502 | 3.952 | +0.450 | +12.850% |
+| Havlak | 795.827 | 808.708 | +12.881 | +1.619% | 56.706 | 64.006 | +7.300 | +12.873% |
+| List | 186.836 | 186.822 | -0.014 | -0.007% | 0.023 | 0.024 | +0.001 | +4.348% |
+| Mandelbrot | 399.236 | 400.706 | +1.470 | +0.368% | 6.474 | 6.742 | +0.268 | +4.140% |
+| NBody | 644.117 | 645.469 | +1.352 | +0.210% | 11.237 | 11.524 | +0.287 | +2.554% |
+| Permute | 818.401 | 806.431 | -11.970 | -1.463% | 0.002 | 0.002 | +0.000 | +0.000% |
+| Queens | 216.396 | 217.085 | +0.689 | +0.318% | 0.044 | 0.043 | -0.001 | -2.273% |
+| Richards | 1732.075 | 1729.876 | -2.199 | -0.127% | 0.158 | 0.157 | -0.001 | -0.633% |
+| Sieve | 236.822 | 237.675 | +0.853 | +0.360% | 1.054 | 1.023 | -0.031 | -2.941% |
+| Storage | 330.727 | 344.314 | +13.587 | +4.108% | 42.506 | 57.063 | +14.557 | +34.247% |
+| Towers | 351.601 | 330.093 | -21.508 | -6.117% | 0.006 | 0.006 | +0.000 | +0.000% |
+| **合计** | **6633.370** | **6637.195** | **+3.825** | **+0.058%** | **136.768** | **161.530** | **+24.762** | **+18.105%** |
+
+关键结论：
+
+```text
+staging 版 GiYSB 在 equal-young 条件下，端到端时间几乎持平但略慢 0.058%。
+但是 GC 时间明显更慢，慢 24.762s，约 +18.105%。
+主要问题仍然是 staging/tiny table 路径让 scavenge 成本变高，尤其是 Storage 和 Havlak。
+```
+
+## 2026-05-22：为什么 GiYSB staging 的端到端时间接近，但 GC 表现很差
+
+当前最可信的解释：
+
+```text
+GiYSB staging 的 GC 变慢是真实的。
+端到端时间接近，并不说明 GC 优化成功。
+端到端接近主要是因为 GC 时间只占总运行时间的一小部分，并且非 GC 残差时间存在噪音或抵消。
+```
+
+equal-young 对比中：
+
+```text
+GiY total:   6633.370s
+GiYSB total: 6637.195s
+total delta: +3.825s (+0.058%)
+
+GiY GC:      136.768s
+GiYSB GC:    161.530s
+GC delta:    +24.762s (+18.105%)
+```
+
+也就是说：
+
+```text
+GiYSB 的 GC 慢了 24.762s。
+但是总时间只慢 3.825s。
+因此非 GC 残差时间反而少了大约 20.937s。
+```
+
+这个非 GC 残差时间不是独立测量出来的 mutator 时间，而是：
+
+```text
+business_sec = total_execution_sec - gc_overhead_sec
+```
+
+所以它可能包含：
+- 真正的 mutator 行为变化；
+- 运行时噪音；
+- CPU 频率和系统负载变化；
+- 不同时间窗口运行造成的偏差；
+- total 和 GC timer 的测量误差。
+
+特别需要注意：
+- equal-young 的 GiY 和 GiYSB 不是同一轮交错运行。
+- Towers 和 Permute 这种 GC 几乎为 0 的 benchmark 出现了很大的端到端差异。
+- 这说明 total/business residual 里有明显的运行噪音或非 GC 因素。
+
+为什么 GC 表现差：
+
+1. GiYSB staging 对 tiny object 增加了额外路径。
+   - 普通 GiY：扫描后直接 `giy_copy_live_object()`。
+   - GiYSB staging：tiny object 先记录 tiny table，后面再 decode，再 direct copy 或 staging copy。
+
+2. tiny object 本来很小，复制收益很难覆盖记录成本。
+   - 记录 table 需要编码 young offset 和 size class。
+   - flush 时需要逐条 decode。
+   - staging 时还会先 `memcpy` 到 staging，再从 staging 写到 old。
+   - 对 64B 以下对象，这些额外操作很容易比直接 memcpy 更贵。
+
+3. GiYSB staging 的收益条件很苛刻。
+   - 它希望把很多 tiny object 聚成较大的连续 old 写入。
+   - 但是 source 在 young 区并不一定连续。
+   - object graph 的 LIFO 扫描顺序也不一定等于物理顺序。
+   - 因此 staging 经常只是增加了一次搬运，而没有得到足够大的连续写入收益。
+
+4. Storage 和 Havlak 证明主要损失在 scavenge。
+   - Storage：GC 多约 14.557s。
+   - Havlak：GC 多约 7.300s。
+   - 这两个 benchmark 有大量 live object / tiny object / graph traversal，刚好会放大 tiny table 和 staging 路径的成本。
+
+5. young size 不是根本原因。
+   - 最初 staging 版 GiYSB 比 GiY 多占 24KB workspace，导致 young 更小、minor GC 更多。
+   - 但 equal-young 实验已经把 GiY young 也调成一样大。
+   - minor GC 次数一致后，GiYSB GC 仍然慢约 18%。
+   - 所以根本问题在每次 GC 内部的 scavenge/materialization 成本。
+
+端到端为什么接近：
+
+```text
+GC 时间只占总时间约 2% 左右。
+即使 GC 慢 18%，折算到总时间也只有大约 0.3%～0.4% 量级。
+再加上 total/business residual 的自然波动，端到端差异就会被掩盖。
+```
+
+此外，GiYSB small/large old placement 可能让某些 benchmark 的 old object 布局稍微更友好，从而让非 GC 访问变快。
+但是这个目前没有直接证据，不能当作主结论。
+
+当前应向导师报告的判断：
+
+```text
+GiYSB staging 版验证了一个重要事实：
+简单地把 tiny object 先记录到 table，再通过 staging 批量写回 old 区，并没有降低 GC 时间。
+
+它的主要失败点不是 reserve 思想，而是 tiny table/staging/materialization 路径的 per-object 成本太高。
+
+端到端时间接近，是因为 GC 占总时间比例很小，并且非 GC 残差时间有噪音或抵消。
+因此不能用端到端接近来证明 staging 方案成功。
+```
+
+下一步更合理的方向：
+
+```text
+以 GiYSB-PlaceOnly256 作为 baseline。
+先保留 small/large old placement，去掉 tiny table 和 staging。
+如果未来重新引入 batching，必须只在明确有大批量、连续目标、足够收益时启用，而不能默认对所有 tiny object 启用。
+```
+
+## 2026-05-22：给导师说明当前 GiYSB staging 策略的简单英文
+
+用户需要用简单英语向教授说明当前 GiYSB staging 版本采用的策略。
+
+推荐说法：
+
+```text
+My current GiYSB is a size-based promotion strategy with a staging buffer.
+
+During minor GC, when a young object survives, GiYSB first reserves its target address in the old generation.
+Small objects and large objects are placed in different old-generation regions.
+
+For very small objects, currently up to 64 bytes, GiYSB does not copy them immediately.
+Instead, it records them in a small table.
+After scanning, these tiny objects are copied in batches through an 8KB staging buffer.
+The goal is to turn many small copies into fewer larger writes to the old generation, and then use non-temporal stores more effectively.
+
+Medium and large objects are still copied directly, because recording and staging them would add unnecessary overhead.
+```
+
+更短版本：
+
+```text
+GiYSB tries to improve GiY by batching tiny-object promotion.
+It reserves old-generation addresses first, records tiny objects in a table, and later copies them through an 8KB staging buffer.
+The goal is to reduce many small fragmented copies and make old-generation writes more sequential.
+```
+
+中文理解：
+
+```text
+当前 GiYSB staging 版的核心是：
+先 reserve old 地址；
+小对象和大对象放到 old 区不同位置；
+tiny object 不立即复制，而是记录到 tiny table；
+之后通过 8KB staging buffer 批量复制；
+目标是把很多小碎 copy 变成更大的连续写入。
+```
+
+## 2026-05-22：理解 GiYSB 最重要的函数，以及 GiYSB 全称
+
+当前代码里 `GIY_SB` / `GiYSB` 没有写正式英文全称。
+根据命名和实际设计，最稳妥的全称建议是：
+
+```text
+GiY-SB = GiY with Staging Buffer
+```
+
+如果需要更完整地表达策略，可以在论文或汇报第一次出现时写：
+
+```text
+GiY with a Staging Buffer (GiY-SB)
+```
+
+或者更描述性的版本：
+
+```text
+GiY with Size-based Staging Buffer
+```
+
+但是严格按缩写来说，`SB` 最自然对应 `Staging Buffer`。
+`size-based` 是 GiYSB 当前策略的一部分，不一定必须放进 acronym。
+
+为了理解 GiYSB staging 版本，最重要的函数如下：
+
+1. `giy_bind_stack_to_cache_impl()`
+   - 作用：把 GiYSB 的 staging buffer 和 tiny table 放进 GC Local Workspace。
+   - 关键点：只有 `USE_GIYSB && GIYSB_TINY_BATCH` 时才分配这两个结构。
+
+2. `giysb_ensure_old_space()`
+   - 作用：把 old/dram space 逻辑上切成 small old 和 large old。
+   - 这是 size-based placement 的基础。
+
+3. `giysb_reserve_old_object()`
+   - 作用：GiYSB 最核心的 reserve 策略函数。
+   - tiny object：reserve 到 small old，并记录到 tiny table。
+   - 其他对象：reserve 到 large old 或普通路径。
+   - 这个函数决定 GiYSB 和普通 GiY 的核心差异。
+
+4. `copy_for_minor()`
+   - 作用：minor GC 发现 live young object 后，接入 GiYSB reserve 策略。
+   - 它设置 `forwarding_pointer`，并把源对象 push 到 GC stack。
+   - 它本身主要不是复制 bytes，而是 reserve + forward。
+
+5. `giysb_tiny_table_append()`
+   - 作用：把 tiny object 的 young offset 和 size class 编码进 tiny table。
+   - 这是“先记录，不立刻复制”的入口。
+
+6. scavenge/materialization 循环中的 `giysb_is_tiny_destination()`
+   - 作用：判断当前对象是不是 tiny batching 的对象。
+   - 如果是 tiny destination，就跳过立即 `giy_copy_live_object()`。
+
+7. `giysb_flush_tiny_table()`
+   - 作用：GC 扫描结束后，统一处理 tiny table 中记录的小对象。
+   - 它把 tiny table 里的 entries 重新解码，并按 chunk flush。
+
+8. `giysb_flush_tiny_chunk()`
+   - 作用：决定一个 tiny chunk 是直接逐对象复制，还是先进入 staging buffer。
+   - 当前阈值是 `GIYSB_TINY_STAGING_MIN_BYTES=4096`。
+
+9. `giysb_stage_tiny_chunk()`
+   - 作用：把一批 tiny object 先 `memcpy` 到 staging buffer。
+   - 这是 staging 方案额外成本的主要来源之一。
+
+10. `giysb_flush_staging()`
+    - 作用：把 staging buffer 里的连续 bytes 写到 old 区。
+    - 实际写入仍调用 `giy_copy_live_object()`，从而使用已有的 memcpy/NT copy 策略。
+
+11. `giy_minor_collect()`
+    - 作用：每次 minor GC 开始时 reset staging buffer 和 tiny table。
+    - 这是 GiYSB 每轮 GC 状态初始化的位置。
+
+最短理解路径：
+
+```text
+giy_bind_stack_to_cache_impl()
+  -> 准备 staging buffer 和 tiny table
+
+copy_for_minor()
+  -> 发现 live object 后调用 GiYSB reserve
+
+giysb_reserve_old_object()
+  -> 决定放 small old / large old，并记录 tiny table
+
+scavenge loop
+  -> tiny object 暂时不复制
+
+giysb_flush_tiny_table()
+  -> 扫描结束后统一处理 tiny objects
+
+giysb_stage_tiny_chunk()
+  -> 先放进 staging buffer
+
+giysb_flush_staging()
+  -> 再写回 old 区
+```
+
+一句话总结：
+
+```text
+理解 GiYSB 最重要的是理解三件事：
+old 区怎么切分；
+tiny object 怎么先 reserve/记录；
+tiny table 最后怎么通过 staging buffer flush 到 old。
+```
+
+## 2026-05-22：`giysb_flush_tiny_table()` 详细解释
+
+`giysb_flush_tiny_table()` 是 staging 版 GiYSB 在一次 minor GC 的 young traversal 结束后调用的函数。
+
+它的作用不是直接复制每一个对象，而是：
+
+```text
+遍历 tiny table；
+根据 staging buffer 容量把 tiny objects 分成若干 chunk；
+每个 chunk 再交给 giysb_flush_tiny_chunk() 决定是 direct copy 还是 staging copy。
+```
+
+调用位置：
+
+```text
+scavenge/materialization 循环结束后：
+giysb_flush_tiny_table(&used_nt_store);
+然后 giy_finish_local_nt_stores(&used_nt_store);
+```
+
+每次 minor GC 开始时，会先 reset：
+
+```text
+giysb_staging_reset();
+giysb_tiny_table_reset();
+```
+
+函数开头：
+
+```text
+if (g_giysb_tiny_table_count == 0) return;
+```
+
+如果本轮 GC 没有 tiny object 被记录，就什么都不做。
+
+然后：
+
+```text
+if (g_giysb_tiny_batch_begin == 0) error;
+```
+
+`g_giysb_tiny_batch_begin` 是 tiny batch 在 old/small old 区的第一个目标地址。
+如果 tiny table 有 entry，但 batch begin 是 0，说明状态不一致。
+
+接着初始化 chunk 状态：
+
+```text
+chunk_start = 0;
+chunk_dst = g_giysb_tiny_batch_begin;
+dst_cursor = g_giysb_tiny_batch_begin;
+chunk_bytes = 0;
+```
+
+含义：
+- `chunk_start`：当前 chunk 在 tiny table 中的起始 index。
+- `chunk_dst`：当前 chunk 对应的 old 目标起始地址。
+- `dst_cursor`：当前已经累计到的 old 目标末尾地址。
+- `chunk_bytes`：当前 chunk 的总字节数。
+
+为什么可以只用 `g_giysb_tiny_batch_begin + 累计大小` 来算目标地址：
+
+```text
+GIYSB_TINY_BATCH=1 时，tiny object 会按发现顺序 reserve 到 small old。
+每次 reserve 都让 small_free += align_bytes。
+所以 tiny table 里的 tiny objects 在目标 old 区是连续排列的。
+```
+
+主循环：
+
+```text
+for each tiny table entry:
+  decode entry -> src_hdr, nbytes
+```
+
+`giysb_decode_tiny_entry()` 从 32-bit entry 里恢复：
+- 源对象 payload 在 young/cache space 里的 offset；
+- 对象大小 size class；
+- 源对象 header 地址 `src_hdr`；
+- 复制字节数 `nbytes`。
+
+但是在 `giysb_flush_tiny_table()` 里：
+
+```text
+(void) src_hdr;
+```
+
+说明这个函数这里只需要 `nbytes` 来计算 chunk 大小。
+真正复制时，后面的 `giysb_flush_tiny_chunk()` 会再次 decode entry。
+这也是当前实现的一个额外成本：同一个 entry 可能被 decode 两次。
+
+chunk 满了时：
+
+```text
+if staging capacity != 0
+   and chunk_bytes != 0
+   and chunk_bytes + nbytes > staging capacity:
+       flush 当前 chunk
+       从当前 entry 开始新 chunk
+```
+
+也就是说，如果把当前对象加入 chunk 后会超过 8KB staging buffer，就先把已有 chunk flush 掉。
+
+这里调用：
+
+```text
+giysb_flush_tiny_chunk(chunk_start, i, chunk_dst, chunk_bytes, used_nt_store, true);
+```
+
+`full_flush=true` 表示这是因为 staging buffer 容量快满而触发的 flush。
+这个值主要用于 profile 统计 full flush 和 tail flush。
+
+每个 entry 处理完后：
+
+```text
+chunk_bytes += nbytes;
+dst_cursor += nbytes;
+```
+
+表示当前 tiny object 已经被纳入 chunk，并推进目标 old 地址 cursor。
+
+循环结束后：
+
+```text
+giysb_flush_tiny_chunk(chunk_start,
+                       g_giysb_tiny_table_count,
+                       chunk_dst,
+                       chunk_bytes,
+                       used_nt_store,
+                       false);
+```
+
+这会 flush 最后一个 tail chunk。
+`full_flush=false` 表示这是 GC 结束时剩余的 tail，不是因为 staging buffer 满了。
+
+最后：
+
+```text
+giysb_tiny_table_reset();
+```
+
+清空 tiny table 状态，准备下一次 minor GC。
+
+和下面几个函数的关系：
+
+```text
+giysb_flush_tiny_table()
+  负责把 tiny table 分成 chunk
+
+giysb_flush_tiny_chunk()
+  如果 chunk >= 4KB，则走 staging；
+  如果 chunk < 4KB，则逐对象 direct copy。
+
+giysb_stage_tiny_chunk()
+  把 chunk 中每个 tiny object memcpy 到 staging buffer。
+
+giysb_flush_staging()
+  把 staging buffer 中的连续 bytes 写回 old 区。
+
+giysb_copy_tiny_chunk_direct()
+  不用 staging，直接逐对象 giy_copy_live_object()。
+```
+
+当前性能问题也能从这个函数看出来：
+
+```text
+1. flush_tiny_table 先 decode 一次 tiny entry，只为了算 chunk。
+2. 真正 copy 时，flush_tiny_chunk 下面又 decode 一次。
+3. staging 路径还会多做 young -> staging 的 memcpy。
+4. 如果 chunk 不够大，最后仍然逐对象 direct copy，那么 table 记录和 decode 就几乎纯属额外成本。
+```
+
+所以这个函数很好地体现了 staging 版 GiYSB 的核心 tradeoff：
+
+```text
+希望用 tiny table + staging buffer 得到更大的连续 old 写入；
+但代价是增加了 table 遍历、entry decode、chunk 管理和可能的额外 memcpy。
+```
+
+## 2026-05-22：256-bit NT store 循环代码解释
+
+代码：
+
+```cpp
+while (n >= 32) {
+  __m256i v = _mm256_loadu_si256((const __m256i *) s);
+  _mm256_stream_si256((__m256i *) d, v);
+  s += 32;
+  d += 32;
+  n -= 32;
+}
+```
+
+这段代码的整体含义：
+
+```text
+每次从源地址 s 读取 32 bytes，
+再用 256-bit non-temporal store 写到目标地址 d，
+然后 s/d 都向后移动 32 bytes，
+n 减少 32 bytes，
+直到剩余字节数不足 32 bytes。
+```
+
+各部分含义：
+
+```text
+while:
+  C/C++ 循环语句。只要条件为真，就重复执行循环体。
+
+n >= 32:
+  判断剩余要复制的字节数是否至少还有 32 bytes。
+  32 bytes = 256 bits。
+
+__m256i:
+  Intel AVX/AVX2 的 256-bit 整数向量类型。
+  可以理解成一个能装 32 bytes 的向量寄存器值。
+
+v:
+  临时变量，用来保存刚从源地址 s 读出来的 32 bytes。
+  理论上它会放在 YMM 向量寄存器里。
+
+_mm256_loadu_si256:
+  Intel intrinsic。
+  从内存读取 256-bit，也就是 32 bytes。
+  loadu 中的 u 表示 unaligned，所以源地址 s 不要求 32-byte 对齐。
+
+(const __m256i *) s:
+  强制类型转换。
+  告诉编译器：把 s 这个地址当作“指向 256-bit 向量”的指针来读。
+  const 表示这个 load 不会修改源内存。
+
+_mm256_stream_si256:
+  Intel intrinsic。
+  把 256-bit 数据用 streaming store / non-temporal store 写到内存。
+  目的通常是尽量避免把目标地址的数据带进 cache。
+
+(__m256i *) d:
+  强制类型转换。
+  告诉编译器：把 d 这个地址当作“指向 256-bit 向量”的目标地址来写。
+  这里没有 const，因为目标内存会被修改。
+
+s += 32:
+  源指针向后移动 32 bytes。
+
+d += 32:
+  目标指针向后移动 32 bytes。
+
+n -= 32:
+  剩余字节数减少 32 bytes。
+```
+
+关键注意点：
+
+```text
+_mm256_loadu_si256 的源地址 s 可以不对齐。
+但是 _mm256_stream_si256 的目标地址 d 通常要求 32-byte aligned。
+如果 d 没有 32-byte 对齐，可能出错或性能很差。
+所以使用这段循环之前，一般要先处理前缀，让 d 对齐到 32B 边界。
+```
+
+和 GiY/GiYSB 的关系：
+
+```text
+这段循环是 256-bit non-temporal copy 的核心。
+它适合把比较大的连续数据写到 old 区。
+对很小的对象，它不一定划算，因为对齐处理、循环准备、sfence 等成本可能超过收益。
+```
+
+## 2026-05-22：为什么 8B 分支还要用 `_mm_stream_si64`
+
+相关代码：
+
+```cpp
+uint64_t v;
+memcpy(&v, s, sizeof(v));
+_mm_stream_si64((long long *) d, (long long) v);
+s += 8;
+d += 8;
+n -= 8;
+```
+
+这里使用 `_mm_stream_si64` 的原因是：
+
+```text
+当剩余部分只有 8 bytes，或者目标地址还没有对齐到 16B/32B 时，
+不能使用 128-bit 或 256-bit streaming store。
+但是代码仍然想让这 8 bytes 也用 non-temporal store 写到 old 区。
+所以使用 64-bit 的 streaming store：_mm_stream_si64。
+```
+
+在 256-bit NT copy 路径里：
+
+```text
+_mm256_stream_si256 适合 32B 对齐的目标地址。
+_mm_stream_si128 适合 16B 对齐的目标地址。
+_mm_stream_si64 可以处理 8B 粒度的 NT 写入。
+```
+
+这段 8B 分支有两个用途：
+
+1. 对齐前缀处理：
+
+```text
+如果 d 已经 8B 对齐，但还没有 32B 对齐，
+就先写 8B 或 16B，把 d 推进到 32B 对齐位置。
+这样后面的 _mm256_stream_si256 才能安全使用。
+```
+
+2. 尾巴处理：
+
+```text
+主循环每次处理 32B。
+如果最后还剩 8B 或 16B，
+16B 可以用 _mm_stream_si128，
+8B 就用 _mm_stream_si64。
+```
+
+为什么先 `memcpy(&v, s, sizeof(v))`，而不是直接 `*(uint64_t *)s`：
+
+```text
+s 不一定 8B 对齐。
+直接把 s 强转成 uint64_t* 再解引用，在 C/C++ 层面可能有未对齐访问或 strict-aliasing 风险。
+memcpy 到局部 uint64_t v 更安全，编译器通常会把它优化成普通 load。
+```
+
+为什么不是直接普通 `memcpy(d, s, 8)`：
+
+```text
+因为这个分支属于 NT copy 路径。
+如果这里用普通 memcpy，8B 前缀/尾巴会变成普通 cached store，
+可能把 old 区目标 cache line 带进 cache。
+使用 _mm_stream_si64 可以让这一小段也保持 non-temporal store 的策略一致性。
+```
+
+但需要注意：
+
+```text
+对很小的数据，_mm_stream_si64 不一定总是更快。
+它主要是为了完成大块 NT copy 的对齐和尾巴处理，并保持 old 区写入尽量不污染 cache。
+```
+
+## 2026-05-22：`memcpy` 后再 `_mm_stream_si64` 是否有问题
+
+代码：
+
+```cpp
+uint64_t v;
+memcpy(&v, s, sizeof(v));
+_mm_stream_si64((long long *) d, (long long) v);
+```
+
+结论：
+
+```text
+这段代码语义上没有问题。
+这里的 memcpy 不是把数据复制到目标 old 区。
+它只是从源地址 s 读取 8 bytes 到局部变量 v。
+真正写入目标地址 d 的操作是后面的 _mm_stream_si64。
+```
+
+所以它不是：
+
+```text
+source -> destination by memcpy
+然后又 source -> destination by NT store
+```
+
+而是：
+
+```text
+source s -> local variable v
+local variable v -> destination d by NT store
+```
+
+为什么用 `memcpy(&v, s, 8)`：
+
+```text
+s 不一定 8-byte 对齐。
+直接写 `uint64_t v = *(uint64_t *)s;` 在 C/C++ 层面可能有未对齐访问和 strict-aliasing 风险。
+用 memcpy 读到局部 uint64_t 是更安全的写法。
+现代编译器通常会把这个固定 8B memcpy 优化成一个普通 load。
+```
+
+为什么后面还用 `_mm_stream_si64`：
+
+```text
+因为代码想让目标 old 区的 8B 写入也走 non-temporal store。
+这通常用于 256-bit NT copy 的前缀对齐或尾巴处理。
+```
+
+需要注意的地方：
+
+```text
+1. _mm_stream_si64 的目标 d 至少应该 8-byte 对齐。
+   当前代码在进入 256-bit NT path 前检查了 d 的 8B 对齐，否则退回普通 memcpy。
+
+2. 对很小的数据，NT store 不一定比普通 memcpy 更快。
+   这个 8B 分支主要是为了配合大块 NT copy 的对齐和尾巴处理。
+
+3. 最后如果还剩小于 8B 的 tail，代码会用普通 memcpy。
+   这会混合 NT store 和普通 store，但只发生在很小的尾巴上。
+```
+
+因此，更准确的说法是：
+
+```text
+这段代码不是 correctness bug。
+它可能有性能 tradeoff，但不是“memcpy 之后又重复 NT store 到同一块目标地址”。
+```
+
+## 2026-05-22：如何验证服务器支持 256-bit NT store
+
+验证分三层：
+
+1. 看 CPU/OS flags：
+
+```bash
+lscpu | rg -i 'Model name|Flags|avx2'
+```
+
+本机结果：
+
+```text
+Intel(R) Xeon(R) W-2235 CPU @ 3.80GHz
+Flags 中包含 avx2
+```
+
+这说明 CPU/OS 支持 AVX2。`_mm256_stream_si256` 对应的 256-bit integer NT store 需要 AVX2。
+
+2. 编译并实际运行最小测试：
+
+```bash
+g++ -O2 -mavx2 -std=c++17 -x c++ -o /tmp/ntstore256_test - <<'CPP'
+#include <immintrin.h>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+
+__attribute__((noinline)) void ntcopy256(void *dst, const void *src) {
+  __m256i v = _mm256_loadu_si256((const __m256i *)src);
+  _mm256_stream_si256((__m256i *)dst, v);
+  _mm_sfence();
+}
+
+int main() {
+  void *src = nullptr;
+  void *dst = nullptr;
+  if (posix_memalign(&src, 32, 32) != 0 || posix_memalign(&dst, 32, 32) != 0) return 2;
+  for (int i = 0; i < 32; i++) ((unsigned char *)src)[i] = (unsigned char)(i + 1);
+  for (int i = 0; i < 32; i++) ((unsigned char *)dst)[i] = 0;
+  ntcopy256(dst, src);
+  int ok = 1;
+  for (int i = 0; i < 32; i++) ok &= (((unsigned char *)dst)[i] == (unsigned char)(i + 1));
+  std::printf("ntstore256 runtime %s\n", ok ? "OK" : "FAIL");
+  std::free(src);
+  std::free(dst);
+  return ok ? 0 : 1;
+}
+CPP
+/tmp/ntstore256_test
+```
+
+本机结果：
+
+```text
+ntstore256 runtime OK
+```
+
+这说明服务器可以实际执行 256-bit NT store，不会 illegal instruction。
+
+3. 反汇编确认生成的是真正的 256-bit NT store：
+
+```bash
+objdump -d -Mintel /tmp/ntstore256_test | rg -i 'vmovntdq|vmovdqu|sfence'
+```
+
+本机关键结果：
+
+```text
+vmovdqu  ymm0,YMMWORD PTR [rsi]
+vmovntdq YMMWORD PTR [rdi],ymm0
+sfence
+```
+
+其中：
+
+```text
+vmovntdq YMMWORD PTR ...
+```
+
+就是 256-bit non-temporal store。`YMMWORD` 表示 256-bit。如果是 `XMMWORD`，那就是 128-bit。
+
+另外，当前 GiYSB benchmark binary 也确认包含 256-bit NT store：
+
+```bash
+objdump -d -Mintel build.debug/benchmarks/out_giysb_tiny16_adaptive_vs_giy_nt256_896_20260521_175640/giysb_tiny16_adaptive_896/ejsvm_giysb_tiny16_adaptive_896 | rg -i 'vmovntdq.*YMMWORD|sfence'
+```
+
+本机结果中出现：
+
+```text
+vmovntdq YMMWORD PTR [...],ymm0
+```
+
+结论：
+
+```text
+这台服务器支持并且当前 GiY/GiYSB 构建能够生成和执行 256-bit NT store。
+```
+
+## 2026-05-22：为什么 GiYSB staging 最可能无法带来性能提高
+
+最可能的原因：
+
+```text
+GiYSB staging 为了把 tiny object 合并成较大的 NT store，额外引入了 per-object 记录、decode、chunk 管理和 young->staging 的二次搬运；但是 tiny object 本身太小，直接 memcpy 的成本已经很低，所以这些额外成本超过了批量 NT store 带来的收益。
+```
+
+换句话说：
+
+```text
+这个方法优化的是“old 区写入形式”，但它增加了“GC 内部调度和搬运成本”。
+当前 benchmark 中增加的成本更大。
+```
+
+最关键的证据：
+
+```text
+equal-young 条件下，GiYSB staging 的 GC 时间比 GiY 慢 24.762s，约 +18.105%。
+其中主要差异来自 scavenge/materialization，而不是 minor GC 次数。
+Storage 和 Havlak 是主要退化来源。
+```
+
+为什么会这样：
+
+```text
+普通 GiY 对小对象直接复制：
+  scan -> giy_copy_live_object -> memcpy/NT copy
+
+GiYSB staging 对 tiny object：
+  reserve -> 写 tiny table
+  scan 结束后遍历 tiny table
+  decode entry
+  判断 chunk
+  可能 memcpy 到 staging buffer
+  再从 staging buffer 写 old
+```
+
+因此，多出来的成本包括：
+
+```text
+1. tiny table append 成本；
+2. flush 时 tiny table 遍历成本；
+3. entry decode 成本，而且当前实现里可能 decode 两次；
+4. chunk 分割判断成本；
+5. young -> staging 的额外 memcpy；
+6. staging buffer 自身对 cache/local workspace 的占用；
+7. 如果 chunk 小于阈值，最后仍然 direct copy，那么前面的记录和 decode 基本都是净损耗。
+```
+
+一句话结论：
+
+```text
+GiYSB staging 失败的最可能原因不是 256-bit NT store 不可用，而是为了使用更大的 NT store 所付出的 tiny-object batching 成本太高。
+```
+
+## 2026-05-22：理论上 `memcpy` 和 NT store 的成本差距
+
+结论先写：
+
+```text
+memcpy 和 NT store 没有固定的“差多少”。
+对小对象，memcpy 通常更便宜。
+对大块、连续、之后不马上读取的写入，NT store 才可能更便宜。
+```
+
+当前代码里的经验阈值也体现了这一点：
+
+```text
+GIY_NT_COPY_MIN_BYTES = 256
+```
+
+也就是说：
+
+```text
+nbytes <= 256B 时，当前 GiY 直接使用 memcpy；
+nbytes > 256B 时，才尝试 NT copy。
+```
+
+理论上的主要区别：
+
+普通 `memcpy` / cached store：
+
+```text
+1. 写目标地址时，CPU 通常会把目标 cache line 带进 cache。
+2. 如果目标 line 原来不在 cache，可能发生 write allocate / RFO。
+3. 对一个 64B cache line，最差情况下可能产生：
+   - 读入 64B cache line；
+   - 之后再写回 64B。
+4. 所以纯写一个冷的 64B line，内存流量可能接近 128B。
+5. 但好处是：小数据非常快，store latency 低，之后如果马上读，数据已经在 cache。
+```
+
+NT store / streaming store：
+
+```text
+1. 目标写入尽量绕过普通 cache 层级。
+2. 通常避免 write allocate / RFO。
+3. 对一个 64B cache line，理想情况下主要就是写出 64B。
+4. 所以对大块连续冷写，理论内存流量可能从 128B 降到 64B，最多接近 2x 的流量优势。
+5. 但代价是：
+   - 需要对齐；
+   - 小写入不容易合并；
+   - 需要 write-combining buffer；
+   - 最后需要 sfence 保证可见性；
+   - 如果之后马上读目标数据，反而会更慢，因为数据不在 cache。
+```
+
+所以理论收益大概是：
+
+```text
+大块连续冷写：
+  NT store 可能有 1.1x 到接近 2x 的写入带宽优势。
+
+小对象、小于 64B/128B/256B：
+  NT store 通常不占优势，甚至更慢。
+  因为对齐、指令、fence、write-combining、函数/分支成本会超过节省的 cache traffic。
+```
+
+对 GiYSB staging 来说，最关键的是：
+
+```text
+GiYSB 试图把 <=64B tiny objects 合并起来，让最后写 old 区时更像大块 NT store。
+但为了做到这一点，它付出了：
+  tiny table append；
+  tiny table decode；
+  chunk 管理；
+  young -> staging 的额外 memcpy；
+  staging -> old 的 NT store。
+```
+
+如果直接复制 tiny object：
+
+```text
+一次很小的 memcpy 可能已经非常便宜。
+```
+
+如果走 GiYSB staging：
+
+```text
+至少变成一次普通读写到 staging，再一次 NT 写到 old，
+再加上 table 管理成本。
+```
+
+所以对 tiny object 来说，NT store 理论上的大块写入优势很容易被额外管理成本吃掉。
+
+一句话总结：
+
+```text
+NT store 的理论优势主要是减少大块冷写的 cache traffic；
+但 GiYSB staging 处理的是大量 tiny object，per-object 管理成本太高，所以很难把这个理论优势转化成实际 GC 性能提升。
+```
+
+## 2026-05-22：GC Local Workspace 放进 cache 是否合理，以及更大 young 区是否可能提升性能
+
+当前判断：
+
+```text
+把 GC Local Workspace 设计成大体能放进 L2 cache 是合理的方向，
+但不能理解成“这块空间一定被 cache 固定保存”。
+cache 不是显式管理的 scratchpad，它只是硬件缓存。
+```
+
+本机 L2 情况：
+
+```text
+每个 core 约 1MiB L2。
+之前推荐的 896KB workspace 大约是单核 L2 的 87.5%。
+```
+
+这个选择的优点：
+
+```text
+1. GC stack、RSet/index、FT slot set、tiny table、staging buffer 等高频访问结构更可能留在 L2。
+2. young object 的分配和 minor GC 访问也更可能在较低延迟的 cache 中完成。
+3. 相比让 GC 元数据散落在更慢的层级，local workspace 的设计更符合 GiY 的核心思想。
+```
+
+但风险是：
+
+```text
+1. L2 不是独占的，还要放代码、普通栈、其他运行时数据、prefetch 数据等。
+2. L2 是 set-associative，不是只看总大小；地址映射冲突也可能导致 eviction。
+3. 如果 workspace 太接近 L2 上限，反而可能增加 cache conflict 和 eviction。
+4. 如果开 SMT，同一个物理 core 的两个 logical threads 会共享 L2。
+```
+
+所以结论是：
+
+```text
+让 workspace 接近但不超过 L2 是合理实验方向。
+896KB 可以作为一个强 baseline，但不能保证它“几乎全部永远在 L2”。
+```
+
+关于更大的 young 区：
+
+```text
+更大的 young 区很可能带来一部分性能提升，但不是无限变大越好。
+```
+
+为什么更大 young 可能更快：
+
+```text
+1. minor GC 次数减少。
+2. root / RSet 扫描次数减少。
+3. 很多短命对象有更长时间自然死亡，可能降低 promotion/copy 压力。
+4. GC overhead 通常会下降，尤其是 minor GC 很频繁的 benchmark。
+```
+
+为什么更大 young 也可能不提升，甚至变差：
+
+```text
+1. young 区太大后，GC Local Workspace 可能不再稳定停留在 L2。
+2. 每次 minor GC 时，活对象集合可能更大，单次 GC pause 变长。
+3. 更大的 young 会占用更多 cache 容量，可能挤出 RSet、stack、shape/layout cache 等真正高频结构。
+4. 如果 benchmark 本身 GC 时间占比很低，减少 GC 次数对端到端时间帮助有限。
+5. 对 GiYSB staging 来说，更大 young 不能解决 tiny table/staging 的 per-object 成本。
+```
+
+因此最合理的设计逻辑是：
+
+```text
+不是盲目扩大 young，
+而是在 L2 budget 内尽量减少不必要的辅助结构，
+把省下来的空间还给 young。
+```
+
+对当前结果的解释：
+
+```text
+GiYSB staging 多占了 tiny table 和 staging buffer，
+导致 young after aux 变小。
+这会增加 minor GC 次数。
+equal-young 实验说明：即使 young 一样大，GiYSB staging 的 GC 仍然慢，
+所以 staging 的根本问题是 per-object batching 成本。
+```
+
+当前最合理的方向：
+
+```text
+1. 保持总 GC Local Workspace 在 896KB 附近。
+2. 删除或关闭 tiny table/staging 这种收益不足的结构。
+3. 把释放出来的空间还给 young。
+4. 保留 small/large old placement 做 PlaceOnly baseline。
+5. 如果未来要重新引入 batching，只在明确能形成足够大连续 chunk 时启用。
+```
+
+一句话结论：
+
+```text
+把 workspace 控制在 L2 内是合理的；
+更大的 young 区通常有机会减少 GC 次数并提高性能；
+但对 GiYSB staging 当前失败的核心问题来说，单纯扩大 young 不能解决 staging/tiny table 的额外管理成本。
+```
+
+## 2026-05-22：从 cache-friendly 角度看，workspace/young 是否越大越好
+
+用户进一步澄清：问题不是 GC 次数，而是从 cache-friendly 的角度，空间更大是否更容易实现 GiY 的“缓存友好”。
+
+当前判断：
+
+```text
+不是越大越 cache-friendly。
+GiY 的 cache-friendly 来自“活跃工作集能留在 cache 中”，不是来自“保留的空间更大”。
+```
+
+更大的 local workspace / young 区有两种相反效果。
+
+可能有利的部分：
+
+```text
+1. 如果原来的 young 太小，minor GC 太频繁，那么适当变大可以减少 GC 次数。
+2. 如果大多数 GC 活跃数据仍然能留在 L2 里，更大的 young 可以让更多最近分配的对象仍在 cache 附近被处理。
+3. 在不挤出高频元数据的前提下，适当扩大 young 有助于降低重复扫描和重复进入 GC 的成本。
+```
+
+可能不利的部分：
+
+```text
+1. cache 容量固定。空间越大，越不容易整体保持 hot。
+2. L2 不是 scratchpad，不会因为叫 GC Local Workspace 就固定常驻 cache。
+3. 如果 young/workspace 太接近或超过 L2，有效工作集会挤出 GC stack、RSet、FT slot set、layout cache 等高频结构。
+4. L2 是 set-associative，还可能出现 set conflict；不是只看总大小。
+5. 更大的 young 也可能让单次 GC 的 live working set 更大，导致扫描时访问更多 cache line。
+```
+
+所以更准确的原则是：
+
+```text
+GiY 需要的不是“越大的 young”，而是“活跃 GC 工作集恰好能放进 L2，并留有足够余量”。
+```
+
+从 cache-friendly 角度，空间大小存在一个最佳区间：
+
+```text
+太小：
+  GC 太频繁，root/RSet/scavenge 重复执行，开销高。
+
+适中：
+  young + GC metadata 的活跃部分大体留在 L2，GC 次数也不过多。
+  这是 GiY 最想要的区域。
+
+太大：
+  工作集超过 L2 或产生更多 conflict，cache miss 增加。
+  这时虽然 young 更大，但反而不 cache-friendly。
+```
+
+因此：
+
+```text
+“更大”只在还没有超过 L2 有效容量、且没有挤出高频元数据时，才可能更 cache-friendly。
+超过这个区间后，更大反而更不 cache-friendly。
+```
+
+对于当前机器：
+
+```text
+单核 L2 约 1MiB。
+896KB workspace 已经是非常激进的 L2 budget，约 87.5%。
+它可能是合理实验点，但也已经留下不多余量给代码、栈、运行时数据和 cache set 冲突。
+```
+
+当前汇报时可以这样说：
+
+```text
+I do not assume that a larger workspace is always more cache-friendly.
+The goal of GiY is to keep the active GC working set inside L2, not to maximize the nursery size.
+So there should be an optimal range: too small causes too many minor GCs, but too large may exceed L2 capacity or evict hot GC metadata.
+```
+
+## 2026-05-23：按照导师原则重新设计 GiYSB two-class 方案
+
+导师的新原则理解为：
+
+```text
+1. 对象只分两类：tiny 或 large。
+2. 不再有 tiny / medium / large 三类。
+3. young -> old 的最终写入不使用普通 memcpy 作为优化路径。
+4. tiny object 一律先进入 staging buffer，然后用 NT store 统一写入 old。
+5. large object 直接从 young 原地用 NT store 写入对应 old 区。
+```
+
+如果导师的意思是“完全禁止 young->old 使用 NT store”，那就是另一个方案。
+这里按“最终写 old 时要么 staging 后 NT，要么 direct NT”来设计。
+
+推荐暂定名称：
+
+```text
+GiYSB-TL
+GiY with Staging Buffer, Tiny/Large two-class policy
+```
+
+对象分类：
+
+```text
+footprint = ALIGN(object_header + payload_size)
+
+tiny:
+  footprint <= GIYSB_TINY_OBJECT_MAX_BYTES
+  当前可继续用 64B。
+
+large:
+  footprint > GIYSB_TINY_OBJECT_MAX_BYTES
+```
+
+注意：
+
+```text
+object_header 当前是 16B。
+所以 tiny 阈值如果是 64B，实际 payload 通常最多约 48B。
+```
+
+old 区布局：
+
+```text
+tiny old region:
+  只放 tiny object 的目标地址。
+  使用 bump pointer。
+  目标地址按 reserve order 连续。
+
+large old region:
+  只放 large object 的目标地址。
+  使用 bump pointer。
+```
+
+不要再使用 `small_object_max=256` 这种中间概念。
+变量命名也最好从 `small_*` 改成 `tiny_*`，避免和导师的 two-class 思想混淆。
+
+minor GC 流程：
+
+1. minor GC 开始：
+
+```text
+reset gc_stack
+reset tiny_table
+reset staging buffer
+reset used_nt_store
+```
+
+2. 发现 live young object：
+
+```text
+copy_for_minor(payload_ptr)
+  -> 计算 footprint
+  -> 如果 tiny:
+       reserve 到 tiny old region
+       设置 forwarding_pointer = tiny old payload
+       记录 tiny table entry
+       push 源对象到 gc_stack
+       不立即复制
+     如果 large:
+       reserve 到 large old region
+       设置 forwarding_pointer = large old payload
+       push 源对象到 gc_stack
+```
+
+3. scavenge / traversal：
+
+```text
+pop 源对象
+扫描它的 children
+把对象内部 young refs patch 成 forwarding refs
+
+如果 tiny:
+  不复制。
+  因为它已经记录在 tiny table，最后统一 staging。
+
+如果 large:
+  立刻使用 forced NT copy 从 young header 写到 large old header。
+```
+
+这里 large 不能继续调用普通 `giy_copy_live_object()`，因为当前 `giy_copy_live_object()` 有：
+
+```text
+if (nbytes <= 256) memcpy(...)
+```
+
+新方案需要一个新的函数，例如：
+
+```text
+giy_nt_copy_live_object_forced(dst, src, nbytes, used_nt_store)
+```
+
+这个函数不根据 256B 阈值退回 memcpy。
+它负责尽量用 `_mm256_stream_si256` / `_mm_stream_si128` / `_mm_stream_si64` 完成写 old。
+
+4. traversal 完成后：
+
+```text
+giysb_flush_tiny_table()
+```
+
+它按照 reserve order 遍历 tiny table。
+因为 tiny old 是按 reserve order 连续分配的，所以 tiny table 顺序也对应连续 old 目标地址。
+
+新的 tiny flush 策略：
+
+```text
+把 tiny objects 逐个 memcpy 到 staging buffer。
+staging buffer 满了就 forced NT flush 到 tiny old。
+GC 结束时 tail 也 forced NT flush。
+```
+
+注意：这里的 `memcpy` 是：
+
+```text
+young -> staging
+```
+
+不是：
+
+```text
+young -> old
+```
+
+最终写 old 必须使用 forced NT copy。
+
+因此 `giysb_flush_tiny_chunk()` 不应该再有：
+
+```text
+chunk < 4KB 就 direct copy
+```
+
+因为这会让小 chunk 绕过 staging。
+新原则下应该改成：
+
+```text
+所有 tiny 都 staging。
+所有 staging flush 都 forced NT。
+```
+
+关键代码修改点：
+
+1. `giysb_reserve_old_object()`
+   - 只判断 tiny / large。
+   - tiny 进入 tiny old，并记录 tiny table。
+   - large 进入 large old。
+   - 不再使用 `GIYSB_SMALL_OBJECT_MAX_BYTES=256` 路径。
+
+2. `giy_copy_live_object()`
+   - 保留给普通 GiY 使用。
+   - 新增 forced NT 版本给 GiYSB-TL 使用。
+
+3. scavenge/materialization 分支
+   - tiny：skip immediate copy。
+   - large：调用 forced NT copy，不走 memcpy threshold。
+
+4. `giysb_flush_tiny_table()`
+   - 保留按 tiny table 分 chunk 的功能。
+   - 但不要再因为 chunk 小于 4KB 走 direct copy。
+
+5. `giysb_stage_tiny_chunk()`
+   - 继续负责 young -> staging。
+   - flush 时调用 forced NT copy。
+
+6. `giysb_copy_tiny_chunk_direct()`
+   - 新原则下最好删除或只作为 debug emergency path。
+   - benchmark 主路径不能使用它。
+
+最大的工程风险：
+
+```text
+tiny table 不能 overflow。
+```
+
+原因：
+
+```text
+如果 tiny table 满了，当前旧代码会 fallback 到 reserve_large/direct copy。
+但这违反“tiny 一律 staging”的原则。
+
+而且 table 满时不能简单立即 flush，
+因为有些 tiny object 可能还没被 scavenge，内部引用还没有 patch 完。
+提前复制到 old 会复制未修正的 references。
+```
+
+因此严格方案必须选择一个办法：
+
+方案 A：把 tiny table 做到足够大。
+
+```text
+优点：实现简单，保持 reserve-order flush。
+缺点：占 workspace，减少 young。
+```
+
+估算：
+
+```text
+如果 young after aux 约 580KB，
+全部都是 64B tiny object，最多约 9K entries。
+4B compact entry 大约 36KB。
+
+如果很多对象更小，例如 16B/24B footprint，
+最坏可能需要 100KB 以上 table。
+```
+
+方案 B：允许 tiny overflow 时 direct NT。
+
+```text
+优点：workspace 小。
+缺点：违反导师“一律 staging”的原则，不推荐作为本设计主线。
+```
+
+方案 C：重新设计 table，使用扫描完成后的 materialization list。
+
+```text
+优点：可以边 materialize 边 flush，减少 table 压力。
+缺点：materialization order 可能不是 reserve order，old 目标地址不一定连续，staging 统一 NT 的收益可能下降。
+```
+
+当前最符合导师原则的是方案 A：
+
+```text
+保留 reserve-order tiny table，
+但把 table size 作为实验参数扩大，
+并在 overflow 时直接报错或记录失败，不做性能 fallback。
+```
+
+推荐初始配置：
+
+```text
+CACHE_SIZE_KB=896
+GIYSB_TINY_OBJECT_MAX_BYTES=64
+GIYSB_STAGING_BYTES=8192
+GIYSB_TINY_TABLE_BYTES=65536
+GIYSB_TINY_BATCH=1
+GIY_NT_COPY_BITS=256
+```
+
+如果 64KB table 仍然 overflow，再测试 128KB。
+但报告时必须说明：更大的 tiny table 会减少 young，需要 equal-young 对照。
+
+应该收集的 profile：
+
+```text
+tiny reserved objects / bytes
+large reserved objects / bytes
+tiny table max entries
+tiny table overflow count
+staging flush count
+staging full flush / tail flush
+staged bytes
+large direct NT bytes
+NT copied bytes
+minor GC count
+scavenge time
+```
+
+判断成功的标准：
+
+```text
+1. correctness：所有 benchmark status=0。
+2. tiny table 没有 overflow。
+3. equal-young 条件下，GC overhead / scavenge 不比 GiY 明显变慢。
+4. 如果 GC 不快，至少要看到 old write cache pollution 或 cache miss 有改善，否则这个策略仍然不成立。
+```
+
+一句话总结：
+
+```text
+新 GiYSB 应该变成一个严格 two-class 策略：
+tiny 永远 staging 后 NT flush；
+large 永远 direct NT copy；
+不再让 medium/small threshold 和 memcpy fallback 混进主策略。
+```
+
+## 2026-05-23：two-class GiYSB 是否还需要 tiny table
+
+用户问：既然 tiny 一律 staging，是否还需要 tiny table？能否每次遇到小对象就直接移动到 staging buffer？
+
+当前判断：
+
+```text
+严格来说，仍然需要某种 table / log / descriptor。
+不一定必须叫 tiny table，但需要一个结构记录 tiny object 的源地址、目标地址或至少 reserve order。
+```
+
+原因 1：不能在 `copy_for_minor()` 发现对象时立刻把对象复制到 staging。
+
+```text
+copy_for_minor() 发生在对象刚被发现 live 的时候。
+此时这个对象内部的 child references 还没有被扫描和 patch。
+如果这时把对象内容复制到 staging，staging 里会保存旧的 young pointers。
+之后 young 对象本体虽然会被 patch，但 staging 里的副本不会自动更新。
+```
+
+所以：
+
+```text
+发现对象时可以 reserve old 地址、设置 forwarding pointer、记录信息；
+但不能安全地复制对象 bytes。
+```
+
+原因 2：可以在对象被 scavenge 完之后立刻 copy 到 staging，但这会遇到目标 old 地址顺序问题。
+
+```text
+对象 scavenge 完后，它内部引用已经 patch，此时复制 bytes 是安全的。
+但是 scavenge 顺序是 LIFO / graph traversal order。
+而 tiny old 的目标地址是 reserve order。
+这两个顺序不一定一致。
+```
+
+如果按照 scavenge 顺序把对象连续放进 staging buffer：
+
+```text
+staging buffer 中的对象顺序 = scavenge order
+old 目标地址顺序 = reserve order
+```
+
+二者不一致时，不能把 staging buffer 一次性 NT store 到 old 的连续区间，否则会把对象写到错误位置。
+
+原因 3：如果 staging buffer 里每个对象都要写到不同目标地址，就又需要 descriptor。
+
+```text
+如果不要求一次连续写 old，而是 staging 中每个对象单独写到自己的 old 地址，
+那就必须记录每个对象对应的 dst。
+这本质上还是一个 table / descriptor list。
+```
+
+所以 tiny table 的本质作用不是“多余的一张表”，而是：
+
+```text
+1. 记住哪些 tiny object 需要延迟复制；
+2. 保持 reserve order；
+3. 让最终 staging buffer 的顺序和 old 目标地址连续顺序一致；
+4. 避免在对象内部引用 patch 之前复制错误内容。
+```
+
+什么时候可以不要 tiny table：
+
+```text
+1. 如果改成 FIFO/Cheney-style traversal，并能严格保证 materialization order == reserve order。
+   这样 scavenge 完一个对象就可以 append staging，目标 old 也连续。
+
+2. 如果只对 pointer-free tiny object 立即 staging。
+   因为它们没有 child refs，不存在 patch 后内容改变的问题。
+   但 JSObject 通常可能有 references，需要准确类型判断。
+
+3. 如果放弃“一次连续 NT store 到 old”的目标。
+   每个 tiny object 单独从 staging 写到自己的 old 地址。
+   但这会失去 batching 的主要意义，并且仍然需要 dst 信息。
+```
+
+因此当前建议：
+
+```text
+在不大改 traversal 的前提下，不建议删除 tiny table。
+可以优化 tiny table，让它更小、更少 decode，或者改成 reserve-order worklist。
+但直接“每次遇到小对象就放 staging buffer”在当前 LIFO GiY 中不安全或收益很低。
+```
+
+一句话结论：
+
+```text
+tiny table 的存在是为了处理“发现顺序、扫描完成顺序、old 目标连续顺序”不一致的问题。
+如果不改变 traversal/order 机制，直接用 staging buffer 不能完全替代 tiny table。
+```
+
+## 2026-05-23：在 materialization/copy 时判断 tiny，是否可以去掉 tiny table
+
+用户进一步澄清：
+
+```text
+不是在 copy_for_minor() 刚发现对象时就把 tiny object 放进 staging，
+而是在真正准备 copy/materialize 这个对象时再判断：
+如果是 tiny，就进入 staging buffer；
+如果不是 tiny，就正常处理。
+```
+
+当前判断：
+
+```text
+这个方向是可行的，而且比原来的 tiny table 方案更干净。
+前提是“准备 copy”指的是对象已经被 scavenge，内部 references 已经 patch 完之后。
+```
+
+原因：
+
+```text
+在 scavenge/materialization 阶段，代码已经先执行：
+giy_process_young_node<GiYReserveTracer>(type, src_payload)
+
+这一步会扫描对象内部引用，并把 young references patch 成 forwarding references。
+所以此时对象内容已经是可以复制到 old 的正确内容。
+```
+
+因此可以改成：
+
+```text
+scavenge 一个对象
+  -> patch children
+  -> 取得 dst_hdr / align_bytes
+  -> 如果 tiny:
+       append 到 staging buffer
+     否则:
+       forced NT copy 到 large old
+```
+
+这样可以删除或绕过原来的 tiny table：
+
+```text
+不需要在 reserve 时记录 tiny entry。
+不需要之后 flush_tiny_table 再 decode entry。
+不需要同一个 tiny entry decode 两次。
+```
+
+但是还必须处理目标 old 地址连续性。
+
+因为 scavenge 顺序仍然可能和 reserve 顺序不同：
+
+```text
+当前对象的 dst_hdr 不一定等于 staging 当前 expected_dst。
+```
+
+所以新的 online staging buffer 需要维护：
+
+```text
+staging_used
+staging_dst_start
+staging_expected_dst
+```
+
+append tiny object 时：
+
+```text
+如果 staging 为空：
+  staging_dst_start = dst_hdr
+  staging_expected_dst = dst_hdr
+
+如果 dst_hdr != staging_expected_dst：
+  先把当前 staging 用 forced NT flush 到 staging_dst_start
+  然后从当前对象开启新的 staging run
+
+把当前 tiny object bytes memcpy 到 staging buffer
+staging_expected_dst += object_size
+staging_used += object_size
+
+如果 staging buffer 满：
+  forced NT flush
+```
+
+这样可以保证：
+
+```text
+每次 flush staging buffer 时，
+staging buffer 的 byte 顺序和 old 目标地址顺序一致。
+```
+
+如果 scavenge 顺序和 reserve 顺序很不一致：
+
+```text
+staging 会频繁因为 dst 不连续而 flush。
+这会降低 batching 收益。
+但 correctness 是安全的。
+```
+
+和原 tiny table 方案相比：
+
+优点：
+
+```text
+1. 不需要 tiny table，占用 workspace 更少。
+2. 不需要 reserve-time 记录。
+3. 不需要 flush_tiny_table 遍历和 decode。
+4. tiny object 只在内容已经 patch 完后才 copy 到 staging，语义安全。
+5. 实现更符合导师的“准备 copy 时判断 tiny/large”原则。
+```
+
+缺点：
+
+```text
+1. batching 取决于 materialization 顺序下的 dst 连续性。
+2. 如果 LIFO traversal 导致 dst 地址跳来跳去，staging run 会很短。
+3. 短 run 仍然 forced NT flush，可能不一定比 memcpy 快。
+4. 需要增加 profile 来统计：
+   - staging run 数量；
+   - 平均 run bytes；
+   - 因 dst 不连续触发的 flush 次数；
+   - 因 buffer full 触发的 flush 次数。
+```
+
+推荐的新设计：
+
+```text
+GiYSB-OnlineStage
+```
+
+核心原则：
+
+```text
+1. copy_for_minor() 只 reserve old 地址和设置 forwarding pointer。
+2. 不再在 reserve 时记录 tiny table。
+3. scavenge/materialization 时判断 tiny/large。
+4. tiny：进入 online staging buffer。
+5. large：forced NT copy 到 large old。
+6. staging flush：永远 forced NT store 到 old。
+7. 如果 tiny dst 不连续：flush 当前 staging，再开始新的 run。
+```
+
+一句话结论：
+
+```text
+如果在“对象已经扫描并 patch 完、准备 materialize”时判断 tiny，那么可以去掉 tiny table，改用 online staging buffer。
+这个方案更简单、更符合导师原则，但需要用 dst 连续性检查来保证 staging flush 的 correctness。
+```
+
+## 2026-05-23：为什么 reserve 顺序和 staging 顺序可能不一样
+
+用户问：
+
+```text
+遇到 tiny object 并 reserve 它们的顺序，不就是 staging buffer 看到它们的顺序吗？
+为什么 staging buffer 的顺序会不一样？
+```
+
+关键区别：
+
+```text
+reserve 顺序 = 对象“第一次被引用发现”的顺序。
+staging 顺序 = 对象“从 GC stack pop 出来、扫描完成、准备 copy”的顺序。
+```
+
+当前 GiY 使用的是 GC stack，也就是 LIFO。
+所以对象发现顺序和处理完成顺序通常会反过来，或者至少不完全一致。
+
+例子：
+
+```text
+Root 引用 A 和 B。
+扫描 root 时按顺序发现 A，再发现 B。
+
+copy_for_minor(A):
+  reserve A old 地址 = old[0]
+  push A
+
+copy_for_minor(B):
+  reserve B old 地址 = old[1]
+  push B
+```
+
+此时 reserve 顺序是：
+
+```text
+A, B
+```
+
+old 目标地址顺序也是：
+
+```text
+old[0] = A
+old[1] = B
+```
+
+但是 GC stack 是 LIFO，所以后面 pop 的顺序是：
+
+```text
+B, A
+```
+
+如果改成 materialization-time staging：
+
+```text
+先 scavenge B，B 进入 staging。
+再 scavenge A，A 进入 staging。
+```
+
+staging buffer 顺序就变成：
+
+```text
+B, A
+```
+
+但 old 连续目标地址要求是：
+
+```text
+A, B
+```
+
+如果把 staging buffer `[B, A]` 一整块写到从 `old[0]` 开始的连续区域，就会写错：
+
+```text
+old[0] 本来应该是 A，却写成 B。
+old[1] 本来应该是 B，却写成 A。
+```
+
+这就是为什么 materialization-time staging 必须检查：
+
+```text
+当前对象 dst 是否等于 staging_expected_dst。
+```
+
+如果不等，就说明目标 old 地址不连续或顺序不同，必须先 flush 当前 staging run，再开始新的 run。
+
+原来的 tiny table 为什么能避免这个问题：
+
+```text
+tiny table 是在 reserve 时记录的。
+所以 tiny table 顺序天然等于 reserve 顺序。
+reserve 顺序也就是 tiny old 目标地址顺序。
+最后按 tiny table 顺序组装 staging buffer，就能保证 staging buffer 顺序和 old 地址顺序一致。
+```
+
+所以：
+
+```text
+如果不使用 tiny table，而是在 copy/materialization 时直接进入 staging，
+就必须接受 staging 顺序可能不同，并用 dst 连续性检查修正。
+```
+
+什么时候两者会一样：
+
+```text
+1. 如果 GC worklist 改成 FIFO，而不是 LIFO。
+2. 如果 traversal 机制保证 pop/materialize 顺序等于 reserve 顺序。
+3. 如果每次 staging run 只包含目标地址连续的一段。
+```
+
+当前 GiY 不是这种保证，所以不能假设顺序一样。
+
+一句话结论：
+
+```text
+遇到对象并 reserve 的顺序，和对象被真正扫描完并准备 copy 的顺序，在当前 LIFO GiY 中不是同一个顺序。
+这就是 staging buffer 顺序可能和 old 目标地址顺序不一致的原因。
+```
+
+## 2026-05-23：保留 tiny table，并在 staging buffer 满时 flush 的方案评估
+
+用户决定继续保留 tiny table，并提出：
+
+```text
+每当 staging buffer 满了，就 flush 一次。
+然后继续处理 tiny table。
+这样每次 GC 理论上只有最后一次 tail flush 是不满 buffer 的 NT store。
+```
+
+当前判断：
+
+```text
+这个方向是合理的，而且是 tiny table 最适合的使用方式。
+```
+
+原因：
+
+```text
+tiny table 按 reserve order 记录 tiny object。
+reserve order 等于 tiny old 目标地址顺序。
+因此按 tiny table 顺序把对象打包进 staging buffer，
+就可以保证 staging buffer 的 byte 顺序和 old 目标地址连续顺序一致。
+```
+
+推荐流程：
+
+```text
+1. minor GC 中发现 tiny object：
+   reserve 到 tiny old；
+   记录 tiny table；
+   不立即复制。
+
+2. scavenge 阶段：
+   tiny object 被 pop 出来后，先扫描和 patch 内部 references；
+   然后仍然不复制。
+
+3. traversal 全部结束后：
+   遍历 tiny table；
+   按 reserve order 读取每个 tiny object 当前已经 patch 完的内容；
+   memcpy 到 staging buffer；
+   如果下一个对象放不下，就 forced NT flush 当前 staging buffer；
+   reset staging buffer，继续处理 tiny table。
+
+4. tiny table 结束后：
+   flush 最后一个 tail。
+```
+
+这样做的好处：
+
+```text
+1. tiny table 保证 old 目标地址顺序。
+2. staging buffer 负责把多个 tiny object 合并成大块连续 bytes。
+3. full flush 基本接近 staging buffer 大小。
+4. 每次 GC 只有最后一个 tail flush 可能明显不满。
+5. 不再需要原来的“chunk 小于 4KB 就 direct copy”的分支。
+```
+
+需要注意一个细节：
+
+```text
+因为 object 不能被切开，
+所以每次 full flush 不一定刚好等于 8KB。
+它通常是“加入下一个 object 会超过 8KB，所以先 flush 当前 buffer”。
+因此每个 full flush 最多会浪费不到一个 tiny object 的空间，通常小于 64B。
+这可以接受。
+```
+
+这和当前旧代码的区别：
+
+当前旧代码里有：
+
+```text
+if chunk_bytes >= GIYSB_TINY_STAGING_MIN_BYTES:
+  staging
+else:
+  direct copy
+```
+
+导师新原则下应该改成：
+
+```text
+所有 tiny 都 staging。
+staging buffer 满了就 forced NT flush。
+最后 tail 也 forced NT flush。
+```
+
+也就是说：
+
+```text
+不要再使用 GIYSB_TINY_STAGING_MIN_BYTES 作为 direct-copy fallback 条件。
+```
+
+是否需要“重新计算 tiny table”：
+
+```text
+不需要重新计算 tiny table。
+tiny table 是本轮 GC 的 reserve-order list。
+flush 时只需要维护当前 table index。
+例如 chunk_start / i 或者直接一个 cursor。
+flush 一个 staging buffer 后，继续从下一个 tiny table entry 处理即可。
+```
+
+真正需要 reset 的是：
+
+```text
+staging buffer used bytes；
+staging destination start；
+staging expected destination。
+```
+
+tiny table 本身应该等整轮 flush 完后再 reset。
+
+核心伪代码：
+
+```text
+staging_reset()
+
+for entry in tiny_table:
+  src_hdr, nbytes = decode(entry)
+
+  if staging_used == 0:
+    staging_dst = current_dst
+
+  if staging_used + nbytes > staging_capacity:
+    forced_nt_flush(staging_dst, staging_buffer, staging_used)
+    staging_reset()
+    staging_dst = current_dst
+
+  memcpy(staging_buffer + staging_used, src_hdr, nbytes)
+  staging_used += nbytes
+  current_dst += nbytes
+
+if staging_used > 0:
+  forced_nt_flush(staging_dst, staging_buffer, staging_used)
+
+tiny_table_reset()
+```
+
+还必须保证：
+
+```text
+staging flush 到 old 时调用 forced NT copy，
+不能再调用会因为 <=256B 而 fallback 到 memcpy 的 giy_copy_live_object()。
+```
+
+最大的风险仍然是：
+
+```text
+tiny table overflow。
+```
+
+因为不能在 traversal 中途提前 flush tiny table：
+
+```text
+有些 tiny object 可能还没有被扫描和 patch。
+提前复制会复制旧 references。
+```
+
+所以 tiny table 必须足够大，或者 overflow 直接作为实验失败记录，而不是偷偷 fallback。
+
+一句话结论：
+
+```text
+保留 tiny table，然后在最终 flush 阶段把 tiny objects 按 reserve order 连续塞进 staging buffer；
+buffer 满就 forced NT flush，最后只剩一个 tail flush。
+这是比当前 adaptive direct-copy 版本更符合导师原则的方案。
+```
+
+## 2026-05-23：能否一边记录 tiny table，一边达到阈值就立刻 flush
+
+用户提出：
+
+```text
+不需要完整全部记录完再批量复制。
+可以直接记录下来，一旦到了一定大小就立刻 flush。
+这样是否可以控制 tiny table 的大小？
+```
+
+当前判断：
+
+```text
+这个想法有价值，但不能在“reserve/发现对象”的时刻直接 flush。
+原因是对象内容可能还没有被扫描和 patch。
+```
+
+为什么不能在 reserve-time 达到阈值就 flush：
+
+```text
+copy_for_minor() 只是第一次发现对象 live。
+此时它只 reserve old 地址、设置 forwarding pointer、push 到 GC stack。
+对象内部的 child references 还没有扫描，也还没有从 young pointer 改成 old forwarding pointer。
+
+如果此时把对象 bytes flush 到 old，就可能把旧的 young references 复制到 old。
+这是 correctness 问题。
+```
+
+所以：
+
+```text
+reserve-time 只能记录，不能安全 materialize。
+```
+
+什么时候可以提前 flush：
+
+```text
+只有当 tiny object 已经被 scavenge 完，也就是内部 references 已经 patch 完之后，才能把它复制到 staging 并 flush 到 old。
+```
+
+但是这里又有第二个问题：
+
+```text
+为了把 staging buffer 一整块 NT store 到 old，
+flush 顺序必须和 old 目标地址顺序一致。
+old 目标地址顺序等于 reserve order。
+```
+
+当前 GiY 是 LIFO，所以：
+
+```text
+reserve order 不一定等于 scavenge/materialization order。
+```
+
+因此可以做的安全版本是：
+
+```text
+ready-prefix flushing
+```
+
+设计如下：
+
+1. reserve tiny object 时：
+
+```text
+记录 tiny table entry：
+  src_hdr
+  dst_hdr
+  nbytes
+  ready = false
+```
+
+2. 对象 scavenge 完、准备 copy 时：
+
+```text
+找到它对应的 tiny table entry；
+标记 ready = true。
+```
+
+3. 维护一个全局 cursor：
+
+```text
+tiny_flush_cursor
+```
+
+它指向 tiny table 中还没有 flush 的第一个 entry。
+
+4. 每次有对象变成 ready 后，尝试从 cursor 开始 flush：
+
+```text
+while tiny_table[cursor].ready:
+  把这个对象 memcpy 到 staging buffer
+  如果 staging buffer 满：
+    forced NT flush
+  cursor++
+```
+
+5. 如果遇到第一个 not-ready entry：
+
+```text
+停止。
+不能跳过它 flush 后面的对象。
+否则 old 目标地址顺序会错。
+```
+
+这样做的好处：
+
+```text
+1. 不必等整轮 GC 结束才开始 flush。
+2. 如果 reserve order 前缀很快 ready，就可以提前释放一部分 table 压力。
+3. staging buffer 满了就 flush，最后仍然只有一个 tail flush。
+```
+
+但是它不能完全保证 tiny table 很小：
+
+```text
+如果 tiny table 的第一个 entry 很晚才 ready，
+后面即使很多 entries 都 ready，也不能先 flush。
+因为不能打乱 old 目标地址顺序。
+```
+
+简单例子：
+
+```text
+reserve order: A, B, C, D
+scavenge ready order: D, C, B, A
+```
+
+在 A ready 之前：
+
+```text
+B/C/D 虽然 ready，也不能 flush。
+因为 old 区顺序必须是 A,B,C,D。
+```
+
+所以：
+
+```text
+ready-prefix flushing 可以降低平均 table 压力，
+但无法给 tiny table 大小一个严格上界。
+```
+
+如果真的想让 tiny table 很小，有三个选择：
+
+1. 改 traversal 为 FIFO / reserve-order materialization：
+
+```text
+让 reserve order 接近 materialization order。
+这样就可以用小 ring buffer + staging buffer。
+但这会明显改变 GiY 当前 LIFO traversal 行为。
+```
+
+2. 只对 pointer-free tiny object 立即 staging：
+
+```text
+因为 pointer-free object 不需要等待 child reference patch。
+但需要非常可靠的类型判断。
+```
+
+3. 允许 overflow fallback：
+
+```text
+tiny table 满时 direct NT copy。
+但这违反导师“tiny 一律 staging”的严格原则。
+```
+
+当前最合理的折中方案：
+
+```text
+保留 tiny table。
+新增 ready bit / ready flag。
+实现 ready-prefix flushing。
+staging buffer 满了就 forced NT flush。
+GC 结束时 flush 剩余 ready prefix；理论上此时所有 tiny 都应该 ready。
+```
+
+需要 profile 的指标：
+
+```text
+max tiny table live entries
+max unflushed tiny entries
+ready-prefix flush count
+blocked-by-not-ready count
+staging full flush count
+tail flush count
+average flush bytes
+```
+
+一句话结论：
+
+```text
+“记录到一定大小就立刻 flush”只有在这些 entries 已经 scavenge 完、并且形成 reserve-order 前缀时才安全。
+它可以降低平均 tiny table 压力，但在当前 LIFO GiY 中不能保证 tiny table 一定很小。
+```
+
+## 2026-05-23：tiny / large 分界点的当前判断
+
+用户决定暂时继续使用当前大小的 tiny table，并询问 tiny 和 large 的分界点应该是多少。
+
+当前建议：
+
+```text
+先保持 GIYSB_TINY_OBJECT_MAX_BYTES = 64B。
+这里的 64B 指 object footprint，也就是 ALIGN(object_header + payload)，不是 payload 本身。
+```
+
+原因：
+
+```text
+object_header 当前是 16B。
+所以 64B footprint 大约表示 payload <= 48B。
+```
+
+为什么不建议一开始提高到 128B 或 256B：
+
+```text
+1. 之前 staging 版即使只处理 <=64B tiny object，GC 仍然明显变慢。
+2. 阈值变大后，更多对象进入 staging，会增加 young->staging 的 memcpy 字节数。
+3. 阈值变大后，staging buffer full flush 次数会增加，table 记录的总字节也会增加。
+4. 对 128B/256B 对象来说，二次搬运成本更明显；如果收益不够，退化会更严重。
+5. 当前目标是先验证导师的 two-class 原则，而不是一开始扩大搜索空间。
+```
+
+为什么也不建议低于 64B：
+
+```text
+1. cache line 是 64B。
+2. 64B 是一个自然边界：一个 tiny object footprint 最多约一个 cache line。
+3. 如果阈值降到 32B，能进入 staging 的对象太少，可能很难形成稳定的 8KB staging flush。
+```
+
+因此当前最合理的 baseline：
+
+```text
+tiny:  footprint <= 64B
+large: footprint > 64B
+```
+
+需要注意：
+
+```text
+按照导师新原则，large 会 direct NT copy。
+这意味着 72B、80B、128B 这种对象也会走 direct NT，而不是 memcpy。
+这可能不一定快。
+但为了保持 two-class 策略纯粹，第一版可以先这样实现并测量。
+```
+
+后续如果要做参数 sweep，推荐顺序：
+
+```text
+64B -> 128B -> 256B
+```
+
+判断标准：
+
+```text
+1. GC overhead / scavenge 是否下降；
+2. staging full flush 平均大小是否接近 8KB；
+3. tail flush 是否很多；
+4. tiny table 是否 overflow；
+5. large direct NT 是否在 65B~256B 对象上造成明显损失。
+```
+
+如果 64B 仍然慢：
+
+```text
+不应该马上扩大到 128B。
+更可能应该先证明 overhead 来自哪里：
+  - table append/decode；
+  - young->staging memcpy；
+  - forced NT tail；
+  - large small-object direct NT。
+```
+
+一句话结论：
+
+```text
+当前最稳妥的 tiny/large 分界点是 64B footprint。
+这是保守 baseline；之后可以实验 128B/256B，但不建议一开始就扩大。
+```

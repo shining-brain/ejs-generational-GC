@@ -62,8 +62,8 @@
 #define is_normal_boolean_object(x) (((0 || is_ptag((x), T_GENERIC)) && (0 || is_htag((x), HTAG_BOXED_BOOLEAN))))
 
 #define is_object(x) (((0) && (0)) || is_ptag((x), T_GENERIC))
-#define is_number(x) (((0) && (0)) || is_ptag((x), T_FIXNUM) || is_ptag((x), T_FLONUM))
-#define has_htag(x) (((0) && (0)) || is_ptag((x), T_STRING) || is_ptag((x), T_FLONUM) || is_ptag((x), T_GENERIC))
+#define is_number(x) (((0) && (0)) || is_ptag((x), T_FLONUM) || is_ptag((x), T_FIXNUM))
+#define has_htag(x) (((0) && (0)) || is_ptag((x), T_FLONUM) || is_ptag((x), T_STRING) || is_ptag((x), T_GENERIC))
 
 /* case label(s) for get_ptag_value_by_cell_type */
 #define CASE_LABELS_FOR_get_ptag_value_by_cell_type \

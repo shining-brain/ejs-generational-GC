@@ -18,7 +18,7 @@ TLsetlocal_array:
 TLsetlocal_iterator:
 TLsetlocal_boolean_object:
 TLsetlocal_function:
-{ // normal_builtin vmgen.newsynth.DecisionDiagram$Leaf@41d
+{ // normal_flonum vmgen.newsynth.DecisionDiagram$Leaf@54
 
   FunctionFrame *fr;
   int i;

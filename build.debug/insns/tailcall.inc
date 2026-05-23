@@ -17,9 +17,9 @@ case TV_FIXNUM:
 default:
 Ltailcall1:
 TLtailcall_special:
-TLtailcall_flonum:
 TLtailcall_array:
 TLtailcall_boolean_object:
+TLtailcall_flonum:
 TLtailcall_number_object:
 TLtailcall_regexp:
 TLtailcall_fixnum:
@@ -27,13 +27,13 @@ TLtailcall_simple_object:
 TLtailcall_string_object:
 TLtailcall_string:
 TLtailcall_iterator:
-{ // normal_special vmgen.newsynth.DecisionDiagram$Leaf@54
+{ // normal_iterator vmgen.newsynth.DecisionDiagram$Leaf@54
 
   LOG_EXIT("TAILCALL: not a function\n");
 }
 break;
 case TV_GENERIC:
-Ltailcall2:switch((unsigned int) get_htag(fn).v){ // vmgen.newsynth.DecisionDiagram$HTNode@173c(3)
+Ltailcall2:switch((unsigned int) get_htag(fn).v){ // vmgen.newsynth.DecisionDiagram$HTNode@41d(3)
 case HTAGV_SIMPLE_OBJECT:
 case 5:
 case 4:
@@ -76,7 +76,7 @@ TLtailcall_builtin:
   NEXT_INSN_INCPC();
 }
 break;
-}// vmgen.newsynth.DecisionDiagram$HTNode@173c
+}// vmgen.newsynth.DecisionDiagram$HTNode@41d
 break;
 } // vmgen.newsynth.DecisionDiagram$PTNode@550
 #undef fn

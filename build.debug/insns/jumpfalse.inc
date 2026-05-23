@@ -17,7 +17,7 @@ TLjumpfalse_fixnum:
 TLjumpfalse_boolean_object:
 TLjumpfalse_builtin:
 TLjumpfalse_array:
-{ // normal_builtin vmgen.newsynth.DecisionDiagram$Leaf@41d
+{ // normal_flonum vmgen.newsynth.DecisionDiagram$Leaf@54
 
 /*
    jumpfalse src disp

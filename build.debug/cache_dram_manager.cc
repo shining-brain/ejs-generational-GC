@@ -34,6 +34,10 @@ int in_minor_gc = 0;
 #define CACHE_SIZE_KB 512
 #endif
 
+#ifndef CHENEY_LOCAL_PADDING_BYTES
+#define CHENEY_LOCAL_PADDING_BYTES 0
+#endif
+
 // Performance profiling: GC breakdown
 long long total_scan_roots_time = 0;
 long long total_scan_rs_time = 0;
@@ -531,6 +535,11 @@ typedef struct CacheCheneyFTSlotSet {
 } CacheCheneyFTSlotSet;
 
 static CacheCheneyFTSlotSet cache_cheney_ft_slot_set = {NULL, 0, 0, false};
+static uintptr_t cache_cheney_local_padding_begin = 0;
+static size_t cache_cheney_local_padding_bytes = 0;
+static size_t cache_cheney_young_before_aux_bytes = 0;
+static size_t cache_cheney_ft_slot_bytes = 0;
+static size_t cache_cheney_aux_bytes = 0;
 
 static inline bool cache_cheney_ft_value_is_young(JSValue value) {
     if (is_fixnum(value) || is_special(value))
@@ -555,9 +564,13 @@ static void cache_cheney_bind_ft_slots_to_cache() {
     }
 
     size_t young_bytes = (size_t) (cache_space.end - cache_space.work_begin);
-    size_t ft_slot_bytes = (young_bytes / 8) & ~(sizeof(uintptr_t) - 1);
-    if (ft_slot_bytes < 4096 * sizeof(uintptr_t))
-        ft_slot_bytes = 4096 * sizeof(uintptr_t);
+    if (cache_cheney_young_before_aux_bytes == 0)
+        cache_cheney_young_before_aux_bytes = young_bytes;
+    size_t ft_slot_bytes = ALIGN((size_t) GC_FT_SLOT_SET_BYTES);
+    if (ft_slot_bytes == 0) {
+        printf("cache_cheney function table slot set size must be greater than zero\n");
+        exit(1);
+    }
     if (ft_slot_bytes >= young_bytes) {
         printf("cache_cheney function table slot set bind failed: not enough cache bytes (%zu)\n",
                young_bytes);
@@ -572,6 +585,40 @@ static void cache_cheney_bind_ft_slots_to_cache() {
     cache_cheney_ft_slot_set.count = 0;
     cache_cheney_ft_slot_set.capacity = ft_slot_bytes / sizeof(uintptr_t);
     cache_cheney_ft_slot_set.in_cache_space = true;
+    cache_cheney_ft_slot_bytes = ft_slot_bytes;
+    cache_cheney_aux_bytes += ft_slot_bytes;
+    printf("init_info: cache_cheney ft slot set bytes=%zuKB capacity=%zu\n",
+           ft_slot_bytes / 1024, cache_cheney_ft_slot_set.capacity);
+}
+
+static void cache_cheney_bind_local_padding_to_cache() {
+    size_t padding_bytes = ALIGN((size_t) CHENEY_LOCAL_PADDING_BYTES);
+    if (padding_bytes == 0)
+        return;
+
+    if (cache_space.work_begin == 0 || cache_space.end <= cache_space.work_begin) {
+        printf("cache_cheney local padding bind failed: invalid cache work area\n");
+        exit(1);
+    }
+
+    size_t young_bytes = (size_t) (cache_space.end - cache_space.work_begin);
+    if (cache_cheney_young_before_aux_bytes == 0)
+        cache_cheney_young_before_aux_bytes = young_bytes;
+    if (padding_bytes >= young_bytes) {
+        printf("cache_cheney local padding bind failed: not enough cache bytes (%zu)\n",
+               young_bytes);
+        exit(1);
+    }
+
+    uintptr_t padding_begin = cache_space.end - padding_bytes;
+    cache_space.end = padding_begin;
+    cache_space.total_size -= (int) padding_bytes;
+
+    cache_cheney_local_padding_begin = padding_begin;
+    cache_cheney_local_padding_bytes = padding_bytes;
+    cache_cheney_aux_bytes += padding_bytes;
+    printf("init_info: cache_cheney local padding bytes=%zuKB begin=%p\n",
+           padding_bytes / 1024, (void *) cache_cheney_local_padding_begin);
 }
 
 static void cache_cheney_ft_slot_set_add(uintptr_t raw_slot) {
@@ -1084,6 +1131,18 @@ static void print_gc_status(){
     } else if (generational_forward_count > 0) {
         printf("  Forward per GC:    N/A (no GC yet)\n");
     }
+
+#ifndef USE_GIY_MINOR
+    printf("\n=== GC Local Workspace ===\n");
+    printf("Young before aux:    %.2f KB\n",
+           cache_cheney_young_before_aux_bytes / 1024.0);
+    printf("Young after aux:     %.2f KB\n",
+           (cache_space.end - cache_space.work_begin) / 1024.0);
+    printf("Aux total:           %.2f KB (ft %.2f KB, padding %.2f KB)\n",
+           cache_cheney_aux_bytes / 1024.0,
+           cache_cheney_ft_slot_bytes / 1024.0,
+           cache_cheney_local_padding_bytes / 1024.0);
+#endif
     
     if (minor_gc_count > 0 && total_gc_core_ns > 0) {
         printf("\n=== GC Core Breakdown (Roots/RS/Traverse) ===\n");
@@ -1139,6 +1198,7 @@ extern "C" void space_free_dram_manager_init(){
     giy_bind_stack_to_cache();
 #else
     cache_cheney_bind_ft_slots_to_cache();
+    cache_cheney_bind_local_padding_to_cache();
 #endif
     init_finish = 1;
     printf("init_info: after init object alloc, cache_space.work_begin moved to %p\n",

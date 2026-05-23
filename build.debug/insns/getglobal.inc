@@ -12,9 +12,9 @@ default:
 case TV_GENERIC:
 Lgetglobal1:
 TLgetglobal_builtin:
-TLgetglobal_flonum:
-TLgetglobal_array:
 TLgetglobal_special:
+TLgetglobal_array:
+TLgetglobal_flonum:
 TLgetglobal_string_object:
 TLgetglobal_boolean_object:
 TLgetglobal_simple_object:
@@ -23,7 +23,7 @@ TLgetglobal_regexp:
 TLgetglobal_fixnum:
 TLgetglobal_number_object:
 TLgetglobal_function:
-{ // normal_boolean_object vmgen.newsynth.DecisionDiagram$Leaf@54
+{ // normal_regexp vmgen.newsynth.DecisionDiagram$Leaf@435
 
   LOG_EXIT("GETGLOBAL with non-stirng variable name\n");
 /* Local Variables:      */

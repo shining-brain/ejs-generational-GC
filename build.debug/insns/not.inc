@@ -13,26 +13,18 @@ TLnot_array:
 TLnot_boolean_object:
 TLnot_iterator:
 TLnot_function:
-TLnot_regexp:
 TLnot_number_object:
-{ // normal_number_object vmgen.newsynth.DecisionDiagram$Leaf@54
+TLnot_regexp:
+{ // normal_array vmgen.newsynth.DecisionDiagram$Leaf@54
 
   dst = JS_FALSE;
 }
 break;
-case TV_SPECIAL:
-Lnot2:
-TLnot_special:
-{ // normal_special vmgen.newsynth.DecisionDiagram$Leaf@dbb
-
-  dst = v1 == JS_TRUE ? JS_FALSE : JS_TRUE;
-}
-break;
 case TV_FIXNUM:
 default:
-Lnot3:
+Lnot2:
 TLnot_fixnum:
-{ // normal_fixnum vmgen.newsynth.DecisionDiagram$Leaf@118b
+{ // normal_fixnum vmgen.newsynth.DecisionDiagram$Leaf@dbb
 
   dst = true_false(v1 == FIXNUM_ZERO);
 }
@@ -41,11 +33,19 @@ case TV_STRING:
 case 3:
 case 2:
 case 1:
-Lnot4:
+Lnot3:
 TLnot_string:
-{ // normal_string vmgen.newsynth.DecisionDiagram$Leaf@1c49
+{ // normal_string vmgen.newsynth.DecisionDiagram$Leaf@118b
 
   dst = true_false(v1 == gconsts.g_string_empty);
+}
+break;
+case TV_SPECIAL:
+Lnot4:
+TLnot_special:
+{ // normal_special vmgen.newsynth.DecisionDiagram$Leaf@1c49
+
+  dst = v1 == JS_TRUE ? JS_FALSE : JS_TRUE;
 }
 break;
 case TV_FLONUM:

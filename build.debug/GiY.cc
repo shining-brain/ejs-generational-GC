@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #if defined(__x86_64__) || defined(__i386__)
-#include <emmintrin.h>
+#include <immintrin.h>
 #endif
 
 #include "prefix.h"
@@ -21,15 +21,17 @@ extern long long generational_forward_count;
 
 namespace {
 
-// LIFO stack that stores young payload pointers for minor traversal.
+// Worklist that stores young payload pointers for minor traversal.
 struct GiYGCStack {
   uintptr_t *items;
   size_t count;
+  size_t head;
+  size_t tail;
   size_t capacity;
   bool in_cache_space;
 };
 
-GiYGCStack g_gc_stack = {NULL, 0, 0, false};
+GiYGCStack g_gc_stack = {NULL, 0, 0, 0, 0, false};
 
 enum EdgePatchKind {
   EDGE_PATCH_JSVALUE_TAGGED,
@@ -94,12 +96,68 @@ static const unsigned int GIY_PROFILE_CELL_TYPES = 256;
 static const unsigned int GIY_PROFILE_EDGE_KINDS = 4;
 static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 
+#ifndef GIY_NT_COPY_BITS
+#define GIY_NT_COPY_BITS 128
+#endif
+
+#if GIY_NT_COPY_BITS != 128 && GIY_NT_COPY_BITS != 256
+#error "GIY_NT_COPY_BITS must be 128 or 256"
+#endif
+
 #ifndef GIY_PROFILE_DETAIL
 #define GIY_PROFILE_DETAIL 0
 #endif
 
+#ifndef GIY_RSET_READ_SLOT_AT_GC
+#define GIY_RSET_READ_SLOT_AT_GC 1
+#endif
+
+#ifndef GIY_GC_STACK_BYTES
+#define GIY_GC_STACK_BYTES (48 * 1024)
+#endif
+
+#ifndef GIY_LOCAL_PADDING_BYTES
+#define GIY_LOCAL_PADDING_BYTES 0
+#endif
+
 #ifndef GIY_AS_DRY_PROFILE
 #define GIY_AS_DRY_PROFILE 0
+#endif
+
+#ifndef USE_GIYSB
+#define USE_GIYSB 0
+#endif
+
+#ifndef GIYSB_TINY_BATCH
+#define GIYSB_TINY_BATCH 1
+#endif
+
+#ifndef GIYSB_STAGING_BYTES
+#define GIYSB_STAGING_BYTES (8 * 1024)
+#endif
+
+#ifndef GIYSB_SMALL_OBJECT_MAX_BYTES
+#define GIYSB_SMALL_OBJECT_MAX_BYTES 256
+#endif
+
+#ifndef GIYSB_TINY_OBJECT_MAX_BYTES
+#define GIYSB_TINY_OBJECT_MAX_BYTES 64
+#endif
+
+#ifndef GIYSB_TINY_TABLE_BYTES
+#define GIYSB_TINY_TABLE_BYTES (16 * 1024)
+#endif
+
+#ifndef GIYSB_TINY_STAGING_MIN_BYTES
+#define GIYSB_TINY_STAGING_MIN_BYTES (4 * 1024)
+#endif
+
+#ifndef GIYSB_SMALL_OLD_RATIO
+#define GIYSB_SMALL_OLD_RATIO 50
+#endif
+
+#ifndef GIYSB_PROFILE
+#define GIYSB_PROFILE 0
 #endif
 
 #ifndef GIY_AS_UPDATE
@@ -108,6 +166,46 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 
 #ifndef GIY_AS_FT_ADVANCE
 #define GIY_AS_FT_ADVANCE 1
+#endif
+
+#ifndef GIY_JSOBJECT_PRECISE_SCAN
+#define GIY_JSOBJECT_PRECISE_SCAN 0
+#endif
+
+#ifndef GIY_JSOBJECT_PRECISE_ARRAY
+#define GIY_JSOBJECT_PRECISE_ARRAY 1
+#endif
+
+#ifndef GIY_JSOBJECT_SHAPE_ONLY_SCAN
+#define GIY_JSOBJECT_SHAPE_ONLY_SCAN 0
+#endif
+
+#ifndef GIY_JSOBJECT_TYPE_AWARE_SCAN
+#define GIY_JSOBJECT_TYPE_AWARE_SCAN 0
+#endif
+
+#ifndef GIY_JSOBJECT_TYPE_AWARE_ARRAY
+#define GIY_JSOBJECT_TYPE_AWARE_ARRAY 0
+#endif
+
+#ifndef GIY_JSOBJECT_TYPE_AWARE_BOXED_PRIMITIVE
+#define GIY_JSOBJECT_TYPE_AWARE_BOXED_PRIMITIVE 0
+#endif
+
+#ifndef GIY_JSOBJECT_ARRAY_FAST_PATH
+#define GIY_JSOBJECT_ARRAY_FAST_PATH 0
+#endif
+
+#ifndef GIY_JSOBJECT_ARRAY_SKIP_SIZE
+#define GIY_JSOBJECT_ARRAY_SKIP_SIZE 0
+#endif
+
+#ifndef GIY_JSOBJECT_PRECISE_MIN_SLOTS
+#define GIY_JSOBJECT_PRECISE_MIN_SLOTS 0
+#endif
+
+#ifndef GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES
+#define GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES 0
 #endif
 
 #ifndef GIYOL_BATCH_BYTES
@@ -120,6 +218,10 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 
 #ifndef GIYOL_INLINE_COPY_ENTRIES
 #define GIYOL_INLINE_COPY_ENTRIES 64
+#endif
+
+#ifndef GIYOL_WORKSPACE_BATCH_ENTRIES
+#define GIYOL_WORKSPACE_BATCH_ENTRIES 4096
 #endif
 
 #ifndef GIYOL_ADAPTIVE_BATCH
@@ -135,11 +237,11 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 #endif
 
 #ifndef GIYOL_TINY_STAGING_BYTES
-#define GIYOL_TINY_STAGING_BYTES 4096
+#define GIYOL_TINY_STAGING_BYTES (5 * 1024)
 #endif
 
 #ifndef GIYOL_TINY_FLUSH_BYTES
-#define GIYOL_TINY_FLUSH_BYTES 4096
+#define GIYOL_TINY_FLUSH_BYTES (4 * 1024)
 #endif
 
 #ifndef GIYOL_TINY_MAX_OBJECT_BYTES
@@ -169,7 +271,9 @@ struct GiYOLCopyBatch {
   size_t count;
   size_t capacity;
   size_t bytes;
+#if !GIYOL_STAGING_COPY
   GiYOLCopyEntry inline_items[GIYOL_INLINE_COPY_ENTRIES];
+#endif
 };
 
 #if defined(USE_GIYOL) && GIYOL_ADAPTIVE_BATCH
@@ -179,8 +283,9 @@ static bool giyol_batch_next_traversal = false;
 #if defined(USE_GIYOL) && GIYOL_STAGING_COPY
 static unsigned char *giyol_staging_buffer = NULL;
 static size_t giyol_staging_capacity = 0;
-static GiYOLCopyBatch giyol_reserve_order_batch;
+static GiYOLCopyBatch *giyol_reserve_order_batch = NULL;
 static bool giyol_reserve_order_batch_active = false;
+static bool giyol_reserve_order_batch_overflow = false;
 #endif
 
 struct GiYProfile {
@@ -255,9 +360,33 @@ struct GiYProfile {
   unsigned long long as_shape_advance_attempts;
   unsigned long long as_shape_advance_changed;
 
+  unsigned long long jsobject_scans;
+  unsigned long long jsobject_precise_scans;
+  unsigned long long jsobject_type_aware_scans;
+  unsigned long long jsobject_precise_fallbacks;
+  unsigned long long jsobject_conservative_scans;
+  unsigned long long jsobject_conservative_slots;
+  unsigned long long jsobject_precise_slots;
+  unsigned long long jsobject_type_aware_slots;
+  unsigned long long jsobject_skipped_slots;
+  unsigned long long jsobject_shape_edges;
+  unsigned long long jsobject_shape_layout_young;
+  unsigned long long jsobject_pm_layout_young;
+  unsigned long long jsobject_extension_arrays;
+  unsigned long long jsobject_extension_slots;
+  unsigned long long jsobject_layout_cache_hits;
+  unsigned long long jsobject_layout_cache_misses;
+  unsigned long long jsobject_layout_cache_invalid;
+
   size_t aux_stack_bytes;
   size_t aux_edge_bytes;
   size_t aux_ft_slot_bytes;
+  size_t aux_jsobject_layout_cache_bytes;
+  size_t aux_giysb_staging_bytes;
+  size_t aux_giysb_tiny_table_bytes;
+  size_t aux_giyol_staging_bytes;
+  size_t aux_giyol_batch_bytes;
+  size_t aux_padding_bytes;
   size_t aux_total_bytes;
   size_t young_bytes_before_aux;
   size_t young_bytes_after_aux;
@@ -265,6 +394,59 @@ struct GiYProfile {
 
 GiYProfile giy_profile = {};
 unsigned int giy_profile_current_cell_type = GIY_PROFILE_CELL_TYPES;
+
+struct GiYJSObjectLayoutCacheEntry {
+  Shape *shape;
+  unsigned int epoch;
+  unsigned int n_special_props;
+  unsigned int actual_embedded;
+  unsigned int extension_slots;
+};
+
+static GiYJSObjectLayoutCacheEntry *g_jsobject_layout_cache = NULL;
+static size_t g_jsobject_layout_cache_capacity = 0;
+static unsigned int g_jsobject_layout_cache_epoch = 1;
+
+#if USE_GIYSB
+struct GiYSBOldSpace {
+  bool initialized;
+  uintptr_t small_begin;
+  uintptr_t small_free;
+  uintptr_t small_end;
+  uintptr_t large_begin;
+  uintptr_t large_free;
+  uintptr_t large_end;
+};
+
+struct GiYSBProfile {
+  unsigned long long tiny_reserved_objects;
+  unsigned long long tiny_reserved_bytes;
+  unsigned long long tiny_overflow_objects;
+  unsigned long long tiny_overflow_bytes;
+  unsigned long long large_reserved_objects;
+  unsigned long long large_reserved_bytes;
+  unsigned long long staged_objects;
+  unsigned long long staged_bytes;
+  unsigned long long staging_flushes;
+  unsigned long long staging_full_flushes;
+  unsigned long long staging_tail_flushes;
+  unsigned long long direct_tiny_objects;
+  unsigned long long direct_tiny_bytes;
+  unsigned long long max_tiny_table_entries_per_gc;
+};
+
+static GiYSBOldSpace g_giysb_old = {};
+static GiYSBProfile g_giysb_profile = {};
+static unsigned char *g_giysb_staging_buffer = NULL;
+static uint32_t *g_giysb_tiny_table = NULL;
+static size_t g_giysb_staging_capacity = 0;
+static size_t g_giysb_tiny_table_capacity = 0;
+static size_t g_giysb_tiny_table_count = 0;
+static size_t g_giysb_staging_used = 0;
+static uintptr_t g_giysb_staging_dst = 0;
+static uintptr_t g_giysb_staging_expected = 0;
+static uintptr_t g_giysb_tiny_batch_begin = 0;
+#endif
 
 bool g_old_guard_checked = false;
 bool g_old_guard_enabled = false;
@@ -283,6 +465,180 @@ static inline bool in_young_space(uintptr_t ptr) {
 
 static inline bool in_init_space(uintptr_t ptr) {
 	return ptr >= cache_space.begin && ptr < cache_space.work_begin;
+}
+
+#if USE_GIYSB
+static inline size_t giysb_align_down(size_t bytes) {
+  return bytes & ~(sizeof(uintptr_t) - 1);
+}
+
+static void giysb_ensure_old_space() {
+  if (g_giysb_old.initialized)
+    return;
+  if (dram_space.begin == 0 || dram_space.total_size == 0) {
+    printf("GiYSB old-space split failed: DRAM space is not initialized\n");
+    exit(1);
+  }
+  if (GIYSB_SMALL_OLD_RATIO <= 0 || GIYSB_SMALL_OLD_RATIO >= 100) {
+    printf("GiYSB small old ratio must be between 1 and 99 (current=%d)\n",
+           GIYSB_SMALL_OLD_RATIO);
+    exit(1);
+  }
+
+  size_t small_bytes =
+    giysb_align_down((dram_space.total_size * (size_t) GIYSB_SMALL_OLD_RATIO) / 100);
+  if (small_bytes == 0 || small_bytes >= dram_space.total_size) {
+    printf("GiYSB old-space split failed: small_bytes=%zu total=%zu\n",
+           small_bytes, dram_space.total_size);
+    exit(1);
+  }
+
+  g_giysb_old.small_begin = dram_space.begin;
+  g_giysb_old.small_free = g_giysb_old.small_begin;
+  g_giysb_old.small_end = g_giysb_old.small_begin + small_bytes;
+  g_giysb_old.large_begin = g_giysb_old.small_end;
+  g_giysb_old.large_free = g_giysb_old.large_begin;
+  g_giysb_old.large_end = dram_space.end;
+  g_giysb_old.initialized = true;
+  dram_space.available_bytes =
+    (size_t) (g_giysb_old.small_end - g_giysb_old.small_free) +
+    (size_t) (g_giysb_old.large_end - g_giysb_old.large_free);
+  dram_space.free = g_giysb_old.large_free;
+
+  printf("init_info: GiYSB old split small=%zuKB large=%zuKB ratio=%d%%\n",
+         (size_t) (g_giysb_old.small_end - g_giysb_old.small_begin) / 1024,
+         (size_t) (g_giysb_old.large_end - g_giysb_old.large_begin) / 1024,
+         GIYSB_SMALL_OLD_RATIO);
+}
+
+static inline void giysb_refresh_dram_available() {
+  dram_space.available_bytes =
+    (size_t) (g_giysb_old.small_end - g_giysb_old.small_free) +
+    (size_t) (g_giysb_old.large_end - g_giysb_old.large_free);
+  dram_space.free = g_giysb_old.large_free;
+}
+
+static inline void giysb_tiny_table_reset() {
+  g_giysb_tiny_table_count = 0;
+  g_giysb_tiny_batch_begin = 0;
+}
+
+static bool giysb_tiny_table_append(uintptr_t payload_ptr,
+                                    size_t align_bytes,
+                                    object_header *dest_hdr) {
+  if (g_giysb_tiny_table == NULL ||
+      g_giysb_tiny_table_count >= g_giysb_tiny_table_capacity)
+    return false;
+  if (payload_ptr < cache_space.work_begin)
+    return false;
+
+  uintptr_t offset = payload_ptr - cache_space.work_begin;
+  if ((offset & (sizeof(uintptr_t) - 1)) != 0)
+    return false;
+  size_t offset_units = offset / sizeof(uintptr_t);
+  size_t size_class = align_bytes / sizeof(uintptr_t);
+  if (size_class == 0 || size_class > 15 || (offset_units >> 28) != 0)
+    return false;
+
+  if (g_giysb_tiny_table_count == 0)
+    g_giysb_tiny_batch_begin = (uintptr_t) dest_hdr;
+
+  g_giysb_tiny_table[g_giysb_tiny_table_count++] =
+    (uint32_t) ((offset_units << 4) | size_class);
+#if GIYSB_PROFILE
+  if (g_giysb_tiny_table_count >
+      g_giysb_profile.max_tiny_table_entries_per_gc) {
+    g_giysb_profile.max_tiny_table_entries_per_gc =
+      g_giysb_tiny_table_count;
+  }
+#endif
+  return true;
+}
+
+static object_header *giysb_reserve_old_object(uintptr_t payload_ptr,
+                                               size_t align_bytes,
+                                               bool *deferred_tiny) {
+  giysb_ensure_old_space();
+  *deferred_tiny = false;
+
+#if GIYSB_TINY_BATCH
+  if (align_bytes <= (size_t) GIYSB_TINY_OBJECT_MAX_BYTES &&
+      g_giysb_old.small_free + align_bytes <= g_giysb_old.small_end &&
+      g_giysb_tiny_table != NULL &&
+      g_giysb_tiny_table_count < g_giysb_tiny_table_capacity) {
+    object_header *dest_hdr = (object_header *) g_giysb_old.small_free;
+    if (!giysb_tiny_table_append(payload_ptr, align_bytes, dest_hdr))
+      goto reserve_large;
+    g_giysb_old.small_free += align_bytes;
+    giysb_refresh_dram_available();
+    *deferred_tiny = true;
+#if GIYSB_PROFILE
+    g_giysb_profile.tiny_reserved_objects++;
+    g_giysb_profile.tiny_reserved_bytes += align_bytes;
+#endif
+    return dest_hdr;
+  }
+#else
+  if (align_bytes <= (size_t) GIYSB_SMALL_OBJECT_MAX_BYTES &&
+      g_giysb_old.small_free + align_bytes <= g_giysb_old.small_end) {
+    object_header *dest_hdr = (object_header *) g_giysb_old.small_free;
+    g_giysb_old.small_free += align_bytes;
+    giysb_refresh_dram_available();
+#if GIYSB_PROFILE
+    g_giysb_profile.tiny_reserved_objects++;
+    g_giysb_profile.tiny_reserved_bytes += align_bytes;
+#endif
+    return dest_hdr;
+  }
+#endif
+
+reserve_large:
+  if (g_giysb_old.large_free + align_bytes <= g_giysb_old.large_end) {
+    object_header *dest_hdr = (object_header *) g_giysb_old.large_free;
+    g_giysb_old.large_free += align_bytes;
+    giysb_refresh_dram_available();
+#if GIYSB_PROFILE
+    if (align_bytes <= (size_t) GIYSB_TINY_OBJECT_MAX_BYTES) {
+      g_giysb_profile.tiny_overflow_objects++;
+      g_giysb_profile.tiny_overflow_bytes += align_bytes;
+    } else {
+      g_giysb_profile.large_reserved_objects++;
+      g_giysb_profile.large_reserved_bytes += align_bytes;
+    }
+#endif
+    return dest_hdr;
+  }
+
+  printf("DRAM space full in GiYSB reserve (%zu bytes)\n", align_bytes);
+  exit(1);
+}
+
+static inline bool giysb_is_tiny_destination(const void *dst, size_t nbytes) {
+  uintptr_t ptr = (uintptr_t) dst;
+  return nbytes <= (size_t) GIYSB_TINY_OBJECT_MAX_BYTES &&
+         g_giysb_old.initialized &&
+         ptr >= g_giysb_old.small_begin &&
+         ptr + nbytes <= g_giysb_old.small_end;
+}
+#endif
+
+static bool giy_payload_has_type_for_scan(const void *value, cell_type_t type) {
+  uintptr_t ptr = (uintptr_t) value;
+  if (ptr == 0 || (ptr & (sizeof(uintptr_t) - 1)) != 0)
+    return false;
+  if (!in_young_space(ptr) && !in_dram_space(ptr) && !in_init_space(ptr))
+    return false;
+
+  object_header *hdr = (object_header *) ptr - 1;
+  return hdr->type == type;
+}
+
+static inline bool giy_scan_valid_shape(Shape *shape) {
+  return giy_payload_has_type_for_scan(shape, CELLT_SHAPE);
+}
+
+static inline bool giy_scan_valid_property_map(PropertyMap *pm) {
+  return giy_payload_has_type_for_scan(pm, CELLT_PROPERTY_MAP);
 }
 
 static const char *giy_profile_cell_type_name(unsigned int type) {
@@ -532,6 +888,18 @@ static void giy_old_guard_protect_old_write(void *addr, size_t len) {
   giy_old_guard_set_range(addr, len, PROT_NONE);
 }
 
+static void giy_old_guard_allow_old_read(void *addr, size_t len) {
+  if (!g_old_guard_active)
+    return;
+  giy_old_guard_set_range(addr, len, PROT_READ);
+}
+
+static void giy_old_guard_protect_old_read(void *addr, size_t len) {
+  if (!g_old_guard_active)
+    return;
+  giy_old_guard_set_range(addr, len, PROT_NONE);
+}
+
 template<typename Tracer>
 static inline void giy_process_edge(JSValue &v) {
   Tracer::process_edge(v);
@@ -624,6 +992,24 @@ static inline void giy_store_jsvalue_slot(JSValue *slot, JSValue value, bool slo
   *slot = value;
 }
 
+static inline void *giy_load_ptr_slot(void **slot, bool slot_in_dram) {
+  if (slot_in_dram)
+    giy_old_guard_allow_old_read(slot, sizeof(*slot));
+  void *value = *slot;
+  if (slot_in_dram)
+    giy_old_guard_protect_old_read(slot, sizeof(*slot));
+  return value;
+}
+
+static inline JSValue giy_load_jsvalue_slot(JSValue *slot, bool slot_in_dram) {
+  if (slot_in_dram)
+    giy_old_guard_allow_old_read(slot, sizeof(*slot));
+  JSValue value = *slot;
+  if (slot_in_dram)
+    giy_old_guard_protect_old_read(slot, sizeof(*slot));
+  return value;
+}
+
 static inline void giy_finish_local_nt_stores(bool *used_nt_store) {
 #if defined(__x86_64__) || defined(__i386__)
   if (*used_nt_store)
@@ -633,41 +1019,159 @@ static inline void giy_finish_local_nt_stores(bool *used_nt_store) {
 }
 
 static void giy_bind_stack_to_cache_impl() {
+#if USE_GIYSB && GIYSB_TINY_BATCH
   if (g_gc_stack.in_cache_space && g_edge_log.in_cache_space &&
-      g_ft_slot_set.in_cache_space)
+      g_ft_slot_set.in_cache_space && g_giysb_staging_buffer != NULL &&
+      g_giysb_tiny_table != NULL
+#if GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES > 0
+      && g_jsobject_layout_cache != NULL
+#endif
+      )
     return;
+#elif defined(USE_GIYOL) && GIYOL_STAGING_COPY
+  if (g_gc_stack.in_cache_space && g_edge_log.in_cache_space &&
+      g_ft_slot_set.in_cache_space && giyol_reserve_order_batch_active &&
+      giyol_reserve_order_batch != NULL && giyol_staging_buffer != NULL
+#if GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES > 0
+      && g_jsobject_layout_cache != NULL
+#endif
+      )
+    return;
+#else
+  if (g_gc_stack.in_cache_space && g_edge_log.in_cache_space &&
+      g_ft_slot_set.in_cache_space
+#if GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES > 0
+      && g_jsobject_layout_cache != NULL
+#endif
+      )
+    return;
+#endif
 
   if (cache_space.work_begin == 0 || cache_space.end <= cache_space.work_begin) {
     printf("GiY stack bind failed: invalid cache work area\n");
     exit(1);
   }
 
-  // Reserve a small fixed fraction of young area for GC auxiliaries.
+  // Reserve GC Local Workspace from the young-side cache budget.
   size_t young_bytes = (size_t) (cache_space.end - cache_space.work_begin);
+#if GIY_GC_STACK_BYTES > 0
+  size_t stack_bytes = ALIGN((size_t) GIY_GC_STACK_BYTES);
+#else
   size_t stack_bytes = (young_bytes / 8) & ~(sizeof(uintptr_t) - 1);
+#endif
   size_t edge_bytes = 0;
-  size_t ft_slot_bytes = (young_bytes / 64) & ~(sizeof(uintptr_t) - 1);
+  size_t ft_slot_bytes = ALIGN((size_t) GC_FT_SLOT_SET_BYTES);
+#if GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES > 0
+  size_t jsobject_layout_cache_entries =
+    (size_t) GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES;
+  size_t jsobject_layout_cache_bytes =
+    ALIGN(jsobject_layout_cache_entries *
+          sizeof(GiYJSObjectLayoutCacheEntry));
+#else
+  size_t jsobject_layout_cache_entries = 0;
+  size_t jsobject_layout_cache_bytes = 0;
+#endif
+#if defined(USE_GIYOL) && GIYOL_STAGING_COPY
+  size_t giyol_staging_bytes =
+    ALIGN((size_t) GIYOL_TINY_STAGING_BYTES);
+  size_t giyol_batch_entries = (size_t) GIYOL_WORKSPACE_BATCH_ENTRIES;
+  size_t giyol_batch_header_bytes = ALIGN(sizeof(GiYOLCopyBatch));
+  size_t giyol_batch_item_bytes =
+    ALIGN(giyol_batch_entries * sizeof(GiYOLCopyEntry));
+  size_t giyol_batch_bytes =
+    giyol_batch_header_bytes + giyol_batch_item_bytes;
+#else
+  size_t giyol_staging_bytes = 0;
+  size_t giyol_batch_bytes = 0;
+#endif
+#if USE_GIYSB && GIYSB_TINY_BATCH
+  size_t giysb_staging_bytes = ALIGN((size_t) GIYSB_STAGING_BYTES);
+  size_t giysb_tiny_table_bytes = ALIGN((size_t) GIYSB_TINY_TABLE_BYTES);
+#else
+  size_t giysb_staging_bytes = 0;
+  size_t giysb_tiny_table_bytes = 0;
+#endif
+  size_t padding_bytes = ALIGN((size_t) GIY_LOCAL_PADDING_BYTES);
   if (stack_bytes < 1024 * sizeof(uintptr_t))
     stack_bytes = 1024 * sizeof(uintptr_t);
-  if (ft_slot_bytes < 4096 * sizeof(uintptr_t))
-    ft_slot_bytes = 4096 * sizeof(uintptr_t);
+  if (ft_slot_bytes == 0) {
+    printf("GiY FT slot set size must be greater than zero\n");
+    exit(1);
+  }
+#if defined(USE_GIYOL) && GIYOL_STAGING_COPY
+  if (giyol_batch_entries == 0) {
+    printf("GiYOL workspace batch entries must be greater than zero\n");
+    exit(1);
+  }
+  if (giyol_staging_bytes < (size_t) GIYOL_TINY_FLUSH_BYTES) {
+    printf("GiYOL staging workspace too small (%zu < flush %zu)\n",
+           giyol_staging_bytes, (size_t) GIYOL_TINY_FLUSH_BYTES);
+    exit(1);
+  }
+#endif
+#if USE_GIYSB && GIYSB_TINY_BATCH
+  if (giysb_staging_bytes < (size_t) GIYSB_TINY_OBJECT_MAX_BYTES) {
+    printf("GiYSB staging workspace too small (%zu < tiny object max %zu)\n",
+           giysb_staging_bytes, (size_t) GIYSB_TINY_OBJECT_MAX_BYTES);
+    exit(1);
+  }
+  if (giysb_tiny_table_bytes < sizeof(uint32_t)) {
+    printf("GiYSB tiny table workspace too small (%zu)\n",
+           giysb_tiny_table_bytes);
+    exit(1);
+  }
+#endif
 
-  size_t reserve_total = stack_bytes + edge_bytes + ft_slot_bytes;
+  size_t reserve_total = stack_bytes + edge_bytes + ft_slot_bytes +
+                         jsobject_layout_cache_bytes +
+                         giysb_staging_bytes + giysb_tiny_table_bytes +
+                         giyol_staging_bytes + giyol_batch_bytes +
+                         padding_bytes;
   if (reserve_total >= young_bytes) {
     printf("GiY aux bind failed: not enough cache bytes (%zu)\n", young_bytes);
     exit(1);
   }
 
-  uintptr_t ft_slot_begin = cache_space.end - ft_slot_bytes;
-  uintptr_t edge_begin = ft_slot_begin - edge_bytes;
-  uintptr_t stack_begin = edge_begin - stack_bytes;
-  cache_space.end = stack_begin;
+  uintptr_t cursor = cache_space.end;
+  cursor -= ft_slot_bytes;
+  uintptr_t ft_slot_begin = cursor;
+  cursor -= edge_bytes;
+  uintptr_t edge_begin = cursor;
+  (void) edge_begin;
+  cursor -= stack_bytes;
+  uintptr_t stack_begin = cursor;
+#if GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES > 0
+  cursor -= jsobject_layout_cache_bytes;
+  uintptr_t jsobject_layout_cache_begin = cursor;
+#endif
+#if USE_GIYSB && GIYSB_TINY_BATCH
+  cursor -= giysb_staging_bytes;
+  uintptr_t giysb_staging_begin = cursor;
+  cursor -= giysb_tiny_table_bytes;
+  uintptr_t giysb_tiny_table_begin = cursor;
+#endif
+#if defined(USE_GIYOL) && GIYOL_STAGING_COPY
+  cursor -= giyol_staging_bytes;
+  uintptr_t giyol_staging_begin = cursor;
+  cursor -= giyol_batch_header_bytes;
+  uintptr_t giyol_batch_header_begin = cursor;
+  cursor -= giyol_batch_item_bytes;
+  uintptr_t giyol_batch_items_begin = cursor;
+#endif
+  cursor -= padding_bytes;
+  cache_space.end = cursor;
   cache_space.total_size -= (int) reserve_total;
 
   g_gc_stack.items = (uintptr_t *) stack_begin;
   g_gc_stack.count = 0;
+  g_gc_stack.head = 0;
+  g_gc_stack.tail = 0;
   g_gc_stack.capacity = stack_bytes / sizeof(uintptr_t);
   g_gc_stack.in_cache_space = true;
+  printf("init_info: giy gc stack bytes=%zuKB capacity=%zu mode=%s\n",
+         stack_bytes / 1024,
+         g_gc_stack.capacity,
+         GIY_GC_STACK_BYTES > 0 ? "fixed" : "young/8");
 
   g_edge_log.items = NULL;
   g_edge_log.count = 0;
@@ -678,10 +1182,73 @@ static void giy_bind_stack_to_cache_impl() {
   g_ft_slot_set.count = 0;
   g_ft_slot_set.capacity = ft_slot_bytes / sizeof(uintptr_t);
   g_ft_slot_set.in_cache_space = true;
+  printf("init_info: giy ft slot set bytes=%zuKB capacity=%zu\n",
+         ft_slot_bytes / 1024, g_ft_slot_set.capacity);
+
+#if GIY_JSOBJECT_LAYOUT_CACHE_ENTRIES > 0
+  g_jsobject_layout_cache =
+    (GiYJSObjectLayoutCacheEntry *) jsobject_layout_cache_begin;
+  g_jsobject_layout_cache_capacity = jsobject_layout_cache_entries;
+  g_jsobject_layout_cache_epoch = 1;
+  memset(g_jsobject_layout_cache, 0, jsobject_layout_cache_bytes);
+#else
+  (void) jsobject_layout_cache_entries;
+#endif
+
+#if defined(USE_GIYOL) && GIYOL_STAGING_COPY
+  giyol_staging_buffer = (unsigned char *) giyol_staging_begin;
+  giyol_staging_capacity = giyol_staging_bytes;
+  giyol_reserve_order_batch = (GiYOLCopyBatch *) giyol_batch_header_begin;
+  giyol_reserve_order_batch->items =
+    (GiYOLCopyEntry *) giyol_batch_items_begin;
+  giyol_reserve_order_batch->count = 0;
+  giyol_reserve_order_batch->capacity = giyol_batch_entries;
+  giyol_reserve_order_batch->bytes = 0;
+  giyol_reserve_order_batch_active = true;
+  giyol_reserve_order_batch_overflow = false;
+#endif
+
+#if USE_GIYSB && GIYSB_TINY_BATCH
+  g_giysb_staging_buffer = (unsigned char *) giysb_staging_begin;
+  g_giysb_tiny_table = (uint32_t *) giysb_tiny_table_begin;
+  g_giysb_staging_capacity = giysb_staging_bytes;
+  g_giysb_tiny_table_capacity = giysb_tiny_table_bytes / sizeof(uint32_t);
+  g_giysb_tiny_table_count = 0;
+  g_giysb_staging_used = 0;
+  g_giysb_staging_dst = 0;
+  g_giysb_staging_expected = 0;
+  g_giysb_tiny_batch_begin = 0;
+  printf("init_info: GiYSB staging bytes=%zuKB tiny_table=%zuKB tiny_capacity=%zu tiny_max=%zu tiny_stage_min=%zuKB old_small_ratio=%d%% worklist=LIFO\n",
+         giysb_staging_bytes / 1024,
+         giysb_tiny_table_bytes / 1024,
+         g_giysb_tiny_table_capacity,
+         (size_t) GIYSB_TINY_OBJECT_MAX_BYTES,
+         (size_t) GIYSB_TINY_STAGING_MIN_BYTES / 1024,
+         GIYSB_SMALL_OLD_RATIO);
+#elif USE_GIYSB
+  g_giysb_staging_buffer = NULL;
+  g_giysb_tiny_table = NULL;
+  g_giysb_staging_capacity = 0;
+  g_giysb_tiny_table_capacity = 0;
+  g_giysb_tiny_table_count = 0;
+  g_giysb_staging_used = 0;
+  g_giysb_staging_dst = 0;
+  g_giysb_staging_expected = 0;
+  g_giysb_tiny_batch_begin = 0;
+  printf("init_info: GiYSB place-only tiny_batch=0 small_max=%zu old_small_ratio=%d%% worklist=LIFO\n",
+         (size_t) GIYSB_SMALL_OBJECT_MAX_BYTES,
+         GIYSB_SMALL_OLD_RATIO);
+#endif
 
   giy_profile.aux_stack_bytes = stack_bytes;
   giy_profile.aux_edge_bytes = edge_bytes;
   giy_profile.aux_ft_slot_bytes = ft_slot_bytes;
+  giy_profile.aux_jsobject_layout_cache_bytes = jsobject_layout_cache_bytes;
+  giy_profile.aux_giysb_staging_bytes = giysb_staging_bytes;
+  giy_profile.aux_giysb_tiny_table_bytes = giysb_tiny_table_bytes;
+  giy_profile.aux_giyol_staging_bytes = giyol_staging_bytes;
+  giy_profile.aux_giyol_batch_bytes = giyol_batch_bytes;
+  giy_profile.aux_padding_bytes = padding_bytes;
   giy_profile.aux_total_bytes = reserve_total;
   giy_profile.young_bytes_before_aux = young_bytes;
   giy_profile.young_bytes_after_aux =
@@ -698,6 +1265,21 @@ static void ensure_gc_stack_capacity() {
 
 static inline void gc_stack_reset() {
   g_gc_stack.count = 0;
+  g_gc_stack.head = 0;
+  g_gc_stack.tail = 0;
+}
+
+static inline void giy_jsobject_layout_cache_begin_minor_gc() {
+  if (g_jsobject_layout_cache == NULL || g_jsobject_layout_cache_capacity == 0)
+    return;
+
+  g_jsobject_layout_cache_epoch++;
+  if (g_jsobject_layout_cache_epoch == 0) {
+    memset(g_jsobject_layout_cache, 0,
+           g_jsobject_layout_cache_capacity *
+             sizeof(GiYJSObjectLayoutCacheEntry));
+    g_jsobject_layout_cache_epoch = 1;
+  }
 }
 
 static inline void gc_stack_push(uintptr_t payload_ptr) {
@@ -923,7 +1505,9 @@ static PropertyMap *giy_materialize_property_map(PropertyMap *pm) {
 static bool giy_cell_type_has_jsobject_shape(cell_type_t type) {
   switch (type) {
   case CELLT_SIMPLE_OBJECT:
+#if !(GIY_JSOBJECT_PRECISE_SCAN && !GIY_JSOBJECT_PRECISE_ARRAY)
   case CELLT_ARRAY:
+#endif
   case CELLT_FUNCTION:
   case CELLT_BUILTIN:
   case CELLT_BOXED_NUMBER:
@@ -1111,6 +1695,21 @@ static void giy_advance_function_table_alloc_sites(Context *) {}
 #endif
 
 template<typename Tracer>
+static void giy_scan_jsobject_conservative_body(JSObject *p, size_t slots) {
+  giy_profile.jsobject_conservative_slots += slots;
+  for (size_t i = 0; i < slots; i++)
+    Tracer::process_edge(p->eprop[i]);
+}
+
+static size_t giy_jsobject_eprop_slots(JSObject *p) {
+  object_header *hdr = ((object_header *) p) - 1;
+  size_t eprop_offset = offsetof(JSObject, eprop);
+  if ((size_t) hdr->size <= eprop_offset)
+    return 0;
+  return ((size_t) hdr->size - eprop_offset) / sizeof(JSValue);
+}
+
+template<typename Tracer>
 static void giy_scan_jsobject_conservative(JSObject *p) {
 #if GIY_AS_DRY_PROFILE && defined(ALLOC_SITE_CACHE)
   Shape *dry_shape = p->shape;
@@ -1126,23 +1725,452 @@ static void giy_scan_jsobject_conservative(JSObject *p) {
   }
 #endif
 
+  giy_profile.jsobject_scans++;
+  giy_profile.jsobject_conservative_scans++;
+  giy_profile.jsobject_shape_edges++;
   giy_process_edge<Tracer>(p->shape);
-
-  object_header *hdr = ((object_header *) p) - 1;
-  size_t eprop_offset = offsetof(JSObject, eprop);
-  if ((size_t) hdr->size <= eprop_offset)
-    return;
-
-  size_t slots = ((size_t) hdr->size - eprop_offset) / sizeof(JSValue);
-  for (size_t i = 0; i < slots; i++)
-    Tracer::process_edge(p->eprop[i]);
+  giy_scan_jsobject_conservative_body<Tracer>(p, giy_jsobject_eprop_slots(p));
 }
 
 template<typename Tracer>
-static void giy_process_young_node(cell_type_t type, uintptr_t ptr) {
+static void giy_scan_jsarray_skip_size(JSObject *p) {
+  giy_profile.jsobject_scans++;
+  giy_profile.jsobject_type_aware_scans++;
+  giy_profile.jsobject_shape_edges++;
+  giy_process_edge<Tracer>(p->shape);
+
+  size_t slots = giy_jsobject_eprop_slots(p);
+  size_t visited_slots = 0;
+  for (size_t i = array_body_index; i < slots; i++) {
+    Tracer::process_edge(p->eprop[i]);
+    visited_slots++;
+  }
+
+  giy_profile.jsobject_type_aware_slots += visited_slots;
+  if (slots > visited_slots)
+    giy_profile.jsobject_skipped_slots += slots - visited_slots;
+}
+
+#if GIY_JSOBJECT_TYPE_AWARE_SCAN
+static size_t giy_jsobject_static_special_props(cell_type_t type) {
   switch (type) {
-  case CELLT_SIMPLE_OBJECT:
   case CELLT_ARRAY:
+#if GIY_JSOBJECT_TYPE_AWARE_ARRAY
+    return ARRAY_SPECIAL_PROPS;
+#else
+    return 0;
+#endif
+  case CELLT_FUNCTION:
+    return FUNCTION_SPECIAL_PROPS;
+  case CELLT_BUILTIN:
+    return BUILTIN_SPECIAL_PROPS;
+  case CELLT_BOXED_NUMBER:
+#if GIY_JSOBJECT_TYPE_AWARE_BOXED_PRIMITIVE
+    return NUMBER_SPECIAL_PROPS;
+#else
+    return 0;
+#endif
+  case CELLT_BOXED_STRING:
+#if GIY_JSOBJECT_TYPE_AWARE_BOXED_PRIMITIVE
+    return STRING_SPECIAL_PROPS;
+#else
+    return 0;
+#endif
+  case CELLT_BOXED_BOOLEAN:
+    return BOOLEAN_SPECIAL_PROPS;
+#ifdef USE_REGEXP
+  case CELLT_REGEXP:
+    return REX_SPECIAL_PROPS;
+#endif
+  default:
+    return 0;
+  }
+}
+
+template<typename Tracer>
+static size_t giy_scan_jsobject_static_special_slots(cell_type_t type,
+                                                    JSObject *p) {
+  switch (type) {
+#if GIY_JSOBJECT_TYPE_AWARE_ARRAY
+  case CELLT_ARRAY: {
+    JSValue *a_body = get_array_ptr_body(p);
+    if (a_body != NULL) {
+      size_t a_size = get_array_ptr_size(p);
+      size_t a_length = (size_t) number_to_double(get_array_ptr_length(p));
+      size_t len = a_length < a_size ? a_length : a_size;
+      Tracer::process_edge_ex_JSValue_array(p->eprop[array_body_index], len);
+      Tracer::process_edge(p->eprop[array_length_index]);
+      giy_profile.jsobject_extension_arrays++;
+      giy_profile.jsobject_extension_slots += len;
+      return 2;
+    }
+    return 0;
+  }
+#endif
+  case CELLT_FUNCTION:
+    Tracer::process_edge(p->eprop[function_environment_index]);
+    return 1;
+#if GIY_JSOBJECT_TYPE_AWARE_BOXED_PRIMITIVE
+  case CELLT_BOXED_NUMBER:
+    Tracer::process_edge(p->eprop[number_object_value_index]);
+    return 1;
+  case CELLT_BOXED_STRING:
+    Tracer::process_edge(p->eprop[string_object_value_index]);
+    return 1;
+#endif
+  default:
+    return 0;
+  }
+}
+
+template<typename Tracer>
+static void giy_scan_jsobject_type_aware(cell_type_t type, JSObject *p) {
+  giy_profile.jsobject_scans++;
+
+  size_t slots = giy_jsobject_eprop_slots(p);
+  size_t special_props = giy_jsobject_static_special_props(type);
+
+  giy_profile.jsobject_shape_edges++;
+  giy_process_edge<Tracer>(p->shape);
+
+  if (special_props == 0) {
+    giy_profile.jsobject_conservative_scans++;
+    giy_scan_jsobject_conservative_body<Tracer>(p, slots);
+    return;
+  }
+
+  if (special_props > slots) {
+    giy_profile.jsobject_precise_fallbacks++;
+    giy_profile.jsobject_conservative_scans++;
+    giy_scan_jsobject_conservative_body<Tracer>(p, slots);
+    return;
+  }
+
+  giy_profile.jsobject_type_aware_scans++;
+  size_t visited_slots =
+    giy_scan_jsobject_static_special_slots<Tracer>(type, p);
+  for (size_t i = special_props; i < slots; i++) {
+    Tracer::process_edge(p->eprop[i]);
+    visited_slots++;
+  }
+
+  giy_profile.jsobject_type_aware_slots += visited_slots;
+  if (slots > visited_slots)
+    giy_profile.jsobject_skipped_slots += slots - visited_slots;
+}
+#endif
+
+#if GIY_JSOBJECT_PRECISE_SCAN
+static size_t giy_jsobject_declared_special_props(cell_type_t type) {
+  switch (type) {
+  case CELLT_ARRAY:
+    return ARRAY_SPECIAL_PROPS;
+  case CELLT_FUNCTION:
+    return FUNCTION_SPECIAL_PROPS;
+  case CELLT_BUILTIN:
+    return BUILTIN_SPECIAL_PROPS;
+  case CELLT_BOXED_NUMBER:
+    return NUMBER_SPECIAL_PROPS;
+  case CELLT_BOXED_STRING:
+    return STRING_SPECIAL_PROPS;
+  case CELLT_BOXED_BOOLEAN:
+    return BOOLEAN_SPECIAL_PROPS;
+#ifdef USE_REGEXP
+  case CELLT_REGEXP:
+    return REX_SPECIAL_PROPS;
+#endif
+  default:
+    return 0;
+  }
+}
+
+static bool giy_jsobject_special_slots_ok(cell_type_t type, size_t slots) {
+  switch (type) {
+  case CELLT_ARRAY:
+    return ARRAY_SPECIAL_PROPS <= slots &&
+           array_body_index < slots &&
+           array_length_index < slots;
+  case CELLT_FUNCTION:
+    return FUNCTION_SPECIAL_PROPS <= slots &&
+           function_environment_index < slots;
+  case CELLT_BOXED_NUMBER:
+    return NUMBER_SPECIAL_PROPS <= slots &&
+           number_object_value_index < slots;
+  case CELLT_BOXED_STRING:
+    return STRING_SPECIAL_PROPS <= slots &&
+           string_object_value_index < slots;
+  case CELLT_BOXED_BOOLEAN:
+    return BOOLEAN_SPECIAL_PROPS <= slots &&
+           boolean_object_value_index < slots;
+  default:
+    return true;
+  }
+}
+
+static bool giy_jsobject_precise_layout(Shape *os,
+                                        PropertyMap *pm,
+                                        size_t slots,
+                                        size_t *actual_embedded,
+                                        size_t *extension_slots) {
+  if (os == NULL || pm == NULL)
+    return false;
+  if (!giy_scan_valid_shape(os) || !giy_scan_valid_property_map(pm))
+    return false;
+  if (os->n_embedded_slots == 0 || os->n_embedded_slots > slots)
+    return false;
+
+  int n_extension = os->n_extension_slots;
+  size_t embedded = os->n_embedded_slots -
+    (n_extension == 0 ? 0 : 1);
+  if (embedded > slots || pm->n_special_props > embedded)
+    return false;
+  if (n_extension != 0) {
+    if (embedded >= slots || pm->n_props < embedded)
+      return false;
+    *extension_slots = pm->n_props - embedded;
+  } else {
+    *extension_slots = 0;
+  }
+
+  *actual_embedded = embedded;
+  return true;
+}
+
+static bool giy_jsobject_layout_lookup(Shape *os,
+                                       size_t slots,
+                                       size_t *n_special_props,
+                                       size_t *actual_embedded,
+                                       size_t *extension_slots) {
+  if (os == NULL)
+    return false;
+
+  if (g_jsobject_layout_cache != NULL &&
+      g_jsobject_layout_cache_capacity > 0) {
+    size_t index =
+      (((uintptr_t) os) >> 4) % g_jsobject_layout_cache_capacity;
+    GiYJSObjectLayoutCacheEntry *entry =
+      &g_jsobject_layout_cache[index];
+    if (entry->epoch == g_jsobject_layout_cache_epoch &&
+        entry->shape == os) {
+      if (entry->actual_embedded <= slots &&
+          entry->n_special_props <= entry->actual_embedded &&
+          (entry->extension_slots == 0 ||
+           entry->actual_embedded < slots)) {
+        giy_profile.jsobject_layout_cache_hits++;
+        *n_special_props = entry->n_special_props;
+        *actual_embedded = entry->actual_embedded;
+        *extension_slots = entry->extension_slots;
+        return true;
+      }
+      giy_profile.jsobject_layout_cache_invalid++;
+      return false;
+    }
+    giy_profile.jsobject_layout_cache_misses++;
+  }
+
+  if (!giy_scan_valid_shape(os)) {
+    giy_profile.jsobject_layout_cache_invalid++;
+    return false;
+  }
+
+  PropertyMap *pm = os->pm;
+  if (pm != NULL && in_young_space((uintptr_t) pm))
+    giy_profile.jsobject_pm_layout_young++;
+
+  size_t embedded = 0;
+  size_t ext_slots = 0;
+  if (!giy_jsobject_precise_layout(os, pm, slots, &embedded, &ext_slots)) {
+    giy_profile.jsobject_layout_cache_invalid++;
+    return false;
+  }
+
+  size_t special = pm->n_special_props;
+  if (g_jsobject_layout_cache != NULL &&
+      g_jsobject_layout_cache_capacity > 0) {
+    if (special <= UINT_MAX &&
+        embedded <= UINT_MAX &&
+        ext_slots <= UINT_MAX) {
+      size_t index =
+        (((uintptr_t) os) >> 4) % g_jsobject_layout_cache_capacity;
+      GiYJSObjectLayoutCacheEntry *entry =
+        &g_jsobject_layout_cache[index];
+      entry->shape = os;
+      entry->epoch = g_jsobject_layout_cache_epoch;
+      entry->n_special_props = (unsigned int) special;
+      entry->actual_embedded = (unsigned int) embedded;
+      entry->extension_slots = (unsigned int) ext_slots;
+    }
+  }
+
+  *n_special_props = special;
+  *actual_embedded = embedded;
+  *extension_slots = ext_slots;
+  return true;
+}
+
+template<typename Tracer>
+static size_t giy_scan_jsobject_special_slots(cell_type_t type,
+                                             JSObject *p) {
+  switch (type) {
+  case CELLT_ARRAY: {
+    JSValue *a_body = get_array_ptr_body(p);
+    if (a_body != NULL) {
+      size_t a_size = get_array_ptr_size(p);
+      size_t a_length = (size_t) number_to_double(get_array_ptr_length(p));
+      size_t len = a_length < a_size ? a_length : a_size;
+      Tracer::process_edge_ex_JSValue_array(p->eprop[array_body_index], len);
+      Tracer::process_edge(p->eprop[array_length_index]);
+      giy_profile.jsobject_extension_arrays++;
+      giy_profile.jsobject_extension_slots += len;
+      return 2;
+    }
+    return 0;
+  }
+  case CELLT_FUNCTION:
+    Tracer::process_edge(p->eprop[function_environment_index]);
+    return 1;
+  case CELLT_BOXED_NUMBER:
+    Tracer::process_edge(p->eprop[number_object_value_index]);
+    return 1;
+  case CELLT_BOXED_STRING:
+    Tracer::process_edge(p->eprop[string_object_value_index]);
+    return 1;
+  case CELLT_BOXED_BOOLEAN:
+    Tracer::process_edge(p->eprop[boolean_object_value_index]);
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+template<typename Tracer>
+static void giy_scan_jsobject_precise(cell_type_t type, JSObject *p) {
+  giy_profile.jsobject_scans++;
+
+  size_t slots = giy_jsobject_eprop_slots(p);
+  Shape *layout_shape = p->shape;
+  if (layout_shape != NULL && in_young_space((uintptr_t) layout_shape))
+    giy_profile.jsobject_shape_layout_young++;
+
+  giy_profile.jsobject_shape_edges++;
+  giy_process_edge<Tracer>(p->shape);
+
+  if (slots < (size_t) GIY_JSOBJECT_PRECISE_MIN_SLOTS) {
+    giy_profile.jsobject_conservative_scans++;
+    giy_scan_jsobject_conservative_body<Tracer>(p, slots);
+    return;
+  }
+
+  size_t n_special_props = 0;
+  size_t actual_embedded = 0;
+  size_t extension_slots = 0;
+#if GIY_JSOBJECT_SHAPE_ONLY_SCAN
+  if (!giy_jsobject_special_slots_ok(type, slots) ||
+      layout_shape == NULL ||
+      !giy_scan_valid_shape(layout_shape) ||
+      layout_shape->n_embedded_slots == 0 ||
+      layout_shape->n_embedded_slots > slots ||
+      layout_shape->n_extension_slots != 0) {
+    giy_profile.jsobject_precise_fallbacks++;
+    giy_profile.jsobject_conservative_scans++;
+    giy_scan_jsobject_conservative_body<Tracer>(p, slots);
+    return;
+  }
+  n_special_props = giy_jsobject_declared_special_props(type);
+  actual_embedded = layout_shape->n_embedded_slots;
+  extension_slots = 0;
+  if (n_special_props > actual_embedded) {
+    giy_profile.jsobject_precise_fallbacks++;
+    giy_profile.jsobject_conservative_scans++;
+    giy_scan_jsobject_conservative_body<Tracer>(p, slots);
+    return;
+  }
+#else
+  if (!giy_jsobject_special_slots_ok(type, slots) ||
+      !giy_jsobject_layout_lookup(layout_shape, slots,
+                                   &n_special_props,
+                                   &actual_embedded, &extension_slots)) {
+    giy_profile.jsobject_precise_fallbacks++;
+    giy_profile.jsobject_conservative_scans++;
+    giy_scan_jsobject_conservative_body<Tracer>(p, slots);
+    return;
+  }
+#endif
+
+  giy_profile.jsobject_precise_scans++;
+
+  size_t visited_slots = giy_scan_jsobject_special_slots<Tracer>(type, p);
+  for (size_t i = n_special_props; i < actual_embedded; i++) {
+    Tracer::process_edge(p->eprop[i]);
+    visited_slots++;
+  }
+
+  if (extension_slots != 0) {
+    Tracer::process_edge_ex_JSValue_array(p->eprop[actual_embedded],
+                                          extension_slots);
+    giy_profile.jsobject_extension_arrays++;
+    giy_profile.jsobject_extension_slots += extension_slots;
+    visited_slots++;
+  }
+
+  giy_profile.jsobject_precise_slots += visited_slots;
+  if (slots > visited_slots)
+    giy_profile.jsobject_skipped_slots += slots - visited_slots;
+}
+#endif
+
+template<typename Tracer>
+static void giy_process_young_node(cell_type_t type, uintptr_t ptr) {
+#if GIY_JSOBJECT_TYPE_AWARE_SCAN
+  switch (type) {
+  case CELLT_FUNCTION:
+  case CELLT_BUILTIN:
+  case CELLT_BOXED_BOOLEAN:
+#ifdef USE_REGEXP
+  case CELLT_REGEXP:
+#endif
+#if GIY_JSOBJECT_TYPE_AWARE_ARRAY
+  case CELLT_ARRAY:
+#endif
+#if GIY_JSOBJECT_TYPE_AWARE_BOXED_PRIMITIVE
+  case CELLT_BOXED_NUMBER:
+  case CELLT_BOXED_STRING:
+#endif
+    giy_scan_jsobject_type_aware<Tracer>(type, (JSObject *) ptr);
+    return;
+  case CELLT_SIMPLE_OBJECT:
+#if !GIY_JSOBJECT_TYPE_AWARE_ARRAY
+  case CELLT_ARRAY:
+#endif
+#if !GIY_JSOBJECT_TYPE_AWARE_BOXED_PRIMITIVE
+  case CELLT_BOXED_NUMBER:
+  case CELLT_BOXED_STRING:
+#endif
+    giy_scan_jsobject_conservative<Tracer>((JSObject *) ptr);
+    return;
+  default:
+    process_node<Tracer>(type, ptr);
+    return;
+  }
+#else
+#if GIY_JSOBJECT_ARRAY_FAST_PATH || \
+    (GIY_JSOBJECT_PRECISE_SCAN && !GIY_JSOBJECT_PRECISE_ARRAY)
+  if (__builtin_expect(type == CELLT_ARRAY, 1)) {
+    giy_scan_jsobject_conservative<Tracer>((JSObject *) ptr);
+    return;
+  }
+#endif
+  switch (type) {
+#if GIY_JSOBJECT_ARRAY_SKIP_SIZE
+  case CELLT_ARRAY:
+    giy_scan_jsarray_skip_size<Tracer>((JSObject *) ptr);
+    return;
+#endif
+  case CELLT_SIMPLE_OBJECT:
+#if !(GIY_JSOBJECT_ARRAY_SKIP_SIZE || GIY_JSOBJECT_ARRAY_FAST_PATH || \
+      (GIY_JSOBJECT_PRECISE_SCAN && !GIY_JSOBJECT_PRECISE_ARRAY))
+  case CELLT_ARRAY:
+#endif
   case CELLT_FUNCTION:
   case CELLT_BUILTIN:
   case CELLT_BOXED_NUMBER:
@@ -1151,12 +2179,19 @@ static void giy_process_young_node(cell_type_t type, uintptr_t ptr) {
 #ifdef USE_REGEXP
   case CELLT_REGEXP:
 #endif
+#if GIY_JSOBJECT_TYPE_AWARE_SCAN
+    giy_scan_jsobject_type_aware<Tracer>(type, (JSObject *) ptr);
+#elif GIY_JSOBJECT_PRECISE_SCAN
+    giy_scan_jsobject_precise<Tracer>(type, (JSObject *) ptr);
+#else
     giy_scan_jsobject_conservative<Tracer>((JSObject *) ptr);
+#endif
     return;
   default:
     process_node<Tracer>(type, ptr);
     return;
   }
+#endif
 }
 
 #if defined(USE_GIYOL) && GIYOL_STAGING_COPY
@@ -1173,6 +2208,14 @@ static uintptr_t copy_for_minor(uintptr_t payload_ptr) {
     return hdr->forwarding_pointer;
 
   int align_bytes = ALIGN(hdr->size + sizeof(object_header));
+#if USE_GIYSB
+  bool giysb_deferred_tiny = false;
+  object_header *dest_hdr =
+    giysb_reserve_old_object(payload_ptr,
+                             (size_t) align_bytes,
+                             &giysb_deferred_tiny);
+  (void) giysb_deferred_tiny;
+#else
   if (dram_space.available_bytes < (size_t) align_bytes) {
     printf("DRAM space full in copy_for_minor (%d bytes)\n", align_bytes);
     exit(1);
@@ -1181,6 +2224,7 @@ static uintptr_t copy_for_minor(uintptr_t payload_ptr) {
   object_header *dest_hdr = (object_header *) dram_space.free;
   dram_space.free += align_bytes;
   dram_space.available_bytes -= align_bytes;
+#endif
 
   hdr->forwarding_pointer = (uintptr_t) (dest_hdr + 1);
   gc_stack_push(payload_ptr);
@@ -1677,6 +2721,40 @@ static void giy_scan_remembered_set_slots() {
     if (!slot_in_dram && !slot_in_init)
       continue;
 
+#if GIY_RSET_READ_SLOT_AT_GC
+    if (is_ptr_slot) {
+      void **slot = (void **) slot_addr;
+      void *value = giy_load_ptr_slot(slot, slot_in_dram);
+      uintptr_t from = (uintptr_t) value;
+      if (!in_young_space(from))
+        continue;
+
+      giy_reserve_edge(value);
+      uintptr_t to = forwarded_or_self(from);
+      if (to != from) {
+        giy_store_ptr_slot(slot, (void *) to, slot_in_dram);
+        if (GIY_PROFILE_DETAIL)
+          giy_profile.rset_slots_patched++;
+      }
+    } else {
+      JSValue *slot = (JSValue *) slot_addr;
+      JSValue value = giy_load_jsvalue_slot(slot, slot_in_dram);
+      if (is_fixnum(value) || is_special(value))
+        continue;
+
+      uintptr_t from = (uintptr_t) clear_ptag(value);
+      if (!in_young_space(from))
+        continue;
+
+      giy_reserve_edge(value);
+      uintptr_t to = forwarded_or_self(from);
+      if (to != from) {
+        giy_store_jsvalue_slot(slot, put_ptag(to, get_ptag(value)), slot_in_dram);
+        if (GIY_PROFILE_DETAIL)
+          giy_profile.rset_slots_patched++;
+      }
+    }
+#else
     uintptr_t raw_value = remembered_set.values[i];
     if (raw_value == 0)
       continue;
@@ -1686,6 +2764,7 @@ static void giy_scan_remembered_set_slots() {
     } else {
       giy_reserve_edge((JSValue) raw_value);
     }
+#endif
   }
 }
 
@@ -1744,6 +2823,11 @@ static inline void giy_clear_function_table_slots() {
 }
 
 static void giy_patch_remembered_set_slots() {
+#if GIY_RSET_READ_SLOT_AT_GC
+  // In senior-style mode, the RSet scan already reads the current old slot,
+  // reserves the young target, and patches that slot immediately.
+  return;
+#else
   for (int i = 0; i < remembered_set.count; i++) {
     uintptr_t raw_slot = remembered_set.buffer[i];
     bool is_ptr_slot = (raw_slot & 1) != 0;
@@ -1780,6 +2864,7 @@ static void giy_patch_remembered_set_slots() {
       }
     }
   }
+#endif
 }
 
 static inline uintptr_t forwarded_or_self(uintptr_t ptr) {
@@ -1808,6 +2893,60 @@ static inline void giy_copy_live_object(void *dst,
   const unsigned char *s = (const unsigned char *) src;
   size_t n = nbytes;
 
+#if GIY_NT_COPY_BITS == 256 && defined(__AVX2__)
+  if ((((uintptr_t) d) & 7) != 0) {
+    memcpy(dst, src, nbytes);
+    giy_old_guard_protect_old_write(dst, nbytes);
+    return;
+  }
+
+  while ((((uintptr_t) d) & 31) != 0 && n >= 8) {
+    if ((((uintptr_t) d) & 15) == 0 && n >= 16 &&
+        (((uintptr_t) d) & 31) == 16) {
+      __m128i v = _mm_loadu_si128((const __m128i *) s);
+      _mm_stream_si128((__m128i *) d, v);
+      s += 16;
+      d += 16;
+      n -= 16;
+    } else {
+      uint64_t v;
+      memcpy(&v, s, sizeof(v));
+      _mm_stream_si64((long long *) d, (long long) v);
+      s += 8;
+      d += 8;
+      n -= 8;
+    }
+  }
+
+  while (n >= 32) {
+    __m256i v = _mm256_loadu_si256((const __m256i *) s);
+    _mm256_stream_si256((__m256i *) d, v);
+    s += 32;
+    d += 32;
+    n -= 32;
+  }
+
+  if (n >= 16) {
+    __m128i v = _mm_loadu_si128((const __m128i *) s);
+    _mm_stream_si128((__m128i *) d, v);
+    s += 16;
+    d += 16;
+    n -= 16;
+  }
+
+  if (n >= 8) {
+    uint64_t v;
+    memcpy(&v, s, sizeof(v));
+    _mm_stream_si64((long long *) d, (long long) v);
+    s += 8;
+    d += 8;
+    n -= 8;
+  }
+
+  if (n != 0) {
+    memcpy(d, s, n);
+  }
+#else
   if ((((uintptr_t) d) & 15) != 0) {
     if ((((uintptr_t) d) & 15) != 8 || n < 8) {
       printf("GiY NT copy alignment invariant failed (dst=%p, n=%zu)\n", (void *) d, n);
@@ -1836,8 +2975,9 @@ static inline void giy_copy_live_object(void *dst,
     }
     uint64_t v;
     memcpy(&v, s, sizeof(v));
-    _mm_stream_si64((long long *) d, (long long) v);
+      _mm_stream_si64((long long *) d, (long long) v);
   }
+#endif
 
   *used_nt_store = true;
   if (GIY_PROFILE_DETAIL) {
@@ -1853,6 +2993,190 @@ static inline void giy_copy_live_object(void *dst,
   memcpy(dst, src, nbytes);
   giy_old_guard_protect_old_write(dst, nbytes);
 }
+
+#if USE_GIYSB
+static inline void giysb_staging_reset() {
+  g_giysb_staging_used = 0;
+  g_giysb_staging_dst = 0;
+  g_giysb_staging_expected = 0;
+}
+
+static void giysb_flush_staging(bool *used_nt_store, bool full_flush) {
+  if (g_giysb_staging_used == 0)
+    return;
+
+  giy_copy_live_object((void *) g_giysb_staging_dst,
+                       (const void *) g_giysb_staging_buffer,
+                       g_giysb_staging_used,
+                       used_nt_store);
+#if GIYSB_PROFILE
+  g_giysb_profile.staging_flushes++;
+  if (full_flush)
+    g_giysb_profile.staging_full_flushes++;
+  else
+    g_giysb_profile.staging_tail_flushes++;
+#else
+  (void) full_flush;
+#endif
+  giysb_staging_reset();
+}
+
+static bool giysb_decode_tiny_entry(uint32_t entry,
+                                    object_header **src_hdr,
+                                    size_t *nbytes) {
+  size_t size_class = (size_t) (entry & 0xF);
+  *nbytes = size_class * sizeof(uintptr_t);
+  uintptr_t offset_units = (uintptr_t) (entry >> 4);
+  uintptr_t src_payload =
+    cache_space.work_begin + offset_units * sizeof(uintptr_t);
+  *src_hdr = (object_header *) src_payload - 1;
+
+  return *nbytes != 0 &&
+         *nbytes <= (size_t) GIYSB_TINY_OBJECT_MAX_BYTES &&
+         src_payload >= cache_space.work_begin &&
+         src_payload < cache_space.end;
+}
+
+static void giysb_copy_tiny_chunk_direct(size_t start,
+                                         size_t end,
+                                         uintptr_t dst_start,
+                                         bool *used_nt_store) {
+  uintptr_t dst_cursor = dst_start;
+  for (size_t i = start; i < end; i++) {
+    object_header *src_hdr = NULL;
+    size_t nbytes = 0;
+    if (!giysb_decode_tiny_entry(g_giysb_tiny_table[i],
+                                 &src_hdr,
+                                 &nbytes)) {
+      printf("GiYSB tiny table entry invariant failed\n");
+      exit(1);
+    }
+
+    giy_copy_live_object((void *) dst_cursor,
+                         (const void *) src_hdr,
+                         nbytes,
+                         used_nt_store);
+    dst_cursor += nbytes;
+#if GIYSB_PROFILE
+    g_giysb_profile.direct_tiny_objects++;
+    g_giysb_profile.direct_tiny_bytes += nbytes;
+#endif
+  }
+}
+
+static void giysb_stage_tiny_chunk(size_t start,
+                                   size_t end,
+                                   uintptr_t dst_start,
+                                   size_t chunk_bytes,
+                                   bool *used_nt_store,
+                                   bool full_flush) {
+  if (g_giysb_staging_buffer == NULL ||
+      chunk_bytes > g_giysb_staging_capacity) {
+    giysb_copy_tiny_chunk_direct(start, end, dst_start, used_nt_store);
+    return;
+  }
+
+  giysb_staging_reset();
+  uintptr_t dst_cursor = dst_start;
+  size_t off = 0;
+  for (size_t i = start; i < end; i++) {
+    object_header *src_hdr = NULL;
+    size_t nbytes = 0;
+    if (!giysb_decode_tiny_entry(g_giysb_tiny_table[i],
+                                 &src_hdr,
+                                 &nbytes)) {
+      printf("GiYSB tiny table entry invariant failed\n");
+      exit(1);
+    }
+
+    memcpy(g_giysb_staging_buffer + off, (const void *) src_hdr, nbytes);
+    off += nbytes;
+    dst_cursor += nbytes;
+#if GIYSB_PROFILE
+    g_giysb_profile.staged_objects++;
+    g_giysb_profile.staged_bytes += nbytes;
+#endif
+  }
+
+  g_giysb_staging_dst = dst_start;
+  g_giysb_staging_expected = dst_cursor;
+  g_giysb_staging_used = off;
+  giysb_flush_staging(used_nt_store, full_flush);
+}
+
+static void giysb_flush_tiny_chunk(size_t start,
+                                   size_t end,
+                                   uintptr_t dst_start,
+                                   size_t chunk_bytes,
+                                   bool *used_nt_store,
+                                   bool full_flush) {
+  if (chunk_bytes == 0 || start == end)
+    return;
+
+  if (chunk_bytes >= (size_t) GIYSB_TINY_STAGING_MIN_BYTES) {
+    giysb_stage_tiny_chunk(start,
+                           end,
+                           dst_start,
+                           chunk_bytes,
+                           used_nt_store,
+                           full_flush);
+  } else {
+    giysb_copy_tiny_chunk_direct(start, end, dst_start, used_nt_store);
+  }
+}
+
+static void giysb_flush_tiny_table(bool *used_nt_store) {
+  if (g_giysb_tiny_table_count == 0)
+    return;
+  if (g_giysb_tiny_batch_begin == 0) {
+    printf("GiYSB tiny flush invariant failed\n");
+    exit(1);
+  }
+
+  giysb_staging_reset();
+  size_t chunk_start = 0;
+  uintptr_t chunk_dst = g_giysb_tiny_batch_begin;
+  uintptr_t dst_cursor = g_giysb_tiny_batch_begin;
+  size_t chunk_bytes = 0;
+
+  for (size_t i = 0; i < g_giysb_tiny_table_count; i++) {
+    object_header *src_hdr = NULL;
+    size_t nbytes = 0;
+    if (!giysb_decode_tiny_entry(g_giysb_tiny_table[i],
+                                 &src_hdr,
+                                 &nbytes)) {
+      printf("GiYSB tiny table entry invariant failed\n");
+      exit(1);
+    }
+    (void) src_hdr;
+
+    if (g_giysb_staging_capacity != 0 &&
+        chunk_bytes != 0 &&
+        chunk_bytes + nbytes > g_giysb_staging_capacity) {
+      giysb_flush_tiny_chunk(chunk_start,
+                             i,
+                             chunk_dst,
+                             chunk_bytes,
+                             used_nt_store,
+                             true);
+      chunk_start = i;
+      chunk_dst = dst_cursor;
+      chunk_bytes = 0;
+    }
+
+    chunk_bytes += nbytes;
+    dst_cursor += nbytes;
+  }
+
+  giysb_flush_tiny_chunk(chunk_start,
+                         g_giysb_tiny_table_count,
+                         chunk_dst,
+                         chunk_bytes,
+                         used_nt_store,
+                         false);
+  giysb_tiny_table_reset();
+}
+#endif
 
 #if defined(USE_GIYOL)
 #if GIYOL_SORT_BATCH || GIYOL_STAGING_COPY
@@ -1876,16 +3200,24 @@ static inline void giyol_stream_copy_region(void *dst,
   unsigned char *d = (unsigned char *) dst;
   const unsigned char *s = (const unsigned char *) src;
   size_t n = nbytes;
+  bool streamed = false;
+
+  if ((((uintptr_t) d) & 7) != 0) {
+    memcpy(dst, src, nbytes);
+    giy_old_guard_protect_old_write(dst, nbytes);
+    return;
+  }
 
   if ((((uintptr_t) d) & 15) != 0) {
     if ((((uintptr_t) d) & 15) != 8 || n < 8) {
-      printf("GiYOL NT copy alignment invariant failed (dst=%p, n=%zu)\n",
-             (void *) d, n);
-      exit(1);
+      memcpy(dst, src, nbytes);
+      giy_old_guard_protect_old_write(dst, nbytes);
+      return;
     }
     uint64_t v;
     memcpy(&v, s, sizeof(v));
     _mm_stream_si64((long long *) d, (long long) v);
+    streamed = true;
     s += 8;
     d += 8;
     n -= 8;
@@ -1894,23 +3226,30 @@ static inline void giyol_stream_copy_region(void *dst,
   while (n >= 16) {
     __m128i v = _mm_loadu_si128((const __m128i *) s);
     _mm_stream_si128((__m128i *) d, v);
+    streamed = true;
     s += 16;
     d += 16;
     n -= 16;
   }
 
-  if (n != 0) {
-    if (n != 8) {
-      printf("GiYOL NT copy tail invariant failed (n=%zu)\n", n);
-      exit(1);
-    }
+  if (n >= 8) {
     uint64_t v;
     memcpy(&v, s, sizeof(v));
     _mm_stream_si64((long long *) d, (long long) v);
+    streamed = true;
+    s += 8;
+    d += 8;
+    n -= 8;
   }
 
-  *used_nt_store = true;
-  if (GIY_PROFILE_DETAIL) {
+  if (n != 0) {
+    memcpy(d, s, n);
+  }
+
+  if (streamed) {
+    *used_nt_store = true;
+  }
+  if (streamed && GIY_PROFILE_DETAIL) {
     giy_profile.nt_copy_objects++;
     giy_profile.nt_copy_bytes += nbytes;
   }
@@ -1936,14 +3275,14 @@ static inline void giyol_direct_nt_copy_live_object(void *dst,
   giy_profile.giyol_direct_nt_bytes += nbytes;
 }
 
+#if !GIYOL_STAGING_COPY
 static void giyol_copy_batch_init(GiYOLCopyBatch *batch) {
   batch->items = batch->inline_items;
-  batch->count = 0;
   batch->capacity = GIYOL_INLINE_COPY_ENTRIES;
+  batch->count = 0;
   batch->bytes = 0;
 }
 
-#if !GIYOL_STAGING_COPY
 static void giyol_copy_batch_destroy(GiYOLCopyBatch *batch) {
   if (batch->items != batch->inline_items)
     free(batch->items);
@@ -1954,10 +3293,13 @@ static void giyol_copy_batch_destroy(GiYOLCopyBatch *batch) {
 }
 #endif
 
-static void giyol_copy_batch_reserve_entry(GiYOLCopyBatch *batch) {
+static bool giyol_copy_batch_reserve_entry(GiYOLCopyBatch *batch) {
   if (batch->count < batch->capacity)
-    return;
+    return true;
 
+#if GIYOL_STAGING_COPY
+  return false;
+#else
   size_t new_capacity = batch->capacity == 0 ?
                         GIYOL_INLINE_COPY_ENTRIES : batch->capacity * 2;
   GiYOLCopyEntry *new_items;
@@ -1979,18 +3321,22 @@ static void giyol_copy_batch_reserve_entry(GiYOLCopyBatch *batch) {
   }
   batch->items = new_items;
   batch->capacity = new_capacity;
+  return true;
+#endif
 }
 
-static void giyol_copy_batch_append(GiYOLCopyBatch *batch,
+static bool giyol_copy_batch_append(GiYOLCopyBatch *batch,
                                     void *dst,
                                     const void *src,
                                     size_t nbytes) {
-  giyol_copy_batch_reserve_entry(batch);
+  if (!giyol_copy_batch_reserve_entry(batch))
+    return false;
   GiYOLCopyEntry *entry = &batch->items[batch->count++];
   entry->dst = dst;
   entry->src = src;
   entry->nbytes = nbytes;
   batch->bytes += nbytes;
+  return true;
 }
 
 static inline void giyol_copy_batch_reset(GiYOLCopyBatch *batch) {
@@ -2000,12 +3346,13 @@ static inline void giyol_copy_batch_reset(GiYOLCopyBatch *batch) {
 
 #if GIYOL_STAGING_COPY
 static void giyol_reserve_order_batch_begin() {
-  if (!giyol_reserve_order_batch_active) {
-    giyol_copy_batch_init(&giyol_reserve_order_batch);
-    giyol_reserve_order_batch_active = true;
+  if (!giyol_reserve_order_batch_active || giyol_reserve_order_batch == NULL) {
+    printf("GiYOL reserve-order batch is not bound to GC Local Workspace\n");
+    exit(1);
   }
-  giyol_reserve_order_batch.count = 0;
-  giyol_reserve_order_batch.bytes = 0;
+  giyol_reserve_order_batch->count = 0;
+  giyol_reserve_order_batch->bytes = 0;
+  giyol_reserve_order_batch_overflow = false;
 }
 
 static void giyol_reserve_order_log_append(void *dst,
@@ -2013,7 +3360,8 @@ static void giyol_reserve_order_log_append(void *dst,
                                            size_t nbytes) {
   if (!giyol_reserve_order_batch_active)
     giyol_reserve_order_batch_begin();
-  giyol_copy_batch_append(&giyol_reserve_order_batch, dst, src, nbytes);
+  if (!giyol_copy_batch_append(giyol_reserve_order_batch, dst, src, nbytes))
+    giyol_reserve_order_batch_overflow = true;
 }
 
 static void giyol_ensure_staging_capacity(size_t bytes) {
@@ -2022,21 +3370,9 @@ static void giyol_ensure_staging_capacity(size_t bytes) {
   if (giyol_staging_capacity >= bytes)
     return;
 
-  size_t new_capacity =
-    giyol_staging_capacity == 0 ? bytes : giyol_staging_capacity;
-  while (new_capacity < bytes)
-    new_capacity *= 2;
-
-  unsigned char *new_buffer =
-    (unsigned char *) realloc(giyol_staging_buffer, new_capacity);
-  if (new_buffer == NULL) {
-    printf("GiYOL staging buffer allocation failed (capacity=%zu)\n",
-           new_capacity);
-    exit(1);
-  }
-
-  giyol_staging_buffer = new_buffer;
-  giyol_staging_capacity = new_capacity;
+  printf("GiYOL staging buffer overflow (needed=%zu, capacity=%zu)\n",
+         bytes, giyol_staging_capacity);
+  exit(1);
 }
 
 static void giyol_flush_staging_chunk(GiYOLCopyEntry *items,
@@ -2382,7 +3718,7 @@ static void giyol_enqueue_copy(GiYOLCopyBatch *batch,
                               const void *src,
                               size_t nbytes,
                               bool *used_nt_store) {
-  giyol_copy_batch_append(batch, dst, src, nbytes);
+  (void) giyol_copy_batch_append(batch, dst, src, nbytes);
 
   if (!GIYOL_STAGING_COPY && batch->bytes >= (size_t) GIYOL_BATCH_BYTES)
     giyol_flush_copy_batch(batch, true, used_nt_store);
@@ -2425,12 +3761,22 @@ static void giy_traverse_stack_and_copy() {
 
 			object_header *dst_hdr = ((object_header *) dst_payload) - 1;
 
-#if defined(USE_GIYOL)
-    giyol_traversal_bytes += (size_t) align_bytes;
+#if USE_GIYSB && GIYSB_TINY_BATCH
+    if (giysb_is_tiny_destination((const void *) dst_hdr,
+                                   (size_t) align_bytes)) {
+      // Tiny objects are materialized after the LIFO traversal finishes.
+    } else {
+      giy_copy_live_object((void *) dst_hdr,
+                           (const void *) src_hdr,
+                           (size_t) align_bytes,
+                           &used_nt_store);
+    }
+#elif defined(USE_GIYOL)
+	    giyol_traversal_bytes += (size_t) align_bytes;
 #if GIYOL_STAGING_COPY
-    if (!giyol_use_batch ||
-        (GIYOL_TINY_STAGING &&
-         (size_t) align_bytes > (size_t) GIYOL_TINY_MAX_OBJECT_BYTES)) {
+	    if (!giyol_use_batch || giyol_reserve_order_batch_overflow ||
+	        (GIYOL_TINY_STAGING &&
+	         (size_t) align_bytes > (size_t) GIYOL_TINY_MAX_OBJECT_BYTES)) {
 #if GIYOL_DIRECT_NONTINY_NT
       giyol_direct_nt_copy_live_object((void *) dst_hdr,
                                        (const void *) src_hdr,
@@ -2474,10 +3820,10 @@ static void giy_traverse_stack_and_copy() {
 		}
 #if defined(USE_GIYOL)
 #if GIYOL_STAGING_COPY
-	  if (giyol_use_batch)
-	    giyol_flush_copy_batch(&giyol_reserve_order_batch, true, &used_nt_store);
+	  if (giyol_use_batch && !giyol_reserve_order_batch_overflow)
+	    giyol_flush_copy_batch(giyol_reserve_order_batch, true, &used_nt_store);
 	  else
-	    giyol_copy_batch_reset(&giyol_reserve_order_batch);
+	    giyol_copy_batch_reset(giyol_reserve_order_batch);
 #else
   if (giyol_use_batch)
     giyol_flush_copy_batch(&copy_batch,
@@ -2491,6 +3837,9 @@ static void giy_traverse_stack_and_copy() {
 #else
 	  (void) giyol_traversal_bytes;
 #endif
+#endif
+#if USE_GIYSB && GIYSB_TINY_BATCH
+  giysb_flush_tiny_table(&used_nt_store);
 #endif
   giy_finish_local_nt_stores(&used_nt_store);
 	  giy_profile_current_cell_type = GIY_PROFILE_CELL_TYPES;
@@ -2510,12 +3859,47 @@ void giy_print_profile() {
            giy_profile.young_bytes_before_aux / 1024.0);
     printf("Young after aux:     %.2f KB\n",
            giy_profile.young_bytes_after_aux / 1024.0);
-    printf("Aux total:           %.2f KB (stack %.2f KB, edge %.2f KB, ft %.2f KB)\n",
+    printf("Aux total:           %.2f KB (stack %.2f KB, edge %.2f KB, ft %.2f KB, jsobj layout %.2f KB, giysb staging %.2f KB, giysb tiny table %.2f KB, giyol staging %.2f KB, giyol batch %.2f KB, padding %.2f KB)\n",
            giy_profile.aux_total_bytes / 1024.0,
            giy_profile.aux_stack_bytes / 1024.0,
            giy_profile.aux_edge_bytes / 1024.0,
-           giy_profile.aux_ft_slot_bytes / 1024.0);
-    printf("Small memcpy limit:  %zu bytes\n", GIY_NT_COPY_MIN_BYTES);
+           giy_profile.aux_ft_slot_bytes / 1024.0,
+           giy_profile.aux_jsobject_layout_cache_bytes / 1024.0,
+           giy_profile.aux_giysb_staging_bytes / 1024.0,
+           giy_profile.aux_giysb_tiny_table_bytes / 1024.0,
+           giy_profile.aux_giyol_staging_bytes / 1024.0,
+           giy_profile.aux_giyol_batch_bytes / 1024.0,
+           giy_profile.aux_padding_bytes / 1024.0);
+	    printf("Small memcpy limit:  %zu bytes\n", GIY_NT_COPY_MIN_BYTES);
+	    printf("NT copy width:       %d bits\n", GIY_NT_COPY_BITS);
+#if USE_GIYSB
+    printf("GiYSB enabled:       1\n");
+    printf("GiYSB tiny batch:    %d\n", GIYSB_TINY_BATCH);
+    printf("GiYSB profile:       %d\n", GIYSB_PROFILE);
+    printf("GiYSB staging bytes: %zu\n", (size_t) GIYSB_STAGING_BYTES);
+    printf("GiYSB tiny table bytes:%zu\n", (size_t) GIYSB_TINY_TABLE_BYTES);
+    printf("GiYSB small max:     %zu\n", (size_t) GIYSB_SMALL_OBJECT_MAX_BYTES);
+    printf("GiYSB tiny max:      %zu\n", (size_t) GIYSB_TINY_OBJECT_MAX_BYTES);
+    printf("GiYSB tiny stage min:%zu\n", (size_t) GIYSB_TINY_STAGING_MIN_BYTES);
+    printf("GiYSB old small ratio:%d\n", GIYSB_SMALL_OLD_RATIO);
+#if GIYSB_PROFILE
+    printf("GiYSB tiny reserved:%llu objs, %.2f MB\n",
+           g_giysb_profile.tiny_reserved_objects,
+           g_giysb_profile.tiny_reserved_bytes / (1024.0 * 1024.0));
+    printf("GiYSB large reserved:%llu objs, %.2f MB\n",
+           g_giysb_profile.large_reserved_objects,
+           g_giysb_profile.large_reserved_bytes / (1024.0 * 1024.0));
+    printf("GiYSB staged tiny:   %llu objs, %.2f MB\n",
+           g_giysb_profile.staged_objects,
+           g_giysb_profile.staged_bytes / (1024.0 * 1024.0));
+    printf("GiYSB max tiny table:%llu entries\n",
+           g_giysb_profile.max_tiny_table_entries_per_gc);
+    printf("GiYSB staging flushes:%llu (full %llu, tail %llu)\n",
+           g_giysb_profile.staging_flushes,
+           g_giysb_profile.staging_full_flushes,
+           g_giysb_profile.staging_tail_flushes);
+#endif
+#endif
 #if defined(USE_GIYOL)
     printf("GiYOL batch bytes:   %zu\n", (size_t) GIYOL_BATCH_BYTES);
     printf("GiYOL NT batches:    %llu\n", giy_profile.giyol_batches);
@@ -2586,6 +3970,44 @@ void giy_print_profile() {
     printf("AS shape advance chg:   %llu\n",
            giy_profile.as_shape_advance_changed);
 #endif
+    printf("JSObject precise scan: %d\n", GIY_JSOBJECT_PRECISE_SCAN);
+    printf("JSObject precise array: %d\n", GIY_JSOBJECT_PRECISE_ARRAY);
+    printf("JSObject shape-only scan: %d\n", GIY_JSOBJECT_SHAPE_ONLY_SCAN);
+    printf("JSObject type-aware scan: %d\n", GIY_JSOBJECT_TYPE_AWARE_SCAN);
+    printf("JSObject array skip size: %d\n", GIY_JSOBJECT_ARRAY_SKIP_SIZE);
+    printf("JSObject scans:       %llu\n", giy_profile.jsobject_scans);
+    printf("JSObject precise:     %llu\n",
+           giy_profile.jsobject_precise_scans);
+    printf("JSObject type-aware:  %llu\n",
+           giy_profile.jsobject_type_aware_scans);
+    printf("JSObject fallbacks:   %llu\n",
+           giy_profile.jsobject_precise_fallbacks);
+    printf("JSObject conservative:%llu\n",
+           giy_profile.jsobject_conservative_scans);
+    printf("JSObject cons slots:  %llu\n",
+           giy_profile.jsobject_conservative_slots);
+    printf("JSObject precise slots:%llu\n",
+           giy_profile.jsobject_precise_slots);
+    printf("JSObject type-aware slots:%llu\n",
+           giy_profile.jsobject_type_aware_slots);
+    printf("JSObject skipped slots:%llu\n",
+           giy_profile.jsobject_skipped_slots);
+    printf("JSObject shape edges: %llu\n",
+           giy_profile.jsobject_shape_edges);
+    printf("JSObject young shapes:%llu\n",
+           giy_profile.jsobject_shape_layout_young);
+    printf("JSObject young PMs:   %llu\n",
+           giy_profile.jsobject_pm_layout_young);
+    printf("JSObject ext arrays:  %llu\n",
+           giy_profile.jsobject_extension_arrays);
+    printf("JSObject ext slots:   %llu\n",
+           giy_profile.jsobject_extension_slots);
+    printf("JSObject layout cache hits:%llu\n",
+           giy_profile.jsobject_layout_cache_hits);
+    printf("JSObject layout cache misses:%llu\n",
+           giy_profile.jsobject_layout_cache_misses);
+    printf("JSObject layout cache invalid:%llu\n",
+           giy_profile.jsobject_layout_cache_invalid);
     return;
   }
 
@@ -2594,13 +4016,20 @@ void giy_print_profile() {
          giy_profile.young_bytes_before_aux / 1024.0);
   printf("Young after aux:     %.2f KB\n",
          giy_profile.young_bytes_after_aux / 1024.0);
-  printf("Aux total:           %.2f KB (stack %.2f KB, edge %.2f KB, ft %.2f KB)\n",
+  printf("Aux total:           %.2f KB (stack %.2f KB, edge %.2f KB, ft %.2f KB, jsobj layout %.2f KB, giysb staging %.2f KB, giysb tiny table %.2f KB, giyol staging %.2f KB, giyol batch %.2f KB, padding %.2f KB)\n",
          giy_profile.aux_total_bytes / 1024.0,
          giy_profile.aux_stack_bytes / 1024.0,
          giy_profile.aux_edge_bytes / 1024.0,
-         giy_profile.aux_ft_slot_bytes / 1024.0);
+         giy_profile.aux_ft_slot_bytes / 1024.0,
+         giy_profile.aux_jsobject_layout_cache_bytes / 1024.0,
+         giy_profile.aux_giysb_staging_bytes / 1024.0,
+         giy_profile.aux_giysb_tiny_table_bytes / 1024.0,
+         giy_profile.aux_giyol_staging_bytes / 1024.0,
+         giy_profile.aux_giyol_batch_bytes / 1024.0,
+         giy_profile.aux_padding_bytes / 1024.0);
 
-  printf("Stack pushes:        %llu\n", giy_profile.stack_pushes);
+	  printf("Stack pushes:        %llu\n", giy_profile.stack_pushes);
+	  printf("NT copy width:       %d bits\n", GIY_NT_COPY_BITS);
   printf("Max stack depth:     %llu\n", giy_profile.max_stack_depth);
 
   printf("Young edge visits:   %llu\n", giy_profile.edge_entries);
@@ -2643,6 +4072,40 @@ void giy_print_profile() {
   printf("NT copy objects:     %llu\n", giy_profile.nt_copy_objects);
   printf("NT copy bytes:       %.2f MB\n",
          giy_profile.nt_copy_bytes / (1024.0 * 1024.0));
+#if USE_GIYSB
+  printf("GiYSB enabled:       1\n");
+  printf("GiYSB tiny batch:    %d\n", GIYSB_TINY_BATCH);
+  printf("GiYSB profile:       %d\n", GIYSB_PROFILE);
+  printf("GiYSB staging bytes: %zu\n", (size_t) GIYSB_STAGING_BYTES);
+  printf("GiYSB tiny table bytes:%zu\n", (size_t) GIYSB_TINY_TABLE_BYTES);
+  printf("GiYSB small max:     %zu\n", (size_t) GIYSB_SMALL_OBJECT_MAX_BYTES);
+  printf("GiYSB tiny max:      %zu\n", (size_t) GIYSB_TINY_OBJECT_MAX_BYTES);
+  printf("GiYSB tiny stage min:%zu\n", (size_t) GIYSB_TINY_STAGING_MIN_BYTES);
+  printf("GiYSB old small ratio:%d\n", GIYSB_SMALL_OLD_RATIO);
+#if GIYSB_PROFILE
+  printf("GiYSB tiny reserved: %llu objs, %.2f MB\n",
+         g_giysb_profile.tiny_reserved_objects,
+         g_giysb_profile.tiny_reserved_bytes / (1024.0 * 1024.0));
+  printf("GiYSB tiny overflow: %llu objs, %.2f MB\n",
+         g_giysb_profile.tiny_overflow_objects,
+         g_giysb_profile.tiny_overflow_bytes / (1024.0 * 1024.0));
+  printf("GiYSB large reserved:%llu objs, %.2f MB\n",
+         g_giysb_profile.large_reserved_objects,
+         g_giysb_profile.large_reserved_bytes / (1024.0 * 1024.0));
+  printf("GiYSB staged tiny:   %llu objs, %.2f MB\n",
+         g_giysb_profile.staged_objects,
+         g_giysb_profile.staged_bytes / (1024.0 * 1024.0));
+  printf("GiYSB direct tiny:   %llu objs, %.2f MB\n",
+         g_giysb_profile.direct_tiny_objects,
+         g_giysb_profile.direct_tiny_bytes / (1024.0 * 1024.0));
+  printf("GiYSB max tiny table:%llu entries\n",
+         g_giysb_profile.max_tiny_table_entries_per_gc);
+  printf("GiYSB staging flushes:%llu (full %llu, tail %llu)\n",
+         g_giysb_profile.staging_flushes,
+         g_giysb_profile.staging_full_flushes,
+         g_giysb_profile.staging_tail_flushes);
+#endif
+#endif
 #if defined(USE_GIYOL)
   printf("GiYOL batch bytes:   %zu\n", (size_t) GIYOL_BATCH_BYTES);
   printf("GiYOL NT batches:    %llu\n", giy_profile.giyol_batches);
@@ -2705,6 +4168,44 @@ void giy_print_profile() {
          giy_profile.rset_slots_scanned);
   printf("Remembered set slots patched:  %llu\n",
          giy_profile.rset_slots_patched);
+  printf("JSObject precise scan: %d\n", GIY_JSOBJECT_PRECISE_SCAN);
+  printf("JSObject precise array: %d\n", GIY_JSOBJECT_PRECISE_ARRAY);
+  printf("JSObject shape-only scan: %d\n", GIY_JSOBJECT_SHAPE_ONLY_SCAN);
+  printf("JSObject type-aware scan: %d\n", GIY_JSOBJECT_TYPE_AWARE_SCAN);
+  printf("JSObject array skip size: %d\n", GIY_JSOBJECT_ARRAY_SKIP_SIZE);
+  printf("JSObject scans:       %llu\n", giy_profile.jsobject_scans);
+  printf("JSObject precise:     %llu\n",
+         giy_profile.jsobject_precise_scans);
+  printf("JSObject type-aware:  %llu\n",
+         giy_profile.jsobject_type_aware_scans);
+  printf("JSObject fallbacks:   %llu\n",
+         giy_profile.jsobject_precise_fallbacks);
+  printf("JSObject conservative:%llu\n",
+         giy_profile.jsobject_conservative_scans);
+  printf("JSObject cons slots:  %llu\n",
+         giy_profile.jsobject_conservative_slots);
+  printf("JSObject precise slots:%llu\n",
+         giy_profile.jsobject_precise_slots);
+  printf("JSObject type-aware slots:%llu\n",
+         giy_profile.jsobject_type_aware_slots);
+  printf("JSObject skipped slots:%llu\n",
+         giy_profile.jsobject_skipped_slots);
+  printf("JSObject shape edges: %llu\n",
+         giy_profile.jsobject_shape_edges);
+  printf("JSObject young shapes:%llu\n",
+         giy_profile.jsobject_shape_layout_young);
+  printf("JSObject young PMs:   %llu\n",
+         giy_profile.jsobject_pm_layout_young);
+  printf("JSObject ext arrays:  %llu\n",
+         giy_profile.jsobject_extension_arrays);
+  printf("JSObject ext slots:   %llu\n",
+         giy_profile.jsobject_extension_slots);
+  printf("JSObject layout cache hits:%llu\n",
+         giy_profile.jsobject_layout_cache_hits);
+  printf("JSObject layout cache misses:%llu\n",
+         giy_profile.jsobject_layout_cache_misses);
+  printf("JSObject layout cache invalid:%llu\n",
+         giy_profile.jsobject_layout_cache_invalid);
 #if GIY_AS_DRY_PROFILE && defined(ALLOC_SITE_CACHE)
   printf("AS dry objects:       %llu\n", giy_profile.as_dry_objects);
   printf("AS dry pm null:       %llu\n", giy_profile.as_dry_pm_null);
@@ -2768,9 +4269,14 @@ void giy_minor_collect(Context *ctx,
 												 long long *scan_roots_ns,
 												 long long *scan_rs_ns,
 											 long long *young_trace_ns) {
-			ensure_gc_stack_capacity();
-  giy_profile_begin_minor_gc();
-				gc_stack_reset();
+				ensure_gc_stack_capacity();
+	  giy_profile_begin_minor_gc();
+					gc_stack_reset();
+#if USE_GIYSB && GIYSB_TINY_BATCH
+  giysb_staging_reset();
+  giysb_tiny_table_reset();
+#endif
+	  giy_jsobject_layout_cache_begin_minor_gc();
 #if defined(USE_GIYOL) && GIYOL_STAGING_COPY
   giyol_reserve_order_batch_begin();
 #endif

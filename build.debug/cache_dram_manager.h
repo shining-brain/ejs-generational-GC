@@ -8,6 +8,10 @@
 #define ALIGN_MASK (sizeof(uintptr_t) - 1)
 #define ALIGN(s)   (((s) + ALIGN_MASK) & ~ALIGN_MASK)
 
+#ifndef GC_FT_SLOT_SET_BYTES
+#define GC_FT_SLOT_SET_BYTES (32 * 1024)
+#endif
+
 #define DEFAULT_GC_THRESHOLD(heap_limit) (0)
 // #define remember_set
 // #define printf(...) do { } while (0)
@@ -28,7 +32,7 @@ typedef struct
 typedef struct RememberedSet
 {
     uintptr_t *buffer;  // Array of pointers to remembered objects
-    uintptr_t *values;  // GiY records latest values to avoid reading old slots
+    uintptr_t *values;  // Optional saved values table; NULL in read-slot mode.
     int count;       // Number of remembered objects
     int capacity;    // Capacity of the buffer
     int size_of_hash_table;

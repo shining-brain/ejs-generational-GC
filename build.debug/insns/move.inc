@@ -17,7 +17,7 @@ TLmove_flonum:
 TLmove_number_object:
 TLmove_string_object:
 TLmove_simple_object:
-{ // normal_fixnum vmgen.newsynth.DecisionDiagram$Leaf@54
+{ // normal_builtin vmgen.newsynth.DecisionDiagram$Leaf@54
 
 /*
    move dst src

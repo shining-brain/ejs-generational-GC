@@ -19,6 +19,10 @@ RememberedSet remembered_set;
 #define GIY_RSET_INDEX_FAST 0
 #endif
 
+#ifndef GIY_RSET_READ_SLOT_AT_GC
+#define GIY_RSET_READ_SLOT_AT_GC 1
+#endif
+
 #if GIY_WB_PROFILE
 static unsigned long long wb_profile_update_attempts = 0;
 static unsigned long long wb_profile_update_hits = 0;
@@ -35,7 +39,7 @@ static unsigned long long wb_profile_fallback_insertions = 0;
 static unsigned long long wb_profile_fallback_scan_steps = 0;
 #endif
 
-#if GIY_RSET_INDEX_FAST
+#if GIY_RSET_INDEX_FAST && !GIY_RSET_READ_SLOT_AT_GC
 static int *remembered_set_hash_indices = NULL;
 #endif
 
@@ -46,6 +50,7 @@ static int *remembered_set_hash_indices = NULL;
 #define RS_PTR_SLOT_TAG ((uintptr_t)1)
 #define REMEMBERED_SET_CAPACITY_BYTES (128 * 1024)
 
+#if !GIY_RSET_READ_SLOT_AT_GC
 static int rememberset_find_index_linear(uintptr_t obj_ptr) {
     for (int i = 0; i < remembered_set.count; i++) {
 #if GIY_WB_PROFILE
@@ -109,6 +114,7 @@ static bool rememberset_update_existing(uintptr_t obj_ptr, uintptr_t value) {
     remembered_set.values[index] = value;
     return true;
 }
+#endif
 
 static void rememberset_require_new_entry_space() {
     if (remembered_set.count < remembered_set.capacity) {
@@ -122,26 +128,39 @@ static void rememberset_require_new_entry_space() {
 // Initialize the remembered set,and adjust cache_space.end accordingly, adjust total_size too
 void init_remembered_set() {
     remembered_set.count = 0;
+    size_t remembered_set_buffer_bytes;
+    size_t remembered_set_values_bytes = 0;
 
+#if GIY_RSET_READ_SLOT_AT_GC
+    // Senior-style RSet: keep only slot addresses. Minor GC reads the slot's
+    // current value, so no saved values[] table or slot->index update path.
+    remembered_set.capacity = REMEMBERED_SET_CAPACITY_BYTES / (int) sizeof(uintptr_t);
+    remembered_set.values = NULL;
+#else
     // GiY stores both slot addresses and last written values in cache.
     remembered_set.capacity = REMEMBERED_SET_CAPACITY_BYTES / (int) (2 * sizeof(uintptr_t));
     // remembered_set.capacity = 24*1024/8*200; // Can remember 128*1024/8 = 600K objects
+    remembered_set_values_bytes = remembered_set.capacity * sizeof(uintptr_t);
     remembered_set.values = (uintptr_t *)(cache_space.end - remembered_set.capacity * sizeof(uintptr_t));
     cache_space.end -= remembered_set.capacity * sizeof(uintptr_t);
     cache_space.total_size -= remembered_set.capacity * sizeof(uintptr_t);
+#endif
 
+    remembered_set_buffer_bytes = remembered_set.capacity * sizeof(uintptr_t);
     remembered_set.buffer = (uintptr_t *)(cache_space.end - remembered_set.capacity * sizeof(uintptr_t));
     cache_space.end -= remembered_set.capacity* sizeof(uintptr_t);
     cache_space.total_size -= remembered_set.capacity* sizeof(uintptr_t);
 
     // set up hash table for quick lookup
     remembered_set.size_of_hash_table = HASH_TABLE_SIZE;
+    size_t remembered_set_hash_bytes =
+        remembered_set.size_of_hash_table * sizeof(uintptr_t);
     remembered_set.hash_table = (uintptr_t *)(cache_space.end - remembered_set.size_of_hash_table * sizeof(uintptr_t));
     cache_space.end -= remembered_set.size_of_hash_table * sizeof(uintptr_t);
     cache_space.total_size -= remembered_set.size_of_hash_table * sizeof(uintptr_t);
 
     memset(remembered_set.hash_table, 0, remembered_set.size_of_hash_table * sizeof(uintptr_t));
-#if GIY_RSET_INDEX_FAST
+#if GIY_RSET_INDEX_FAST && !GIY_RSET_READ_SLOT_AT_GC
     if (remembered_set_hash_indices == NULL) {
         remembered_set_hash_indices =
             (int *) malloc(remembered_set.size_of_hash_table * sizeof(int));
@@ -157,6 +176,11 @@ void init_remembered_set() {
     
     printf("init_info: remembered set initialized with capacity %d , new cache_space.end at %p\n",
            remembered_set.capacity, (void*)cache_space.end);
+    printf("init_info: giy rset mode=%s buffer=%zuKB values=%zuKB hash=%zuKB\n",
+           GIY_RSET_READ_SLOT_AT_GC ? "read_slot" : "saved_value",
+           remembered_set_buffer_bytes / 1024,
+           remembered_set_values_bytes / 1024,
+           remembered_set_hash_bytes / 1024);
     
 }
 
@@ -176,7 +200,9 @@ static void rememberset_add_with_value(uintptr_t obj_ptr, uintptr_t value) {
 #if GIY_WB_PROFILE
             wb_profile_duplicate_value_updates++;
 #endif
-#if GIY_RSET_INDEX_FAST
+#if GIY_RSET_READ_SLOT_AT_GC
+            (void) value;
+#elif GIY_RSET_INDEX_FAST
             int index = remembered_set_hash_indices[idx];
             if (index >= 0 && index < remembered_set.count &&
                 remembered_set.buffer[index] == obj_ptr) {
@@ -200,8 +226,10 @@ static void rememberset_add_with_value(uintptr_t obj_ptr, uintptr_t value) {
             rememberset_require_new_entry_space();
             remembered_set.hash_table[idx] = obj_ptr;
             remembered_set.buffer[remembered_set.count] = obj_ptr;
+#if !GIY_RSET_READ_SLOT_AT_GC
             remembered_set.values[remembered_set.count] = value;
-#if GIY_RSET_INDEX_FAST
+#endif
+#if GIY_RSET_INDEX_FAST && !GIY_RSET_READ_SLOT_AT_GC
             remembered_set_hash_indices[idx] = remembered_set.count;
 #endif
             remembered_set.count += 1;
@@ -209,14 +237,20 @@ static void rememberset_add_with_value(uintptr_t obj_ptr, uintptr_t value) {
         }
     }
     
+#if !GIY_RSET_READ_SLOT_AT_GC
     if (rememberset_update_existing(obj_ptr, value)) {
         write_barrier_duplicate_filtered++;
         return;
     }
+#endif
 
     rememberset_require_new_entry_space();
     remembered_set.buffer[remembered_set.count] = obj_ptr;
+#if !GIY_RSET_READ_SLOT_AT_GC
     remembered_set.values[remembered_set.count] = value;
+#else
+    (void) value;
+#endif
 #if GIY_WB_PROFILE
     wb_profile_fallback_insertions++;
 #endif
@@ -230,7 +264,7 @@ void rememberset_add(uintptr_t obj_ptr) {
 void rememberset_clear() {
     remembered_set.count = 0;
     memset(remembered_set.hash_table, 0, remembered_set.size_of_hash_table * sizeof(uintptr_t));
-#if GIY_RSET_INDEX_FAST
+#if GIY_RSET_INDEX_FAST && !GIY_RSET_READ_SLOT_AT_GC
     for (int i = 0; i < remembered_set.size_of_hash_table; i++) {
         remembered_set_hash_indices[i] = -1;
     }
@@ -256,7 +290,9 @@ void write_barrier(JSValue* ptr, JSValue value){
 #if GIY_WB_PROFILE
         wb_profile_clear_attempts_jsvalue++;
 #endif
+#if !GIY_RSET_READ_SLOT_AT_GC
         rememberset_update_existing(obj_ptr, 0);
+#endif
         return;
     }
 
@@ -265,7 +301,9 @@ void write_barrier(JSValue* ptr, JSValue value){
 #if GIY_WB_PROFILE
         wb_profile_clear_attempts_jsvalue++;
 #endif
+#if !GIY_RSET_READ_SLOT_AT_GC
         rememberset_update_existing(obj_ptr, 0);
+#endif
         return;
     }
 
@@ -298,7 +336,9 @@ void write_barrier_ptr(void** ptr, void* value){
 #if GIY_WB_PROFILE
         wb_profile_clear_attempts_ptr++;
 #endif
+#if !GIY_RSET_READ_SLOT_AT_GC
         rememberset_update_existing(obj_ptr | RS_PTR_SLOT_TAG, 0);
+#endif
         return;
     }
 

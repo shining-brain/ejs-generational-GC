@@ -17,7 +17,7 @@ TLjumptrue_function:
 TLjumptrue_special:
 TLjumptrue_fixnum:
 TLjumptrue_iterator:
-{ // normal_builtin vmgen.newsynth.DecisionDiagram$Leaf@41d
+{ // normal_flonum vmgen.newsynth.DecisionDiagram$Leaf@54
 
 /*
    jumptrue src disp
