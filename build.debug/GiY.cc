@@ -100,6 +100,14 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 #define GIY_NT_COPY_BITS 128
 #endif
 
+#ifndef GIY_OLD_SLOT_NT_STORE
+#define GIY_OLD_SLOT_NT_STORE 0
+#endif
+
+#ifndef GIY_FORCE_NT_COPY
+#define GIY_FORCE_NT_COPY 0
+#endif
+
 #if GIY_NT_COPY_BITS != 128 && GIY_NT_COPY_BITS != 256
 #error "GIY_NT_COPY_BITS must be 128 or 256"
 #endif
@@ -147,6 +155,10 @@ static const size_t GIY_NT_COPY_MIN_BYTES = 256;
 #ifndef GIYSB_TINY_TABLE_BYTES
 #define GIYSB_TINY_TABLE_BYTES (64 * 1024)
 #endif
+
+#define GIYSB_TINY_TABLE_SIZE_BITS 7
+#define GIYSB_TINY_TABLE_SIZE_MASK \
+  ((1U << GIYSB_TINY_TABLE_SIZE_BITS) - 1U)
 
 #ifndef GIYSB_SMALL_OLD_RATIO
 #define GIYSB_SMALL_OLD_RATIO 50
@@ -533,14 +545,16 @@ static bool giysb_tiny_table_append(uintptr_t payload_ptr,
     return false;
   size_t offset_units = offset / sizeof(uintptr_t);
   size_t size_class = align_bytes / sizeof(uintptr_t);
-  if (size_class == 0 || size_class > 15 || (offset_units >> 28) != 0)
+  if (size_class == 0 ||
+      size_class > GIYSB_TINY_TABLE_SIZE_MASK ||
+      (offset_units >> (32 - GIYSB_TINY_TABLE_SIZE_BITS)) != 0)
     return false;
 
   if (g_giysb_tiny_table_count == 0)
     g_giysb_tiny_batch_begin = (uintptr_t) dest_hdr;
 
   g_giysb_tiny_table[g_giysb_tiny_table_count++] =
-    (uint32_t) ((offset_units << 4) | size_class);
+    (uint32_t) ((offset_units << GIYSB_TINY_TABLE_SIZE_BITS) | size_class);
 #if GIYSB_PROFILE
   if (g_giysb_tiny_table_count >
       g_giysb_profile.max_tiny_table_entries_per_gc) {
@@ -966,9 +980,9 @@ static void giy_scan_roots_generational(Context *ctx) {
 }
 
 static inline void giy_store_u64_old(uint64_t *slot, uint64_t bits) {
+#if GIY_OLD_SLOT_NT_STORE && defined(__x86_64__)
   if (GIY_PROFILE_DETAIL)
     giy_profile.old_slot_stream_stores++;
-#if defined(__x86_64__)
   giy_old_guard_allow_old_write(slot, sizeof(*slot));
   _mm_stream_si64((long long *) slot, (long long) bits);
   g_used_nt_old_store = true;
@@ -3016,7 +3030,8 @@ static inline void giy_copy_live_object(void *dst,
                                         const void *src,
                                         size_t nbytes,
                                         bool *used_nt_store) {
-  giy_copy_live_object_impl(dst, src, nbytes, used_nt_store, false);
+  giy_copy_live_object_impl(dst, src, nbytes, used_nt_store,
+                            GIY_FORCE_NT_COPY ? true : false);
 }
 
 static inline void giy_nt_copy_live_object_forced(void *dst,
@@ -3056,9 +3071,11 @@ static void giysb_flush_staging(bool *used_nt_store, bool full_flush) {
 static bool giysb_decode_tiny_entry(uint32_t entry,
                                     object_header **src_hdr,
                                     size_t *nbytes) {
-  size_t size_class = (size_t) (entry & 0xF);
+  size_t size_class =
+    (size_t) (entry & GIYSB_TINY_TABLE_SIZE_MASK);
   *nbytes = size_class * sizeof(uintptr_t);
-  uintptr_t offset_units = (uintptr_t) (entry >> 4);
+  uintptr_t offset_units =
+    (uintptr_t) (entry >> GIYSB_TINY_TABLE_SIZE_BITS);
   uintptr_t src_payload =
     cache_space.work_begin + offset_units * sizeof(uintptr_t);
   *src_hdr = (object_header *) src_payload - 1;

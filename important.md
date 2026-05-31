@@ -134,3 +134,53 @@ Benchmark 输出：
 
 - 以后写入 `AIlog.md` 和 `important.md` 的实验记录、结论、设计说明默认使用中文。
 - 英文术语可以保留，但解释和总结使用中文。
+
+## 2026-05-24：GiYSBF tiny 阈值实验结论
+
+实验目的：
+- 比较 GiYSBF 的 tiny 阈值 `64B / 128B / 256B`。
+- 新增完整 benchmark：`128B` 和 `256B`。
+
+输出目录：
+- `/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319`
+
+配置：
+- `CACHE_SIZE_KB=896`
+- `GIY_GC_STACK_BYTES=49152`
+- `GIYSB_STAGING_BYTES=8192`
+- `GIYSB_TINY_TABLE_BYTES=65536`
+- `GIY_NT_COPY_BITS=256`
+- `GIY_RSET_READ_SLOT_AT_GC=true`
+- `EJS_DISABLE_GC_PMU=1`
+
+代码修正：
+- `ejsvm/GiY.cc` 中 tiny table 的 size class 从 4 bit 扩到 6 bit。
+- 原因：4 bit 最多表示 `15 * 8B = 120B`，不够支持 `128B/256B` tiny 阈值。
+
+总结果：
+
+| Tiny max | Total sec | vs 64 total | GC sec | vs 64 GC | Business sec | Minor GC |
+|---:|---:|---:|---:|---:|---:|---:|
+| 64B | 6703.283 | - | 211.272 | - | 6492.015 | 1187074 |
+| 128B | 6620.341 | -1.237% | 170.784 | -19.164% | 6449.555 | 1187074 |
+| 256B | 6592.568 | -1.652% | 170.272 | -19.406% | 6422.292 | 1187074 |
+
+GC-heavy subset：
+
+| Tiny max | Heavy total sec | vs 64 total | Heavy GC sec | vs 64 GC |
+|---:|---:|---:|---:|---:|
+| 64B | 3106.160 | - | 210.787 | - |
+| 128B | 3052.417 | -1.730% | 170.355 | -19.181% |
+| 256B | 3042.127 | -2.061% | 169.873 | -19.410% |
+
+关键判断：
+- 三组 minor GC count 完全相同，所以差异来自每次 GC 的处理成本，不是 GC 次数。
+- `128B` 已经拿到几乎全部收益。
+- `256B` 总时间最好，但相比 `128B` 的额外收益很小。
+- `Storage` 是最明显的改善来源：GC 从 `91.459s` 降到约 `61.37s`。
+- `Havlak` 也明显改善：GC 从 `75.601s` 降到约 `66s`。
+
+当前推荐：
+- 开发默认优先考虑 `128B`。
+- `256B` 保留为对照组。
+- 论文级最终数据最好用当前代码再重跑一次 `64B`，因为本次为了支持 `256B` 修改了 tiny table 编码。

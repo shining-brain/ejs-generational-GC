@@ -140,6 +140,13 @@ static void gc_pmu_init_once(void)
         return;
     gc_pmu_initialized = 1;
 
+    const char *disable_pmu = getenv("EJS_DISABLE_GC_PMU");
+    if (disable_pmu != NULL && disable_pmu[0] != '\0' &&
+        strcmp(disable_pmu, "0") != 0) {
+        gc_pmu_supported = 0;
+        return;
+    }
+
 #ifdef __linux__
     int saved_errno = 0;
     gc_pmu_perf_event_paranoid = gc_read_perf_event_paranoid();

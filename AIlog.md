@@ -24379,3 +24379,7532 @@ forced NT store 不是越多越好。
 3. 针对 Storage/Havlak 进一步分析对象大小分布和 staging flush 质量；
 4. 如果继续做 GiYSBF，只应该作为 ablation study，而不是主方案。
 ```
+
+## 2026-05-24：GiYSBF tiny 阈值 64B / 128B / 256B 对照实验
+
+目的：
+
+```text
+继续验证 GiYSBF 的 tiny 判断阈值。
+在当前 GiYSBF(force) 策略下，追加两组完整 benchmark：
+- tiny <= 128B
+- tiny <= 256B
+
+然后和已有的 tiny <= 64B 版本比较。
+```
+
+本次代码修正：
+
+```text
+文件：ejsvm/GiY.cc
+
+原来的 tiny table entry 使用 4 bit 记录 size class。
+因为 size class 的单位是 8B，所以 4 bit 最多只能表达 15 * 8B = 120B。
+这会导致 128B/256B tiny 对象无法正确进入 tiny table。
+
+因此改成：
+- GIYSB_TINY_TABLE_SIZE_BITS = 6
+- 低 6 bit 记录 size class
+- 高 26 bit 记录 young/workspace 内 offset
+
+这样最大可表达 63 * 8B = 504B，足够覆盖 256B tiny 阈值。
+同时 26 bit offset 能表达 512MB 范围，远大于当前 896KB workspace。
+```
+
+代码位置：
+
+```text
+ejsvm/GiY.cc:151-153
+  定义 GIYSB_TINY_TABLE_SIZE_BITS 和 GIYSB_TINY_TABLE_SIZE_MASK。
+
+ejsvm/GiY.cc:526-549
+  giysb_tiny_table_append：
+  按 6 bit size class 编码 tiny table entry。
+
+ejsvm/GiY.cc:3062-3075
+  giysb_decode_tiny_entry：
+  按 6 bit size class 解码 entry，恢复 src header 和 object size。
+```
+
+实验配置：
+
+```text
+输出目录：
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319
+
+64B baseline：
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_vs_giysb_20260523_172759/giysbf_force64_896
+
+新增两组：
+- giysbf_tiny128_896
+- giysbf_tiny256_896
+
+共同配置：
+- CACHE_SIZE_KB=896
+- GIY_GC_STACK_BYTES=49152
+- GIYSB_STAGING_BYTES=8192
+- GIYSB_TINY_TABLE_BYTES=65536
+- GIY_NT_COPY_BITS=256
+- GIY_RSET_READ_SLOT_AT_GC=true
+- EJS_DISABLE_GC_PMU=1
+- benchmark CPU: 0
+```
+
+正确性：
+
+```text
+smoke test:
+- 128B: status 0
+- 256B: status 0
+
+full suite:
+- 128B: 13/13 benchmark status 0
+- 256B: 13/13 benchmark status 0
+```
+
+汇总结果：
+
+| Tiny max | Total sec | vs 64 total | GC sec | vs 64 GC | Business sec | vs 64 business | Minor GC |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 64B | 6703.283 | - | 211.272 | - | 6492.015 | - | 1187074 |
+| 128B | 6620.341 | -1.237% | 170.784 | -19.164% | 6449.555 | -0.654% | 1187074 |
+| 256B | 6592.568 | -1.652% | 170.272 | -19.406% | 6422.292 | -1.074% | 1187074 |
+
+GC-heavy subset：
+
+```text
+定义：64B baseline 的 GC overhead >= 1 sec。
+包含：
+CD, DeltaBlue, Havlak, Mandelbrot, NBody, Sieve, Storage
+```
+
+| Tiny max | Heavy total sec | vs 64 total | Heavy GC sec | vs 64 GC | Heavy business sec | Minor GC |
+|---:|---:|---:|---:|---:|---:|---:|
+| 64B | 3106.160 | - | 210.787 | - | 2895.376 | 1179177 |
+| 128B | 3052.417 | -1.730% | 170.355 | -19.181% | 2882.061 | 1179177 |
+| 256B | 3042.127 | -2.061% | 169.873 | -19.410% | 2872.252 | 1179177 |
+
+各 benchmark 结果：
+
+| Benchmark | 64 total | 128 total | 256 total | 64 GC | 128 GC | 256 GC | 最好 total | 最好 GC |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 308.142 | 310.152 | 302.611 | 0.216 | 0.198 | 0.172 | 256B | 256B |
+| CD | 486.498 | 490.470 | 486.803 | 17.730 | 17.792 | 17.550 | 64B | 256B |
+| DeltaBlue | 134.517 | 134.400 | 134.665 | 4.094 | 4.088 | 4.130 | 128B | 128B |
+| Havlak | 818.346 | 805.497 | 803.037 | 75.601 | 66.072 | 65.651 | 256B | 256B |
+| List | 187.595 | 187.193 | 187.193 | 0.030 | 0.026 | 0.027 | 128B | 128B |
+| Mandelbrot | 401.088 | 403.023 | 397.127 | 7.404 | 7.403 | 7.457 | 256B | 128B |
+| NBody | 647.975 | 638.703 | 639.210 | 13.322 | 12.495 | 12.565 | 128B | 128B |
+| Permute | 810.590 | 803.421 | 802.043 | 0.002 | 0.002 | 0.002 | 256B | 64B |
+| Queens | 217.063 | 214.720 | 214.770 | 0.051 | 0.044 | 0.043 | 128B | 256B |
+| Richards | 1739.902 | 1724.325 | 1716.706 | 0.179 | 0.153 | 0.149 | 256B | 256B |
+| Sieve | 238.576 | 235.211 | 234.982 | 1.177 | 1.132 | 1.127 | 256B | 256B |
+| Storage | 379.160 | 345.113 | 346.303 | 91.459 | 61.373 | 61.393 | 128B | 128B |
+| Towers | 333.831 | 328.113 | 327.118 | 0.007 | 0.006 | 0.006 | 256B | 128B |
+
+重要观察：
+
+```text
+1. minor GC count 三组完全相同。
+   所以差异不是 GC 触发次数变化造成的。
+
+2. 128B/256B 相比 64B，GC 时间明显下降。
+   aggregate GC:
+   - 128B 快 19.164%
+   - 256B 快 19.406%
+
+3. 128B 已经拿到几乎全部 GC 收益。
+   256B 相比 128B：
+   - total 继续快 0.420% 左右；
+   - GC 只继续快 0.300% 左右。
+   说明超过 128B 后边际收益很小。
+
+4. Storage 是最明显的改善来源。
+   Storage GC:
+   - 64B: 91.459 sec
+   - 128B: 61.373 sec
+   - 256B: 61.393 sec
+   128B 已经解决主要问题，256B 没有继续改善。
+
+5. Havlak 也明显改善。
+   Havlak GC:
+   - 64B: 75.601 sec
+   - 128B: 66.072 sec
+   - 256B: 65.651 sec
+   这里 256B 比 128B 略好，但幅度很小。
+
+6. CD、DeltaBlue、Mandelbrot 这类项目没有一致变好。
+   这说明阈值扩大不是普遍线性收益，而是依赖对象大小分布。
+```
+
+当前判断：
+
+```text
+如果只从这一次完整 suite 看：
+256B 的 total 最好，GC 也略好。
+
+但是如果考虑稳定性和机制解释：
+128B 是更保守、更干净的选择。
+原因是：
+- 128B 已经拿到约 98% 以上的 GC 改善；
+- 256B 的额外收益很小；
+- 阈值越大，被 staging/tiny-table 处理的对象越多，未来更容易增加 table 压力和 staging copy 成本；
+- Storage 中 256B 没有比 128B 更好，说明 128B 已经覆盖了主要受益对象。
+
+所以当前推荐：
+- 实验默认可以先用 128B；
+- 256B 保留为对照组；
+- 如果后续对象大小分布分析证明 128B~256B 区间对象很多，再考虑 256B。
+```
+
+需要注意的公平性限制：
+
+```text
+64B baseline 使用的是 2026-05-23 的完整 GiYSBF 64B run。
+128B/256B 是 2026-05-24 新跑的。
+
+代码为支持 256B 修改了 tiny table 编码。
+从语义上看，这不应该改变 64B 行为；
+但如果要写论文级别的最终表，最好再用当前代码重跑一次 64B。
+
+当前结论适合作为开发判断：
+扩大 tiny 阈值确实有价值，128B 是当前最值得继续推进的阈值。
+```
+
+生成的汇总文件：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319/threshold_summary.md
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319/threshold_summary.tsv
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319/threshold_summary.csv
+```
+
+## 2026-05-24：三组 GiYSBF 与 GiY / CheneyGC 的差距
+
+比较口径：
+
+```text
+GiY / CheneyGC baseline：
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_equal_young_896_20260520_1336
+
+GiYSBF threshold 数据：
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319
+
+注意：
+这个比较保持 total local workspace 都是 896KB。
+但是 GiY / CheneyGC 的 young after aux 是 604.24KB；
+GiYSBF 因为有 64KB tiny table + 8KB staging，所以 young after aux 是 532.24KB。
+
+因此这不是“实际 young 完全相同”的比较。
+它是“总 workspace 相同”的比较，并且 GiYSBF 在可用 young 空间上更吃亏。
+如果要论文最终表，应该再跑一组 GiY / CheneyGC padding 到 532.24KB young 的严格比较。
+```
+
+原始总量：
+
+| Config | Young after aux | Aux | Total sec | Business sec | GC sec | Minor GC |
+|---|---:|---:|---:|---:|---:|---:|
+| CheneyGC | 604.24KB | 80.00KB | 6580.231 | 6460.666 | 119.565 | 1032930 |
+| GiY | 604.24KB | 80.00KB | 6597.105 | 6454.527 | 142.578 | 1045148 |
+| GiYSBF-64B | 532.24KB | 152.00KB | 6703.283 | 6492.015 | 211.272 | 1187074 |
+| GiYSBF-128B | 532.24KB | 152.00KB | 6620.341 | 6449.555 | 170.784 | 1187074 |
+| GiYSBF-256B | 532.24KB | 152.00KB | 6592.568 | 6422.292 | 170.272 | 1187074 |
+
+相对 GiY：
+
+| Config | Total gap | Business gap | GC gap | Minor GC gap |
+|---|---:|---:|---:|---:|
+| GiYSBF-64B | +106.178s (+1.609%) | +37.488s (+0.581%) | +68.694s (+48.180%) | +141926 (+13.580%) |
+| GiYSBF-128B | +23.236s (+0.352%) | -4.972s (-0.077%) | +28.206s (+19.783%) | +141926 (+13.580%) |
+| GiYSBF-256B | -4.537s (-0.069%) | -32.235s (-0.499%) | +27.694s (+19.424%) | +141926 (+13.580%) |
+
+相对 CheneyGC：
+
+| Config | Total gap | Business gap | GC gap | Minor GC gap |
+|---|---:|---:|---:|---:|
+| GiYSBF-64B | +123.052s (+1.870%) | +31.349s (+0.485%) | +91.707s (+76.701%) | +154144 (+14.923%) |
+| GiYSBF-128B | +40.110s (+0.610%) | -11.111s (-0.172%) | +51.219s (+42.838%) | +154144 (+14.923%) |
+| GiYSBF-256B | +12.337s (+0.187%) | -38.374s (-0.594%) | +50.707s (+42.410%) | +154144 (+14.923%) |
+
+GC-heavy subset：
+
+```text
+包含：
+CD, DeltaBlue, Havlak, Mandelbrot, NBody, Sieve, Storage
+```
+
+| Config | Heavy total sec | Heavy GC sec | Minor GC |
+|---|---:|---:|---:|
+| CheneyGC | 3007.708 | 119.187 | 1025977 |
+| GiY | 3020.819 | 142.143 | 1038194 |
+| GiYSBF-64B | 3106.160 | 210.787 | 1179177 |
+| GiYSBF-128B | 3052.417 | 170.355 | 1179177 |
+| GiYSBF-256B | 3042.127 | 169.873 | 1179177 |
+
+GC-heavy 差距：
+
+| Config | Heavy total vs GiY | Heavy GC vs GiY | Heavy total vs Cheney | Heavy GC vs Cheney |
+|---|---:|---:|---:|---:|
+| GiYSBF-64B | +85.341s (+2.825%) | +68.644s (+48.292%) | +98.452s (+3.273%) | +91.600s (+76.854%) |
+| GiYSBF-128B | +31.598s (+1.046%) | +28.212s (+19.848%) | +44.709s (+1.486%) | +51.168s (+42.931%) |
+| GiYSBF-256B | +21.308s (+0.705%) | +27.730s (+19.509%) | +34.419s (+1.144%) | +50.686s (+42.526%) |
+
+当前解释：
+
+```text
+1. GiYSBF-64B 明显不如 GiY / CheneyGC。
+   总时间和 GC 时间都更差。
+
+2. GiYSBF-128B 大幅缩小差距。
+   相比 GiY，总时间只慢 0.352%，但 GC 仍慢 19.783%。
+   相比 CheneyGC，总时间慢 0.610%，GC 慢 42.838%。
+
+3. GiYSBF-256B 的端到端时间已经非常接近。
+   相比 GiY，总时间反而快 0.069%。
+   相比 CheneyGC，总时间只慢 0.187%。
+   但是 GC 时间仍然明显更差：
+   - 比 GiY 慢 19.424%
+   - 比 CheneyGC 慢 42.410%
+
+4. GiYSBF 的 business time 在 128B/256B 下反而略快。
+   这会抵消一部分 GC 变慢，所以 total 看起来接近。
+   但从 GC 研究角度，不能只看 total；GC overhead 仍然是 GiYSBF 的主要弱点。
+
+5. GiYSBF 的 minor GC count 比 GiY 多 13.580%，比 CheneyGC 多 14.923%。
+   主要原因是 GiYSBF 的 local workspace 中多了 tiny table 和 staging，
+   导致实际可用 young 从 604.24KB 降到 532.24KB。
+
+6. 因此，当前最准确的说法是：
+   GiYSBF-256B 的端到端表现已经接近 GiY / CheneyGC；
+   但是它没有真正超过 GiY / CheneyGC 的 GC 性能。
+   它的 total 接近，主要靠 business time 抵消 GC overhead。
+```
+
+生成的比较文件：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319/compare_giysbf_vs_giy_cheney.md
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319/compare_giysbf_vs_giy_cheney.csv
+```
+
+## 2026-05-24：当前 GiYSBF 的 GC Local Workspace 结构和过大结构判断
+
+当前 GiYSBF 的 workspace 配置：
+
+```text
+总 GC Local Workspace budget：896KB
+
+Young before aux：684.24KB
+Young after aux： 532.24KB
+Aux total：       152.00KB
+
+Aux breakdown：
+- GC stack：        48KB
+- edge log：         0KB
+- FT slot set：     32KB
+- JSObject layout：  0KB
+- GiYSB staging：    8KB
+- GiYSB tiny table：64KB
+- GiYOL staging：    0KB
+- GiYOL batch：      0KB
+- padding：          0KB
+```
+
+各结构的作用：
+
+```text
+1. Young after aux：532.24KB
+   真正用于 young object allocation 的区域。
+   GiYSBF 因为额外保留 tiny table 和 staging，比普通 GiY 的 604.24KB 更小。
+
+2. GC stack：48KB
+   GiY/GiYSBF 的对象图遍历 worklist。
+   当前使用 LIFO。
+
+3. FT slot set：32KB
+   function table / init 区中可能保存 young 指针的 slot 集合。
+   每个 entry 是 uintptr_t，32KB 大约 4096 entries。
+
+4. GiYSB staging buffer：8KB
+   tiny 对象真正 copy 之前的临时连续缓冲区。
+   满了或结束时统一 flush，用 forced NT store 写到 old small 区。
+
+5. GiYSB tiny table：64KB
+   记录 deferred tiny object。
+   当前 entry 是 32-bit：
+   - 高 26 bit：young/workspace 内 offset
+   - 低 6 bit：size class，单位 8B
+   64KB / 4B = 16384 entries。
+
+6. edge log / JSObject layout / GiYOL staging / GiYOL batch / padding：
+   当前配置下都是 0KB。
+```
+
+我认为明显偏大的结构：
+
+```text
+第一嫌疑：GiYSB tiny table 64KB。
+
+原因：
+- 它占 Aux 的 42.1%；
+- 它直接把可用 young 从 596.24KB 或 604.24KB 进一步压到 532.24KB；
+- 这会增加 minor GC 次数；
+- 当前 128B/256B 结果显示，性能提升主要来自把更多对象纳入 tiny 策略，
+  但还没有证据证明每次 GC 真的需要 16384 个 tiny entries；
+- 如果实际 max tiny entries 远低于 16384，那么 64KB 就是明显浪费。
+
+建议：
+- 优先测试 16KB 或 32KB tiny table；
+- 如果 16KB 不溢出，16KB 更合理；
+- 如果 16KB 溢出但 32KB 不溢出，32KB 更合理；
+- 64KB 目前更像保险值，不像已经被数据证明必要的值。
+```
+
+```text
+第二嫌疑：GC stack 48KB。
+
+原因：
+- 48KB 是之前从 85KB 降下来的保守值；
+- 它仍然占 Aux 的 31.6%；
+- 如果当前 benchmarks 的最大 worklist 深度远低于 48KB，
+  可以继续测试 32KB。
+
+但它比 tiny table 更危险：
+- stack 溢出会直接破坏 GC 正确性；
+- tiny table 过小也会失败，但可以更容易加 fallback 或检测。
+
+所以 GC stack 可以调查，但不应该先动。
+```
+
+```text
+第三：FT slot set 32KB。
+
+目前不建议优先缩小。
+
+原因：
+- 它负责 function table / init slot 中 young 指针的记录；
+- 当前容量 4096 entries；
+- 如果缩太小，可能影响 correctness 或触发 overflow；
+- 相比 tiny table，它是 GiY/GiYSBF 基础语义结构，不是 GiYSBF 额外优化结构。
+```
+
+```text
+GiYSB staging 8KB 目前不算明显过大。
+
+原因：
+- 只占 Aux 的 5.3%；
+- 它是 tiny batching 真正产生连续写的地方；
+- 过小会增加 flush 次数；
+- 过大才可能浪费 young，但 8KB 当前比较合理。
+
+后续可以测试 4KB / 8KB / 16KB，但优先级低于 tiny table。
+```
+
+当前结论：
+
+```text
+当前 GiYSBF workspace 中最明显偏大的是 tiny table 64KB。
+它应该是下一步最值得缩小和验证的结构。
+
+推荐实验顺序：
+1. 固定 tiny threshold = 128B；
+2. tiny table 分别测试 16KB / 32KB / 64KB；
+3. staging 固定 8KB；
+4. GC stack 固定 48KB；
+5. 比较是否 overflow、minor GC count、GC time、total time。
+
+如果 16KB 或 32KB 不溢出且性能不差，应该把 64KB 降下来。
+```
+
+## 2026-05-25：GiYSBF 512B 阈值实验，以及 GiY/Cheney 实际 young 完全一致实验
+
+这次做了两件事：
+
+1. 让 GiYSBF 的 tiny / large 分界继续扩大到 512B，观察是否能进一步改善性能。
+2. 让 GiY 和 CheneyGC 的实际 young 区大小完全一致，再做一次公平比较。
+
+本次 benchmark 没有加入 cache counter，也没有加入额外性能测量，避免把无关测量噪音混入运行时间。
+
+### 一、GiYSBF 512B tiny 阈值实验
+
+为了支持 512B tiny object，修改了 tiny table 的编码：
+
+```text
+原来：
+- tiny table entry 中 size class 使用 4 bit；
+- 最大只能表示 15 * 8B = 120B 左右；
+- 所以不能正确表示 128B / 256B / 512B 这种更大的 tiny 阈值。
+
+现在：
+- size class 使用 7 bit；
+- 最大可以表示 127 * 8B = 1016B；
+- 所以 512B 可以安全编码。
+```
+
+相关源码：
+
+```text
+ejsvm/GiY.cc
+- GIYSB_TINY_TABLE_SIZE_BITS 从逻辑上扩展为 7
+- giysb_tiny_table_append 使用新的 size mask 和 shift
+- giysb_decode_tiny_entry 使用新的 size mask 和 shift
+```
+
+实验配置：
+
+```text
+GC：GiYSBF
+local workspace：896KB
+实际 young after aux：532.24KB
+GC stack：48KB
+FT slot set：32KB
+staging buffer：8KB
+tiny table：64KB
+tiny threshold：512B
+NT copy：256 bit
+PMU/cache counter：关闭
+```
+
+输出目录：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny512_20260524_230654
+```
+
+所有 benchmark 状态都是 0。
+
+与 64B / 128B / 256B 的比较：
+
+| tiny 阈值 | 总时间秒 | 相对 64B 总时间 | GC 时间秒 | 相对 64B GC 时间 | business 秒 | minor GC 次数 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 64B | 6703.283 | 0.000% | 211.272 | 0.000% | 6492.015 | 1187074 |
+| 128B | 6620.341 | -1.237% | 170.784 | -19.164% | 6449.555 | 1187074 |
+| 256B | 6592.568 | -1.652% | 170.272 | -19.406% | 6422.292 | 1187074 |
+| 512B | 6679.640 | -0.353% | 166.432 | -21.224% | 6513.209 | 1187074 |
+
+512B 与 256B 的直接比较：
+
+```text
+总时间：
+512B = 6679.640 秒
+256B = 6592.568 秒
+512B 慢 87.072 秒，也就是慢 1.321%
+
+GC 时间：
+512B = 166.432 秒
+256B = 170.272 秒
+512B 快 3.840 秒，也就是快 2.255%
+
+business 时间：
+512B = 6513.209 秒
+256B = 6422.292 秒
+512B 慢 90.917 秒，也就是慢 1.416%
+```
+
+GC-heavy 子集：
+
+```text
+子集：
+CD, DeltaBlue, Havlak, Mandelbrot, NBody, Sieve, Storage
+```
+
+| tiny 阈值 | heavy 总时间秒 | 相对 64B 总时间 | heavy GC 秒 | 相对 64B GC 时间 | heavy business 秒 |
+|---:|---:|---:|---:|---:|---:|
+| 64B | 3106.160 | 0.000% | 210.787 | 0.000% | 2895.376 |
+| 128B | 3052.417 | -1.730% | 170.355 | -19.181% | 2882.061 |
+| 256B | 3042.127 | -2.061% | 169.873 | -19.410% | 2872.252 |
+| 512B | 3061.454 | -1.439% | 165.942 | -21.275% | 2895.514 |
+
+重要观察：
+
+```text
+512B 的 GC 时间是最低的。
+但是 512B 的端到端总时间不是最低的。
+当前总时间最好的仍然是 256B。
+```
+
+更具体地说：
+
+```text
+512B 对 Havlak 和 CD 的 GC 有帮助：
+- Havlak GC：65.651 秒 -> 61.882 秒，快 3.769 秒
+- CD GC：17.550 秒 -> 16.152 秒，快 1.398 秒
+
+但 512B 在一些 GC 时间很小的 benchmark 上，总时间变慢：
+- Richards 总时间：1716.706 秒 -> 1742.328 秒，慢 25.622 秒
+- Towers 总时间：327.118 秒 -> 349.821 秒，慢 22.703 秒
+- Permute 总时间：802.043 秒 -> 812.578 秒，慢 10.535 秒
+```
+
+当前判断：
+
+```text
+512B 能进一步压低 GC 时间，但没有带来端到端性能提升。
+如果论文只看 GC 时间，512B 是一个有价值的实验点。
+如果看端到端性能，512B 目前不适合作为默认配置。
+
+当前更合理的默认阈值仍然是 256B。
+128B 可以作为更保守的版本。
+512B 可以保留为“扩大 tiny 范围是否降低 GC 时间”的实验组。
+```
+
+修正后的汇总文件：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny512_20260524_230654/threshold512_compare.md
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny512_20260524_230654/threshold512_aggregate.csv
+```
+
+### 二、GiY 与 CheneyGC 的实际 young 完全一致实验
+
+这次不是只让 local workspace 都是 896KB，而是让两边扣除辅助结构之后的实际 young 区也完全一致。
+
+目标：
+
+```text
+GiY actual young = Cheney actual young = 532.24KB
+```
+
+配置：
+
+```text
+CheneyGC：
+- CACHE_SIZE_KB = 896
+- FT slot set = 32KB
+- padding = 120KB
+- aux total = 152KB
+- actual young = 532.24KB
+
+GiY：
+- CACHE_SIZE_KB = 896
+- GC stack = 48KB
+- FT slot set = 32KB
+- padding = 72KB
+- aux total = 152KB
+- actual young = 532.24KB
+```
+
+输出目录：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_equal_young532_20260525_010251
+```
+
+所有 build、smoke、13 项 benchmark 状态都是 0。
+
+整体结果：
+
+| 指标 | CheneyGC | GiY | GiY - Cheney | 差异 |
+|---|---:|---:|---:|---:|
+| 总时间秒 | 6597.027 | 6648.775 | +51.748 | +0.784% |
+| business 秒 | 6480.616 | 6508.511 | +27.895 | +0.430% |
+| GC full 秒 | 116.411 | 140.264 | +23.853 | +20.490% |
+| GC core 秒 | 82.005 | 101.011 | +19.006 | +23.177% |
+| scan_RS 秒 | 2.987 | 25.443 | +22.456 | +751.791% |
+| scavenge 秒 | 78.314 | 75.021 | -3.293 | -4.205% |
+| minor GC 次数 | 1178229 | 1187074 | +8845 | +0.751% |
+| forward ops | 1778117916 | 1674514918 | -103602998 | -5.827% |
+
+最重要的解释：
+
+```text
+在实际 young 完全一致时，GiY 端到端总时间比 CheneyGC 慢 0.784%。
+
+GiY 的主要问题不是 scavenge。
+GiY 的 scavenge 反而比 CheneyGC 快 3.293 秒。
+
+真正拉开 GC 时间差距的是 scan_RS：
+- CheneyGC scan_RS = 2.987 秒
+- GiY scan_RS = 25.443 秒
+- GiY 多 22.456 秒
+
+这几乎解释了 GiY GC full 时间多出的 23.853 秒。
+```
+
+逐 benchmark 的关键结果：
+
+| benchmark | Cheney 总时间 | GiY 总时间 | 总时间差 | Cheney GC | GiY GC | GC 差 |
+|---|---:|---:|---:|---:|---:|---:|
+| Bounce | 306.745 | 307.704 | +0.959 | 0.153 | 0.178 | +0.025 |
+| CD | 483.861 | 513.851 | +29.990 | 12.216 | 15.479 | +3.263 |
+| DeltaBlue | 128.112 | 133.646 | +5.534 | 2.132 | 3.579 | +1.447 |
+| Havlak | 783.545 | 804.294 | +20.749 | 35.635 | 57.724 | +22.089 |
+| List | 186.279 | 186.566 | +0.287 | 0.025 | 0.025 | 0.000 |
+| Mandelbrot | 398.384 | 402.373 | +3.989 | 5.511 | 7.372 | +1.861 |
+| NBody | 645.322 | 650.052 | +4.730 | 8.824 | 12.455 | +3.631 |
+| Permute | 806.446 | 811.689 | +5.243 | 0.002 | 0.002 | 0.000 |
+| Queens | 217.668 | 219.719 | +2.051 | 0.044 | 0.050 | +0.006 |
+| Richards | 1734.878 | 1731.872 | -3.006 | 0.192 | 0.144 | -0.048 |
+| Sieve | 237.434 | 234.845 | -2.589 | 0.923 | 1.064 | +0.141 |
+| Storage | 338.191 | 326.003 | -12.188 | 50.747 | 42.186 | -8.561 |
+| Towers | 330.162 | 326.161 | -4.001 | 0.007 | 0.006 | -0.001 |
+
+观察：
+
+```text
+GiY 并不是所有 benchmark 都输。
+
+GiY 总时间更快的 benchmark：
+- Richards
+- Sieve
+- Storage
+- Towers
+
+GiY 明显更慢的 benchmark：
+- CD
+- Havlak
+- DeltaBlue
+- NBody
+- Mandelbrot
+
+其中 Havlak 是最重要的负面来源：
+- 总时间慢 20.749 秒
+- GC 时间慢 22.089 秒
+
+CD 也是明显负面来源：
+- 总时间慢 29.990 秒
+- GC 时间慢 3.263 秒
+```
+
+当前判断：
+
+```text
+当 actual young 完全一致时，GiY 没有超过 CheneyGC。
+GiY 总时间慢 0.784%，GC 时间慢 20.490%。
+
+但是这个结果也说明：
+- GiY 的 copy/scavenge 思想本身不是完全失败；
+- 因为 scavenge 部分 GiY 比 CheneyGC 更快；
+- 主要瓶颈集中在 remembered set 扫描，也就是 scan_RS。
+
+所以如果要继续优化 GiY，下一步不应该只盯着 copy 宽度或 staging buffer。
+更应该优先解决 remembered set / slot 访问 / scan_RS 成本。
+```
+
+本轮 equal-young 结果文件：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_equal_young532_20260525_010251/summary.csv
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_equal_young532_20260525_010251/compare_equal_young.md
+```
+
+## 2026-05-25：GiYSBF、GiY、CheneyGC 的公平比较和差异分析
+
+这次比较采用同一个公平条件：
+
+```text
+local workspace = 896KB
+actual young after aux = 532.24KB
+aux total = 152KB
+PMU / cache counter = 关闭
+```
+
+这里把 GiYSBF 分成两个口径：
+
+```text
+GiYSBF256：
+- tiny threshold = 256B
+- 当前端到端总时间最好的 GiYSBF 配置
+
+GiYSBF512：
+- tiny threshold = 512B
+- 这次新测试的更大 tiny 阈值
+- GC 时间更低，但端到端总时间不好
+```
+
+整体结果：
+
+| GC | 总时间秒 | business 秒 | GC full 秒 | GC core 秒 | scan_RS 秒 | scavenge 秒 | minor GC 次数 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| CheneyGC | 6597.027 | 6480.616 | 116.411 | 82.005 | 2.987 | 78.314 | 1178229 |
+| GiY | 6648.775 | 6508.511 | 140.264 | 101.011 | 25.443 | 75.021 | 1187074 |
+| GiYSBF256 | 6592.568 | 6422.296 | 170.272 | 130.849 | 25.852 | 104.400 | 1187074 |
+| GiYSBF512 | 6679.640 | 6513.208 | 166.432 | 126.273 | 25.832 | 99.837 | 1187074 |
+
+相对 CheneyGC：
+
+| GC | 总时间差 | 总时间差比例 | GC 时间差 | GC 时间差比例 | business 差 | business 差比例 |
+|---|---:|---:|---:|---:|---:|---:|
+| GiY | +51.748 秒 | +0.784% | +23.853 秒 | +20.490% | +27.895 秒 | +0.430% |
+| GiYSBF256 | -4.459 秒 | -0.068% | +53.861 秒 | +46.268% | -58.320 秒 | -0.900% |
+| GiYSBF512 | +82.613 秒 | +1.252% | +50.021 秒 | +42.969% | +32.592 秒 | +0.503% |
+
+相对 GiY：
+
+```text
+GiYSBF256：
+- 总时间快 56.207 秒，快 0.845%
+- GC 时间慢 30.008 秒，慢 21.394%
+- business 时间快 86.215 秒，快 1.325%
+
+GiYSBF512：
+- 总时间慢 30.865 秒，慢 0.464%
+- GC 时间慢 26.168 秒，慢 18.656%
+- business 时间慢 4.697 秒，慢 0.072%
+```
+
+关键结论：
+
+```text
+GiYSBF256 的端到端总时间看起来最好：
+- 比 CheneyGC 快 0.068%
+- 比 GiY 快 0.845%
+
+但是这个结果不能说明 GiYSBF 的 GC 已经成功优化。
+因为 GiYSBF256 的 GC 时间反而是最慢的：
+- 比 CheneyGC 慢 46.268%
+- 比 GiY 慢 21.394%
+
+也就是说：
+GiYSBF256 的总时间优势来自 business 时间变短，
+不是来自 GC 时间变短。
+```
+
+为什么 GiYSBF 的 GC 更慢：
+
+```text
+GiYSBF 没有解决 GiY 相对 CheneyGC 的 remembered set 问题。
+
+scan_RS：
+- CheneyGC = 2.987 秒
+- GiY = 25.443 秒
+- GiYSBF256 = 25.852 秒
+- GiYSBF512 = 25.832 秒
+
+所以 GiYSBF 仍然继承了 GiY 的 scan_RS 成本。
+```
+
+更重要的是，GiYSBF 还增加了 scavenge 成本：
+
+```text
+scavenge：
+- CheneyGC = 78.314 秒
+- GiY = 75.021 秒
+- GiYSBF256 = 104.400 秒
+- GiYSBF512 = 99.837 秒
+
+GiY 的 scavenge 本来比 CheneyGC 更快。
+但是 GiYSBF 加入 tiny table、staging buffer、flush、decode 之后，
+scavenge 反而明显变慢。
+```
+
+我对原因的判断：
+
+```text
+GiYSBF 的核心策略是：
+1. 小对象先记录到 tiny table；
+2. 小对象最后复制到 staging buffer；
+3. staging buffer 再统一写入 old 区；
+4. 大对象直接走普通路径。
+
+这个策略理论上想减少零散写入，提高写入连续性。
+但是当前实现中，小对象至少多了一层搬运和管理成本：
+- tiny table append / decode；
+- young -> staging 的复制；
+- staging -> old 的写入；
+- flush 边界处理；
+- staging buffer 本身占用 local workspace，使 actual young 变小。
+
+因此，GiYSBF 的 copy/scavenge 部分目前不是更便宜，而是更贵。
+```
+
+为什么端到端还能接近甚至略好：
+
+```text
+因为 GC 时间不是总时间的全部。
+GiYSBF256 的 business 时间比 GiY 和 CheneyGC 都短：
+- 比 CheneyGC 少 58.320 秒
+- 比 GiY 少 86.215 秒
+
+可能原因包括：
+1. old 区对象布局改变后，mutator 阶段访问局部性有变化；
+2. tiny / large 分区改变了对象地址分布；
+3. benchmark 单次运行存在噪音，尤其总时间差只有 0.068% 时不能过度解释；
+4. 某些 benchmark 的 business 时间远大于 GC 时间，轻微波动会覆盖 GC 差异。
+```
+
+逐 benchmark 看 GiYSBF256：
+
+| benchmark | GiYSBF256 总时间 | 相对 Cheney 总时间 | 相对 GiY 总时间 | GiYSBF256 GC | 相对 Cheney GC | 相对 GiY GC |
+|---|---:|---:|---:|---:|---:|---:|
+| Bounce | 302.611 | -4.134 | -5.093 | 0.172 | +0.019 | -0.006 |
+| CD | 486.803 | +2.942 | -27.048 | 17.550 | +5.334 | +2.071 |
+| DeltaBlue | 134.665 | +6.553 | +1.019 | 4.130 | +1.998 | +0.551 |
+| Havlak | 803.037 | +19.492 | -1.257 | 65.651 | +30.016 | +7.927 |
+| List | 187.193 | +0.914 | +0.627 | 0.027 | +0.002 | +0.002 |
+| Mandelbrot | 397.127 | -1.257 | -5.246 | 7.457 | +1.946 | +0.085 |
+| NBody | 639.210 | -6.112 | -10.842 | 12.565 | +3.741 | +0.110 |
+| Permute | 802.043 | -4.403 | -9.646 | 0.002 | 0.000 | 0.000 |
+| Queens | 214.770 | -2.898 | -4.949 | 0.043 | -0.001 | -0.007 |
+| Richards | 1716.706 | -18.172 | -15.166 | 0.149 | -0.043 | +0.005 |
+| Sieve | 234.982 | -2.452 | +0.137 | 1.127 | +0.204 | +0.063 |
+| Storage | 346.303 | +8.112 | +20.300 | 61.393 | +10.646 | +19.207 |
+| Towers | 327.118 | -3.044 | +0.957 | 0.006 | -0.001 | 0.000 |
+
+最重要的 benchmark 观察：
+
+```text
+GiYSBF256 相对 GiY：
+- 端到端赢了 8 / 13 项；
+- 但是 GC 时间大多数没有赢；
+- Storage 是最明显的问题：GiYSBF256 比 GiY 总时间慢 20.300 秒，GC 慢 19.207 秒；
+- Havlak 的 GC 也明显比 GiY 慢 7.927 秒。
+
+GiYSBF256 相对 CheneyGC：
+- 端到端赢了 8 / 13 项；
+- 但 GC 时间几乎全面更慢；
+- Havlak 比 CheneyGC GC 慢 30.016 秒；
+- Storage 比 CheneyGC GC 慢 10.646 秒。
+```
+
+最终判断：
+
+```text
+如果评价端到端总时间：
+GiYSBF256 目前是最接近甚至略好于 CheneyGC 的配置，
+但优势只有 0.068%，单次 full suite 下不能说是确定性胜利。
+
+如果评价 GC 本身：
+CheneyGC 最好，GiY 第二，GiYSBF 最差。
+
+如果评价研究方向：
+GiYSBF 的想法目前还没有证明能降低 GC 成本。
+它反而暴露了 staging/tiny batching 的额外成本。
+
+下一步更合理的优化方向：
+1. 先解决 GiY/GiYSBF 的 scan_RS 成本；
+2. 缩小或重新设计 tiny table，减少管理开销；
+3. 只在确实能形成足够大连续写入时才启用 staging；
+4. 对 tiny batching 做 profiling，确认每次 GC 中实际 tiny 对象数量和 flush 次数；
+5. 不要只扩大 tiny threshold，因为 512B 已经显示：GC 可能下降，但端到端会变差。
+```
+
+### 关于“GC 更慢但总时间更低”的统计口径复查
+
+用户指出一个重要疑问：
+
+```text
+GiYSBF 的 GC 时间明显更慢，
+为什么端到端总时间还能比 CheneyGC 略低？
+这个结果是不是统计方式有问题？
+```
+
+我复查了 GC 时间的来源：
+
+```text
+GC overhead(full) 的来源：
+- 在 garbage_collection() 入口调用 clock_gettime(CLOCK_MONOTONIC)
+- 在 garbage_collection() 返回前再次调用 clock_gettime(CLOCK_MONOTONIC)
+- 把每次 minor GC 的这段 wall-clock 时间累加
+
+也就是说：
+GC overhead(full) = minor GC 函数整体耗时的累加
+```
+
+相关代码位置：
+
+```text
+ejsvm/giy_dram_manager.cc
+- garbage_collection() 开始处记录 gc_wall_start
+- garbage_collection() 结束处记录 gc_wall_end
+- total_gc_full_wall_time += start/end 差值
+- 最后 printf("GC overhead(full): ...")
+
+ejsvm/cache_dram_manager.cc
+- CheneyGC 使用同样的 GC full wall-clock 统计方式
+```
+
+`GC core total` 的口径更窄：
+
+```text
+GC core total = scan_roots + scan_RS + scavenge
+```
+
+所以：
+
+```text
+GC overhead(full) 比 GC core total 更大。
+它还包含 weak_clear、reset young、remembered set clear、统计窗口开关等 GC 函数内部开销。
+```
+
+`business time` 不是单独计时得到的，而是：
+
+```text
+business = Total execution - GC overhead(full)
+```
+
+因此 business time 是一个“剩余量”。
+它会包含 mutator 执行时间，也会吸收运行噪音、布局变化造成的业务阶段变化等。
+
+我还复查了程序内部 `Total execution` 和 `/usr/bin/time real` 的关系：
+
+| GC | 程序内部 Total execution | /usr/bin/time real |
+|---|---:|---:|
+| CheneyGC | 6597.027 | 6601.410 |
+| GiY | 6648.775 | 6653.220 |
+| GiYSBF256 | 6592.568 | 6597.270 |
+| GiYSBF512 | 6679.640 | 6684.050 |
+
+这说明：
+
+```text
+程序内部 Total execution 没有明显读错。
+它和 /usr/bin/time real 大体一致。
+```
+
+但是这次三者比较有一个重要不严谨点：
+
+```text
+GiYSBF256 的数据来自：
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319
+运行时间：2026-05-24 12:43:19 到 16:28:29
+
+CheneyGC / GiY 的数据来自：
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_equal_young532_20260525_010251
+运行时间：2026-05-25 01:02:51 到 04:48:55
+```
+
+也就是说：
+
+```text
+GiYSBF256 和 CheneyGC/GiY 不是同一轮 full suite 中跑出来的。
+```
+
+这会让非常小的总时间差变得不可靠。
+
+特别是：
+
+```text
+GiYSBF256 比 CheneyGC 总时间快：
+6597.027 - 6592.568 = 4.459 秒
+
+相对比例：
+4.459 / 6597.027 = 0.068%
+```
+
+这个差距太小。
+在单次运行、不同时间段、不同 full suite 的条件下，不能说 GiYSBF256 稳定超过 CheneyGC。
+
+更可靠的解释应该改成：
+
+```text
+GiYSBF256 的端到端总时间与 CheneyGC 基本持平。
+当前单次数据中 GiYSBF256 略低 0.068%，但这个优势太小，不能作为稳定结论。
+
+确定性更强的结论是：
+- GiYSBF256 的 GC 时间明显更慢；
+- GiYSBF256 的 business residual 明显更低；
+- 总时间接近，是因为更低的 business residual 抵消了更高的 GC overhead。
+```
+
+目前不能直接断言：
+
+```text
+GiYSBF 真正提高了 mutator/business 性能。
+```
+
+只能说：
+
+```text
+当前单次结果显示 business residual 更低。
+这个现象可能来自布局变化，也可能来自 benchmark 噪音。
+需要同一脚本、同一时间段、交替顺序、多次重复后才能确认。
+```
+
+后续更严谨的测试方案：
+
+```text
+1. 同一个 benchmark 脚本中同时包含 CheneyGC、GiY、GiYSBF256；
+2. 三个配置都使用 actual young = 532.24KB；
+3. 不加入 cache counter；
+4. 每个 benchmark 至少重复 3 次，最好 5 次；
+5. 运行顺序交替或随机化，避免总是 Cheney -> GiY -> GiYSBF；
+6. 使用 median 或 geomean，而不是只看一次 sum；
+7. 同时记录 Total execution、/usr/bin/time real、GC overhead(full)、GC core、scan_RS、scavenge。
+```
+
+修正后的结论：
+
+```text
+GiYSBF 当前不能被描述为“比 CheneyGC 更快”。
+更准确的说法是：
+
+在单次 full suite 的数据中，GiYSBF256 的端到端总时间和 CheneyGC 接近，
+但 GC 时间明显更慢。
+因此 GiYSBF 的 GC 优化目标目前还没有成功。
+
+下一步必须用同一轮、多次重复的 benchmark 验证 business residual 变低到底是不是稳定现象。
+```
+
+### 为什么 GiY 全系列的 remembered set 扫描成本明显更高
+
+这次继续复查代码，目标是解释：
+
+```text
+为什么 GiY / GiYSB / GiYSBF 的 scan_RS 明显比 CheneyGC 高？
+```
+
+当前最重要的结论：
+
+```text
+主要不是因为 GiY 记录了远多于 CheneyGC 的 remembered set。
+更可能是因为 GiY 对每个 remembered set slot 的处理成本更高。
+```
+
+证据之一是 Havlak 的 write barrier 数量同量级：
+
+```text
+CheneyGC Havlak：
+- Write barrier calls = 147488575
+- Duplicates = 26596704，也就是 18.0%
+
+GiY Havlak：
+- Write barrier calls = 145293810
+- Duplicates = 26629883，也就是 18.3%
+
+GiYSBF256 Havlak：
+- Write barrier calls = 145293810
+- Duplicates = 26628256，也就是 18.3%
+```
+
+所以 scan_RS 差距不能简单解释为“GiY 的 remembered set 条目多很多”。
+
+更关键的是每个 slot 怎么处理。
+
+CheneyGC 的 remembered set 扫描路径：
+
+```text
+ejsvm/cache_dram_manager.cc
+scan_remembered_set()
+
+对每个 remembered slot：
+1. 从 remembered_set.buffer[i] 取 slot 地址；
+2. 读这个 slot 当前的值；
+3. CacheCheney_Tracer::process_edge(...)
+4. 如果需要，把 slot 用普通 store 写回。
+```
+
+代码特征：
+
+```text
+JSValue slot：
+CacheCheney_Tracer::process_edge(*slot)
+
+void* slot：
+void *value = *slot;
+CacheCheney_Tracer::process_edge(value);
+*slot = value;
+```
+
+也就是说，CheneyGC 是很直接的：
+
+```text
+读 old slot -> forward/copy -> 普通写回 slot
+```
+
+GiY 当前的 remembered set 扫描路径：
+
+```text
+ejsvm/GiY.cc
+giy_scan_remembered_set_slots()
+```
+
+当前默认是：
+
+```text
+GIY_RSET_READ_SLOT_AT_GC = 1
+```
+
+对每个 remembered slot：
+
+```text
+1. 从 remembered_set.buffer[i] 取 slot 地址；
+2. 判断 slot 在 old 还是 init；
+3. 读 old slot 当前值；
+4. 判断这个值是不是 young；
+5. giy_reserve_edge(value)，只 reserve 目标地址并设置 forwarding；
+6. forwarded_or_self(from)，拿到新地址；
+7. 立刻 patch 这个 old slot。
+```
+
+看起来 GiY 也只扫了一次 remembered set。
+但是 GiY patch old slot 的方式非常关键：
+
+```text
+giy_store_jsvalue_slot()
+giy_store_ptr_slot()
+  -> giy_store_u64_old()
+      -> _mm_stream_si64(...)
+```
+
+也就是说：
+
+```text
+GiY 对 old slot 的写回使用 8 字节 non-temporal store。
+```
+
+这很可能是 scan_RS 成本高的核心原因。
+
+原因：
+
+```text
+NT store 适合大块、连续、很快不会再读的数据写入。
+但是 remembered set slot patch 是完全不同的模式：
+
+- 每个写入通常只有 8 字节；
+- slot 地址分散在 old 区；
+- 很难形成连续写；
+- 很难充分利用 write-combining buffer；
+- 之后 mutator 还可能很快读这些 old object；
+- NT store 绕过 cache，可能反而破坏后续局部性。
+```
+
+所以：
+
+```text
+用 NT store 写 object body 的大块数据，可能有意义。
+用 NT store 写 remembered set 里的零散 old slot，通常是不合适的。
+```
+
+这解释了为什么：
+
+```text
+GiY 的 scavenge 有时比 CheneyGC 快，
+但 scan_RS 却明显更慢。
+```
+
+GiY 系列共享这个问题：
+
+```text
+GiY、GiYSB、GiYSBF 都共用 giy_scan_remembered_set_slots()
+也都通过 giy_store_jsvalue_slot / giy_store_ptr_slot 写回 old slot。
+
+GiYSB/GiYSBF 改的是 young object 复制策略：
+- tiny table
+- staging buffer
+- tiny / large 分区
+
+它们没有改变 remembered set 的 old slot patch 策略。
+所以 scan_RS 成本基本继承 GiY。
+```
+
+这也解释了之前的数据：
+
+```text
+scan_RS：
+- CheneyGC = 2.987 秒
+- GiY = 25.443 秒
+- GiYSBF256 = 25.852 秒
+- GiYSBF512 = 25.832 秒
+```
+
+GiYSBF 的 scan_RS 没有变好，因为它没有解决这个路径。
+
+另外还有一个历史原因：
+
+```text
+早期 GiY 如果使用 saved_value 模式：
+- remembered_set.buffer[] 存 slot 地址；
+- remembered_set.values[] 存写 barrier 时保存的 value；
+- reserve 阶段扫一次；
+- patch 阶段还要再扫一次；
+- write barrier 还需要维护 values[]。
+
+这个模式会让 remembered set 成本更高。
+
+当前 read_slot 模式已经把这个问题缓解了：
+- 不再保存 values[]；
+- GC 时直接读 old slot；
+- RSet patch 在扫描时完成；
+- patch_remembered_set_slots() 直接 return。
+
+但是 read_slot 模式仍然保留了“零散 old slot 使用 NT store 写回”的问题。
+```
+
+所以现在我认为最可能的优化方向是：
+
+```text
+第一优先级：
+不要对 remembered set 的 old slot patch 使用 NT store。
+改成普通 store。
+
+也就是说：
+object body 的批量复制可以继续研究 NT store；
+但是 old slot patch 应该走普通 cached store。
+```
+
+推荐实验：
+
+```text
+增加一个开关：
+GIY_OLD_SLOT_NT_STORE
+
+默认：
+- object copy 仍然可以用 NT store；
+- remembered set / root patch 的 old slot 写回使用普通 store。
+
+然后比较：
+1. GiY old-slot NT store on/off；
+2. GiYSBF old-slot NT store on/off；
+3. 重点看 scan_RS、GC full、Total execution。
+```
+
+预期：
+
+```text
+如果判断正确：
+- scan_RS 会明显下降；
+- GiY 和 GiYSBF 的 GC 时间会接近 CheneyGC；
+- GiYSBF 的 staging/tiny batching 成本仍然可能存在，
+  但 remembered set 这块大问题会先被消掉。
+```
+
+## 2026-05-25：old slot patch 改为普通 store 后的 GiY / GiYSB / GiYSBF256B benchmark
+
+这次按照新的策略修改了 GiY 系列的 old slot patch：
+
+```text
+当 GC 在 remembered set 扫描中只 patch 一个 pointer-sized old slot 时，
+默认不再使用 8B non-temporal store，
+而是使用普通 cached store。
+```
+
+代码变更：
+
+```text
+ejsvm/GiY.cc
+
+新增开关：
+GIY_OLD_SLOT_NT_STORE
+
+默认：
+GIY_OLD_SLOT_NT_STORE = 0
+
+影响函数：
+giy_store_u64_old()
+
+现在默认路径：
+*slot = bits;
+
+只有显式打开 GIY_OLD_SLOT_NT_STORE=1 时，
+才会对 old slot patch 使用 _mm_stream_si64。
+```
+
+这次 benchmark 的运行配置：
+
+```text
+输出目录：
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_slot_cached_store_20260525_121041
+
+状态：
+build / smoke / 13 项 benchmark 全部 status = 0
+
+共同配置：
+CACHE_SIZE_KB = 896
+GIY_GC_STACK_BYTES = 49152
+GIY_NT_COPY_BITS = 256
+GIY_OLD_SLOT_NT_STORE = 0
+EJS_DISABLE_GC_PMU = 1
+benchmark CPU = 0
+
+三组配置：
+1. giy_slot_cached_896_young532
+2. giysb64_slot_cached_896
+3. giysbf256_slot_cached_896
+```
+
+需要注意：
+
+```text
+当前源码里的 giysb64_slot_cached_896 使用的是当前 GiYSB 路径：
+GiYSB tiny policy = staging-only forced NT
+tiny max = 64B
+
+所以它更准确地说是“当前 64B force 策略版本”，
+不是更早那个带 tiny stage min 的旧 GiYSB original64。
+```
+
+三组配置的 workspace 检查：
+
+| 配置 | Young before aux | Young after aux | Aux total | GiYSB staging | GiYSB tiny table | tiny max |
+|---|---:|---:|---:|---:|---:|---:|
+| GiY | 684.24 KB | 532.24 KB | 152.00 KB | 0 KB | 0 KB | - |
+| GiYSB64 | 684.24 KB | 532.24 KB | 152.00 KB | 8 KB | 64 KB | 64B |
+| GiYSBF256 | 684.24 KB | 532.24 KB | 152.00 KB | 8 KB | 64 KB | 256B |
+
+这说明这次三组的实际 young 区大小一致：
+
+```text
+Young after aux = 532.24 KB
+```
+
+所以这次比较没有把 young space 大小差异混进去。
+
+### Aggregate 结果
+
+| 指标 | GiY | GiYSB64 | GiYSBF256 |
+|---|---:|---:|---:|
+| Total sec | 6630.018 | 6814.852 | 6672.226 |
+| Business sec | 6518.418 | 6634.233 | 6530.585 |
+| GC full sec | 111.600 | 180.618 | 141.644 |
+| GC core sec | 78.494 | 147.086 | 108.141 |
+| scan_roots sec | 0.560 | 0.627 | 0.615 |
+| scan_RS sec | 2.063 | 2.428 | 2.430 |
+| scavenge sec | 75.868 | 144.033 | 105.095 |
+| Minor GC count | 1187074 | 1187074 | 1187074 |
+| Forward ops | 1674514909 | 1674514923 | 1674514926 |
+| Write barriers | 2056280888 | 2056280888 | 2056280889 |
+
+相对 GiY：
+
+| 配置 | Total 差异 | GC full 差异 | GC core 差异 | scan_RS 差异 | scavenge 差异 |
+|---|---:|---:|---:|---:|---:|
+| GiYSB64 | +184.834 sec (+2.79%) | +69.018 sec (+61.84%) | +68.592 sec (+87.39%) | +0.365 sec (+17.69%) | +68.165 sec (+89.85%) |
+| GiYSBF256 | +42.208 sec (+0.64%) | +30.044 sec (+26.92%) | +29.647 sec (+37.77%) | +0.367 sec (+17.79%) | +29.227 sec (+38.52%) |
+
+解释：
+
+```text
+old slot patch 改成普通 store 后，
+scan_RS 已经不再是 GiY 系列最大的问题。
+
+当前 GiYSB64 / GiYSBF256 仍然比 GiY 的 GC 慢，
+主要原因已经转移到 scavenge：
+
+GiY scavenge = 75.868 sec
+GiYSB64 scavenge = 144.033 sec
+GiYSBF256 scavenge = 105.095 sec
+
+也就是说：
+GiYSB 的 tiny table + staging + forced NT materialization
+本身带来了额外复制/整理成本。
+```
+
+### old slot NT store 改动前后的对比
+
+旧结果中，GiY 系列对 old slot patch 使用 8B NT store。
+新结果中，old slot patch 使用普通 cached store。
+
+| 配置 | Total 变化 | GC full 变化 | GC core 变化 | scan_RS 变化 | scavenge 变化 |
+|---|---:|---:|---:|---:|---:|
+| GiY | 6648.775 -> 6630.018 sec，-0.28% | 140.264 -> 111.600 sec，-20.44% | 101.011 -> 78.494 sec，-22.29% | 25.443 -> 2.063 sec，-91.89% | 75.021 -> 75.868 sec，+1.13% |
+| GiYSBF64 | 6703.283 -> 6814.852 sec，+1.66% | 211.272 -> 180.618 sec，-14.51% | 170.835 -> 147.086 sec，-13.90% | 25.937 -> 2.428 sec，-90.64% | 144.303 -> 144.033 sec，-0.19% |
+| GiYSBF256 | 6592.568 -> 6672.226 sec，+1.21% | 170.272 -> 141.644 sec，-16.81% | 130.849 -> 108.141 sec，-17.35% | 25.852 -> 2.430 sec，-90.60% | 104.400 -> 105.095 sec，+0.67% |
+
+这个结果基本验证了之前的判断：
+
+```text
+8B scattered old slot patch 不适合使用 non-temporal store。
+改成普通 store 后，scan_RS 成本下降约 90%。
+```
+
+但是也要注意：
+
+```text
+Total execution 不是所有配置都同步变快。
+
+原因：
+1. Total 时间主要由 business logic 主导；
+2. 这几组数据来自不同时间的完整长跑，业务时间存在机器噪音；
+3. 修改 old slot store 主要影响 GC 的 scan_RS，
+   不直接保证 business time 也下降。
+
+所以这次最可靠的结论是：
+scan_RS 的问题被明确修正；
+但 GiYSB / GiYSBF 的 scavenge 成本仍然需要继续优化。
+```
+
+### 每个 benchmark 的 Total 时间
+
+| Benchmark | GiY | GiYSB64 | GiYSBF256 |
+|---|---:|---:|---:|
+| Bounce | 304.584 | 304.655 | 304.763 |
+| CD | 498.764 | 482.926 | 483.023 |
+| DeltaBlue | 133.118 | 132.253 | 132.857 |
+| Havlak | 784.442 | 793.254 | 779.862 |
+| List | 185.907 | 185.945 | 185.991 |
+| Mandelbrot | 397.766 | 397.947 | 397.666 |
+| NBody | 640.977 | 757.925 | 641.265 |
+| Permute | 828.442 | 855.349 | 815.618 |
+| Queens | 216.614 | 216.536 | 217.054 |
+| Richards | 1742.153 | 1733.179 | 1797.021 |
+| Sieve | 237.013 | 237.508 | 237.347 |
+| Storage | 329.631 | 377.516 | 349.774 |
+| Towers | 330.607 | 339.859 | 329.985 |
+
+### 每个 benchmark 的 GC full 时间
+
+| Benchmark | GiY | GiYSB64 | GiYSBF256 |
+|---|---:|---:|---:|
+| Bounce | 0.146 | 0.161 | 0.158 |
+| CD | 13.781 | 16.020 | 15.795 |
+| DeltaBlue | 2.075 | 2.572 | 2.574 |
+| Havlak | 37.700 | 54.690 | 45.240 |
+| List | 0.021 | 0.023 | 0.023 |
+| Mandelbrot | 5.810 | 6.016 | 5.966 |
+| NBody | 8.725 | 9.317 | 9.268 |
+| Permute | 0.002 | 0.002 | 0.002 |
+| Queens | 0.039 | 0.040 | 0.039 |
+| Richards | 0.148 | 0.152 | 0.159 |
+| Sieve | 1.000 | 1.058 | 1.066 |
+| Storage | 42.147 | 90.561 | 61.348 |
+| Towers | 0.006 | 0.006 | 0.006 |
+
+这里最明显的问题是：
+
+```text
+Storage：
+GiY = 42.147 sec
+GiYSB64 = 90.561 sec
+GiYSBF256 = 61.348 sec
+
+Havlak：
+GiY = 37.700 sec
+GiYSB64 = 54.690 sec
+GiYSBF256 = 45.240 sec
+```
+
+也就是说，GiYSB 系列的主要问题集中在高分配/复杂对象图 benchmark 的 scavenge 成本。
+
+### 当前结论
+
+```text
+1. old slot patch 使用普通 store 是正确方向。
+   它把 scan_RS 从约 25-26 秒降到约 2.1-2.4 秒，
+   下降约 90%。
+
+2. GiY 是当前三者中综合最好的一组：
+   Total = 6630.018 sec
+   GC full = 111.600 sec
+
+3. GiYSBF256 比 GiYSB64 明显好：
+   GiYSB64 total 比 GiY 慢 2.79%，GC full 慢 61.84%；
+   GiYSBF256 total 比 GiY 慢 0.64%，GC full 慢 26.92%。
+
+4. 但是 GiYSBF256 仍然没有超过 GiY。
+   它的 scan_RS 已经接近 GiY，
+   差距主要来自 scavenge：
+   GiYSBF256 scavenge = 105.095 sec
+   GiY scavenge = 75.868 sec
+
+5. 下一步不应该继续优先处理 remembered set patch。
+   下一步应该集中分析 GiYSB/GiYSBF 的 tiny staging flush 路径，
+   尤其是为什么 Storage 和 Havlak 的 scavenge 明显变慢。
+```
+
+生成的复核文件：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_slot_cached_store_20260525_121041/summary.csv
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_slot_cached_store_20260525_121041/compare_slot_cached_store.md
+```
+
+## 2026-05-25：当前 GiY / GiYSB / GiYSBF256 与 CheneyGC 的比较
+
+这里使用之前的公平 Cheney 对照组：
+
+```text
+Cheney 数据目录：
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_equal_young532_20260525_010251
+
+Cheney 配置：
+896KB local workspace budget
+实际 young after aux = 532.24KB
+
+当前 GiY / GiYSB / GiYSBF256：
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giy_slot_cached_store_20260525_121041
+
+当前三组 GiY 系列的实际 young after aux 也都是 532.24KB。
+```
+
+所以这个比较比“Cheney 默认 896KB young”更公平。
+
+但需要注意：
+
+```text
+Cheney 和当前 GiY 系列不是同一次脚本里连续跑出来的，
+所以端到端 total / business 时间仍然可能受到机器噪音影响。
+
+GC full / GC core / scan_RS / scavenge 更适合用来判断 GC 机制本身。
+```
+
+### Aggregate 对比
+
+| 配置 | Total | Business | GC full | GC core | scan_roots | scan_RS | scavenge | Minor GC |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Cheney young532 | 6597.027 | 6480.616 | 116.411 | 82.005 | 0.704 | 2.987 | 78.314 | 1178229 |
+| GiY cached-slot | 6630.018 | 6518.418 | 111.600 | 78.494 | 0.560 | 2.063 | 75.868 | 1187074 |
+| GiYSB64 cached-slot | 6814.852 | 6634.233 | 180.618 | 147.086 | 0.627 | 2.428 | 144.033 | 1187074 |
+| GiYSBF256 cached-slot | 6672.226 | 6530.585 | 141.644 | 108.141 | 0.615 | 2.430 | 105.095 | 1187074 |
+
+相对 Cheney：
+
+| 配置 | Total 差异 | GC full 差异 | GC core 差异 | scan_RS 差异 | scavenge 差异 |
+|---|---:|---:|---:|---:|---:|
+| GiY cached-slot | +32.991 sec (+0.50%) | -4.811 sec (-4.13%) | -3.511 sec | -0.924 sec | -2.446 sec |
+| GiYSB64 cached-slot | +217.825 sec (+3.30%) | +64.207 sec (+55.16%) | +65.081 sec | -0.559 sec | +65.719 sec |
+| GiYSBF256 cached-slot | +75.199 sec (+1.14%) | +25.233 sec (+21.68%) | +26.136 sec | -0.557 sec | +26.781 sec |
+
+### 解释
+
+当前最重要的结论：
+
+```text
+GiY 的 GC 时间已经比 CheneyGC 更短。
+
+Cheney GC full = 116.411 sec
+GiY GC full = 111.600 sec
+GiY 比 Cheney 少 4.811 sec，约快 4.13%。
+
+Cheney GC core = 82.005 sec
+GiY GC core = 78.494 sec
+GiY core 少 3.511 sec。
+```
+
+而且 old slot patch 改成普通 store 之后，GiY 的 remembered set 成本不再比 Cheney 差：
+
+```text
+Cheney scan_RS = 2.987 sec
+GiY scan_RS = 2.063 sec
+
+GiY 现在反而比 Cheney 少 0.924 sec。
+```
+
+scavenge 也略好：
+
+```text
+Cheney scavenge = 78.314 sec
+GiY scavenge = 75.868 sec
+
+GiY 少 2.446 sec。
+```
+
+但是端到端 total 仍然是 Cheney 更低一点：
+
+```text
+Cheney total = 6597.027 sec
+GiY total = 6630.018 sec
+
+GiY 慢 32.991 sec，约慢 0.50%。
+```
+
+这说明：
+
+```text
+从 GC 本体看，当前 GiY 已经赢过 Cheney。
+从端到端看，当前 GiY 还没有稳定赢过 Cheney。
+原因不是 GC 时间，而是 business logic 时间：
+
+Cheney business = 6480.616 sec
+GiY business = 6518.418 sec
+
+GiY business 多 37.802 sec。
+```
+
+这个 business 差异可能来自：
+
+```text
+1. 两组不是同一次脚本连续跑，存在机器噪音；
+2. GiY 的对象布局 / old 区写入模式改变了 mutator 后续访问的 cache 状态；
+3. GiY 的 minor GC 次数略多：
+   Cheney = 1178229
+   GiY = 1187074
+   GiY 多 8845 次，约 +0.75%。
+```
+
+### GiYSB / GiYSBF 与 Cheney
+
+GiYSB64 和 GiYSBF256 当前都没有超过 Cheney：
+
+```text
+GiYSB64：
+Total 比 Cheney 慢 3.30%
+GC full 比 Cheney 慢 55.16%
+
+GiYSBF256：
+Total 比 Cheney 慢 1.14%
+GC full 比 Cheney 慢 21.68%
+```
+
+原因仍然很清楚：
+
+```text
+它们的 scan_RS 已经不差：
+Cheney scan_RS = 2.987 sec
+GiYSB64 scan_RS = 2.428 sec
+GiYSBF256 scan_RS = 2.430 sec
+
+真正慢在 scavenge：
+Cheney scavenge = 78.314 sec
+GiYSB64 scavenge = 144.033 sec
+GiYSBF256 scavenge = 105.095 sec
+```
+
+所以：
+
+```text
+GiYSB 系列不是 remembered set 输给 Cheney，
+而是 tiny table / staging / forced NT materialization 让对象复制主体变慢。
+```
+
+### 当前可以向导师汇报的短结论
+
+```text
+After changing single old-slot patching from 8-byte NT store to normal cached store,
+GiY's remembered-set scanning cost dropped by about 90%.
+
+With equal young-space size, GiY now has slightly lower GC time than Cheney
+(111.6s vs 116.4s, about 4.1% faster in GC time),
+but its end-to-end time is still slightly slower by about 0.5%.
+
+GiYSB / GiYSBF do not beat Cheney yet because their scavenge phase is still much more expensive.
+```
+
+## 2026-05-25：GC full 和 GC core 分别表示什么
+
+代码位置：
+
+```text
+ejsvm/cache_dram_manager.cc
+
+GC full 计时：
+大约在 887 行开始：
+clock_gettime(CLOCK_MONOTONIC, &gc_wall_start);
+
+大约在 990-993 行结束：
+clock_gettime(CLOCK_MONOTONIC, &gc_wall_end);
+total_gc_full_wall_time += ...
+
+GC core 打印：
+大约在 1068-1070 行：
+total_gc_core_ns = total_scan_roots_time + total_scan_rs_time + total_scavenge_time;
+
+大约在 1155-1165 行打印：
+GC core total
+scan_roots
+scan_RS
+scavenge
+```
+
+### GC full
+
+`GC overhead(full)` 是一次 minor GC 外层包住的完整 wall-clock pause time 的累加。
+
+它包括：
+
+```text
+1. GC 入口的开销
+   - 记录时间
+   - gc_pmu_start_window()
+   - minor_gc_count++
+   - in_minor_gc = 1
+
+2. GC 核心算法部分
+   - scan_roots
+   - scan_RS
+   - scavenge / young trace / copy / patch
+
+3. weak_clear
+   - GiY: giy_weak_clear(ctx)
+   - Cheney: weak_clear<CacheCheney_Tracer>(ctx)
+
+4. young 区回收/reset
+   - cache_space.current = cache_space.work_begin
+
+5. remembered set 清空
+   - rememberset_clear()
+
+6. GC 退出开销
+   - in_minor_gc = 0
+   - gc_pmu_stop_window()
+   - 记录结束时间
+```
+
+所以：
+
+```text
+GC full 更接近真实 pause time。
+它回答的问题是：
+“程序因为 GC 实际停了多久？”
+```
+
+### GC core
+
+`GC core total` 是人工拆出来的核心算法阶段：
+
+```text
+GC core = scan_roots + scan_RS + scavenge
+```
+
+对 Cheney 路径来说：
+
+```text
+scan_roots:
+- scan_roots_generational(ctx)
+- scan_function_table_strong_slots()
+
+scan_RS:
+- scan_remembered_set()
+  或没有 remembered set 时 scan_init_area()
+
+scavenge:
+- dram_space.current = scan_start
+- scavenge()
+```
+
+对 GiY / GiYSB / GiYSBF 路径来说，`giy_minor_collect()` 内部拆成：
+
+```text
+scan_roots:
+- giy_scan_roots_generational<GiYReserveTracer>(ctx)
+- giy_reserve_function_table_slots()
+
+scan_RS:
+- giy_scan_remembered_set_slots()
+
+scavenge 这个名字在 GiY 里其实更宽：
+- giy_traverse_stack_and_copy()
+- allocation-site update
+- patch roots
+- patch function table slots
+- patch remembered set slots
+- clear function table slots
+- 必要时 _mm_sfence()
+```
+
+所以要注意：
+
+```text
+GiY 的 scavenge 不是单纯“只复制对象”。
+它更接近：
+young live graph traverse + materialization + patch phase。
+```
+
+同时，`GC core` 不包括外层的一些真实 GC 成本：
+
+```text
+- weak_clear
+- remembered set clear
+- young workspace reset
+- GC entry/exit bookkeeping
+- PMU window start/stop
+- 其它 wrapper 开销
+```
+
+### 哪个更有参考价值
+
+结论：
+
+```text
+如果要向导师/论文报告“GC 到底快不快”，优先看 GC full。
+如果要分析“为什么快/为什么慢”，看 GC core 和 breakdown。
+如果要评价用户实际性能，最终还要看 Total execution。
+```
+
+更具体地说：
+
+```text
+1. Total execution
+   评价整个系统最终性能最重要。
+   论文里通常必须报告。
+
+2. GC full
+   评价 GC pause / GC overhead 最重要。
+   这是比 GC core 更接近真实 GC 成本的指标。
+
+3. GC core
+   用来做机制分析最有用。
+   例如判断问题在 scan_roots、scan_RS 还是 scavenge。
+   但不应该单独用 GC core 宣称“GC 总体更快”，
+   因为它漏掉了 weak_clear、RSet clear、entry/exit 等外层成本。
+```
+
+当前实验里应该这样使用：
+
+```text
+GiY vs Cheney：
+- 用 Total execution 说明端到端性能；
+- 用 GC full 说明真实 GC overhead；
+- 用 GC core + scan_RS + scavenge 解释为什么。
+
+GiYSB / GiYSBF 内部优化：
+- 优先看 GC core breakdown 找瓶颈；
+- 最终仍以 GC full 和 Total execution 判断是否成功。
+```
+
+一句话：
+
+```text
+GC full 是结论指标；
+GC core 是诊断指标。
+```
+
+## 2026-05-25：为什么 Cheney 的扫描时间反而比当前 GiY 稍长
+
+当前 equal-young 对照数据：
+
+| 指标 | Cheney young532 | GiY cached-slot |
+|---|---:|---:|
+| scan_roots | 0.704 sec | 0.560 sec |
+| scan_RS | 2.987 sec | 2.063 sec |
+| scavenge | 78.314 sec | 75.868 sec |
+| GC core | 82.005 sec | 78.494 sec |
+| GC full | 116.411 sec | 111.600 sec |
+| minor GC count | 1178229 | 1187074 |
+| forward operations | 1778117916 | 1674514909 |
+
+这里需要注意：
+
+```text
+GiY 的 minor GC 次数还更多：
+GiY 比 Cheney 多 8845 次 minor GC，约 +0.75%。
+
+按理说这会让 GiY 的扫描总时间更容易变大。
+但实际 GiY scan_roots / scan_RS / scavenge 都略低。
+所以这不是因为 GiY GC 次数少。
+```
+
+最可能的原因有几个。
+
+### 原因 1：Cheney 的 scan 阶段包含“第一次复制对象”的成本
+
+Cheney 的 remembered set 扫描路径：
+
+```text
+ejsvm/cache_dram_manager.cc
+scan_remembered_set()
+  -> CacheCheney_Tracer::process_edge(...)
+     -> forward(...)
+        -> copy_to_dram(...)
+           -> memcpy(...)
+```
+
+也就是说：
+
+```text
+Cheney 在 scan_roots / scan_RS 中遇到一个还没 forward 的 young object 时，
+会立刻把这个对象 memcpy 到 old/DRAM。
+```
+
+所以 Cheney 的 `scan_roots` / `scan_RS` 不是纯粹“读 slot 和判断指针”。
+它可能包含：
+
+```text
+- 判断指针；
+- forward；
+- 分配 old 目标；
+- memcpy 对象；
+- 设置 forwarding pointer；
+- patch 当前 slot。
+```
+
+GiY 的 remembered set 扫描路径：
+
+```text
+ejsvm/GiY.cc
+giy_scan_remembered_set_slots()
+  -> giy_reserve_edge(...)
+     -> copy_for_minor(...)
+        -> 只 reserve old 目标
+        -> 设置 forwarding pointer
+        -> push 到 GC stack
+```
+
+GiY 在这个阶段不复制对象 body。
+
+所以：
+
+```text
+Cheney scan_RS 里混入了一部分 copy 成本；
+GiY scan_RS 主要是 reserve + patch。
+```
+
+这会让 Cheney 的 scan_RS 稍长。
+
+### 原因 2：GiY 的设计本来就是“扫描 young 源对象”，Cheney 是“扫描 old 里的复制结果”
+
+Cheney 的 scavenge：
+
+```text
+dram_space.current = scan_start;
+scavenge();
+```
+
+它扫描的是已经复制到 old/DRAM 的对象。
+
+GiY 的核心思路不同：
+
+```text
+1. root / RSet 只找到 live young object；
+2. live young object 先留在 local workspace；
+3. GiY 遍历 young 中的源对象；
+4. 最后 materialize/copy 到 old。
+```
+
+所以 GiY 的 traversal 更容易命中 local workspace / L2。
+Cheney 在 scavenge 中更早进入 old/DRAM 目标区域，局部性可能差一些。
+
+这正好符合 GiY 的核心原则：
+
+```text
+尽量把 tracing 发生在 local workspace 中，
+不要一边 copy 到 old，一边立刻扫描 old 中的新对象。
+```
+
+### 原因 3：当前 old slot patch 已经修正，GiY 的 RSet patch 不再被 8B NT store 拖慢
+
+旧版本 GiY 的问题是：
+
+```text
+giy_store_u64_old()
+  -> _mm_stream_si64(...)
+```
+
+它对 remembered set 的 8B old slot patch 使用 NT store。
+这对零散 slot 非常不合适。
+
+修正后：
+
+```text
+GIY_OLD_SLOT_NT_STORE = 0
+giy_store_u64_old()
+  -> *slot = bits
+```
+
+所以现在 GiY 的 RSet patch 路径已经比较轻。
+
+这解释了为什么现在：
+
+```text
+Cheney scan_RS = 2.987 sec
+GiY scan_RS = 2.063 sec
+```
+
+### 原因 4：Cheney 的 forward 操作数量更多
+
+当前数据：
+
+```text
+Cheney forward operations = 1,778,117,916
+GiY forward operations    = 1,674,514,909
+```
+
+Cheney 多大约：
+
+```text
+103,603,007 次，约 +6.2%
+```
+
+这说明 Cheney 在扫描/转发路径中实际进入 forward 逻辑的次数更多。
+
+可能原因包括：
+
+```text
+1. Cheney 的 process_edge 在扫描时就直接 forward/copy；
+2. Cheney 的扫描和复制混在一起，可能对更多 edge 做完整 forward 路径；
+3. GiY 的 reserve / patch 分离后，有些阶段可以更早过滤非 young 指针；
+4. 两者对 function table strong slots、JSObject 结构扫描、old/init slot 的处理顺序不同。
+```
+
+这不是单独一个原因就能完全解释，但 forward operations 多 6.2% 是一个很有用的信号。
+
+### 原因 5：差距本身不大，不能过度解释
+
+这次差距：
+
+```text
+scan_roots 差距 = 0.144 sec
+scan_RS 差距 = 0.924 sec
+scavenge 差距 = 2.446 sec
+GC core 差距 = 3.511 sec
+GC full 差距 = 4.811 sec
+```
+
+在 6597 秒级别的 full-suite 总运行中，这些都是很小的差异。
+
+所以更谨慎的说法是：
+
+```text
+当前数据支持：
+GiY 的扫描/核心 GC 路径已经不比 Cheney 慢，甚至略快。
+
+但不能说 Cheney “本质上一定更慢很多”。
+目前只是 single full-suite 下，GiY 的 scan/core 指标略优。
+```
+
+### 当前判断
+
+最可信的解释：
+
+```text
+Cheney 的扫描阶段更长，是因为它的 scan_roots / scan_RS 会立刻触发 forward 和 memcpy；
+GiY 则把这个阶段拆成 reserve + later materialization，
+并且 tracing 更多发生在 young/local workspace 中。
+
+因此 Cheney 的 scan time 不是纯扫描时间，
+而 GiY 的 scan time 更接近 reserve/发现 live object 的成本。
+```
+
+如果要进一步验证，可以做一个更细的 profile：
+
+```text
+Cheney：
+- scan_roots 中 forward 新对象的次数；
+- scan_RS 中 forward 新对象的次数；
+- scan_roots / scan_RS 内部 memcpy 字节数；
+
+GiY：
+- reserve 阶段新发现对象数；
+- traverse/copy 阶段 materialized objects / bytes；
+- patch roots / patch RSet 时间单独拆出来。
+```
+
+这样就能确认：
+
+```text
+Cheney 多出来的 scan time 到底是不是主要来自 scan 阶段内的 memcpy/forward。
+```
+
+## 2026-05-25：当前 CheneyGC 的运行流程
+
+这里说的是当前代码里的 `cache_cheney`，不是教科书里完全独立的 two-space Cheney。
+
+当前 CheneyGC 更准确地说是：
+
+```text
+Generational cache_cheney GC
+
+young:
+  GC Local Workspace 中的 work area
+
+old:
+  DRAM / dram_space
+
+minor GC:
+  把 live young objects 复制到 old，
+  然后整体回收 young work area。
+```
+
+主要代码位置：
+
+```text
+ejsvm/cache_dram_manager.cc
+ejsvm/cache_cheney_Rset.cc
+```
+
+### 1. 初始化阶段
+
+初始化在：
+
+```text
+space_init()
+ejsvm/cache_dram_manager.cc:754
+```
+
+做的事情：
+
+```text
+1. malloc 一块 cache_space
+   cache_space.begin
+   cache_space.current
+   cache_space.end
+
+2. init_remembered_set()
+   在 cache_space 的高地址端切出：
+   - remembered_set.buffer
+   - remembered_set.hash_table
+   然后缩小 cache_space.end
+
+3. malloc 一块很大的 dram_space
+   作为 old generation
+```
+
+Remembered set 初始化在：
+
+```text
+ejsvm/cache_cheney_Rset.cc:22
+
+RSet buffer = 128KB
+Hash table = 8192 entries = 64KB
+```
+
+初始对象分配结束后：
+
+```text
+space_free_dram_manager_init()
+ejsvm/cache_dram_manager.cc:1199
+```
+
+会做：
+
+```text
+cache_space.work_begin = cache_space.current
+```
+
+因此 cache_space 被分成：
+
+```text
+cache_space.begin ... cache_space.work_begin:
+  init area
+  初始化阶段创建的对象
+
+cache_space.work_begin ... cache_space.end:
+  young work area
+  之后普通 allocation 的 young 区
+```
+
+当前 Cheney 还会在 local workspace 里放：
+
+```text
+cache_cheney_ft_slot_set
+可选 local padding
+```
+
+对应代码：
+
+```text
+cache_cheney_bind_ft_slots_to_cache()
+cache_cheney_bind_local_padding_to_cache()
+ejsvm/cache_dram_manager.cc:564
+ejsvm/cache_dram_manager.cc:601
+```
+
+### 2. 普通分配阶段
+
+对象分配在：
+
+```text
+space_alloc()
+ejsvm/cache_dram_manager.cc:819
+```
+
+流程：
+
+```text
+1. 计算 object header + payload 的对齐大小；
+2. 如果 cache_space.current + align_bytes > cache_space.end：
+   触发 garbage_collection(the_context)
+3. 在 cache_space.current 处写 object_header：
+   - type
+   - size
+   - forwarding_pointer = 0
+4. cache_space.current += align_bytes
+5. 返回 payload 指针
+```
+
+所以：
+
+```text
+所有新对象默认先进 young work area。
+```
+
+### 3. Write barrier / remembered set
+
+Write barrier 在：
+
+```text
+ejsvm/cache_cheney_Rset.cc
+write_barrier()
+write_barrier_ptr()
+```
+
+它记录的是：
+
+```text
+old/init 区中的 slot 地址
+```
+
+不是记录 object 本身。
+
+触发条件：
+
+```text
+写入位置 slot 在 old/DRAM 或 init area；
+写入的新值 value 指向 young work area；
+当前不在 minor GC 中。
+```
+
+如果满足条件：
+
+```text
+remembered_set.buffer[] 记录 slot 地址；
+remembered_set.hash_table 用来去重；
+ptr slot 会在地址低位加 tag。
+```
+
+也就是说：
+
+```text
+Cheney minor GC 时只需要重新检查这些 old/init -> young 的 slot。
+```
+
+### 4. Function table strong slot set
+
+当前 Cheney 不再 full scan 整个 function table。
+
+它使用：
+
+```text
+cache_cheney_ft_slot_set
+```
+
+记录 function table 里真正可能指向 young 的 strong slots。
+
+记录函数：
+
+```text
+giy_record_ft_jsvalue_slot()
+giy_record_ft_ptr_slot()
+ejsvm/cache_dram_manager.cc:673
+```
+
+GC 时扫描：
+
+```text
+scan_function_table_strong_slots()
+ejsvm/cache_dram_manager.cc:651
+```
+
+GC 后清空：
+
+```text
+clear_function_table_strong_slots()
+```
+
+所以当前 Cheney 已经不是“每次 full scan function table”的旧版本。
+
+### 5. Minor GC 总流程
+
+入口：
+
+```text
+garbage_collection()
+ejsvm/cache_dram_manager.cc:870
+```
+
+当前 major GC 没有真正实现：
+
+```text
+if (need_major_gc()) {
+  printf("major GC triggered");
+  exit(1);
+}
+```
+
+benchmark 中主要跑的是 minor GC。
+
+minor GC 流程：
+
+```text
+1. scan_start = dram_space.free
+
+2. scan_roots_generational(ctx)
+   扫 root：
+   - globals
+   - global property maps
+   - global shapes
+   - ctx->global
+   - special registers
+   - exception handler
+   - lcall stack
+   - VM stack
+   - gc_root_stack
+
+3. scan_function_table_strong_slots()
+   扫 function table 里记录过的 strong slots
+
+4. scan_remembered_set()
+   扫 old/init -> young 的 slots
+
+5. dram_space.current = scan_start
+   scavenge()
+
+6. weak_clear<CacheCheney_Tracer>(ctx)
+
+7. cache_space.current = cache_space.work_begin
+   整体回收 young work area
+
+8. rememberset_clear()
+   清空 remembered set
+
+9. 结束 minor GC
+```
+
+### 6. Cheney 的核心：forward/copy
+
+核心逻辑在：
+
+```text
+CacheCheney_Tracer::process_edge()
+CacheCheney_Tracer::forward()
+CacheCheney_Tracer::copy_to_dram()
+ejsvm/cache_dram_manager.cc:271
+```
+
+当扫描到一个 edge：
+
+```text
+1. 如果是 immediate value，跳过；
+2. 如果已经在 old/DRAM，跳过；
+3. 如果不在 young work area，跳过；
+4. 如果在 young：
+   forward(ptr)
+```
+
+`forward(ptr)` 做：
+
+```text
+1. 如果对象已经有 forwarding_pointer：
+   返回 forwarding_pointer
+
+2. 如果还没有复制过：
+   copy_to_dram(header, size)
+```
+
+`copy_to_dram()` 做：
+
+```text
+1. new_obj_hdr = dram_space.free
+2. memcpy(new_obj_hdr, old_young_hdr, align_bytes)
+3. dram_space.free += align_bytes
+4. 在 young 源对象 header 里写：
+   forwarding_pointer = new_obj_hdr + 1
+```
+
+然后 `process_edge()` 会把原来的 slot 改成 old 中的新地址。
+
+所以 Cheney 的一个很重要特点是：
+
+```text
+扫描 root / remembered set 时，遇到 live young object 会立刻 memcpy 到 old。
+```
+
+### 7. scavenge 阶段
+
+scavenge 在：
+
+```text
+scavenge()
+ejsvm/cache_dram_manager.cc:1000
+```
+
+流程：
+
+```text
+dram_space.current = scan_start
+
+while (dram_space.current < dram_space.free):
+  1. 取 dram_space.current 指向的 copied object；
+  2. dram_space.current += object size；
+  3. process_node<CacheCheney_Tracer>(type, payload)
+     扫这个 object 的所有 reference fields；
+  4. 如果发现 young child：
+     forward/copy 到 dram_space.free；
+     更新当前 object 的 field；
+  5. 因为 dram_space.free 可能变大，
+     while 继续扫描新复制出来的对象。
+```
+
+这就是 Cheney 的 scan pointer 思想：
+
+```text
+scan pointer = dram_space.current
+free pointer = dram_space.free
+
+从 scan_start 开始扫描已复制对象；
+扫描过程中发现的新对象追加到 free；
+直到 current 追上 free。
+```
+
+### 8. 一次 minor GC 后的状态
+
+GC 结束后：
+
+```text
+live young objects:
+  已经复制到 old/DRAM
+
+roots / old slots / copied object fields:
+  已经 patch 成 old 地址
+
+young work area:
+  cache_space.current = cache_space.work_begin
+  直接整体清空，之后被新 allocation 覆盖
+
+remembered set:
+  count = 0
+  hash_table 清零
+
+function table strong slot set:
+  count = 0
+```
+
+所以 Cheney 的 minor GC 语义是：
+
+```text
+只要活过一次 minor GC 的 young object，就被 promoted 到 old。
+```
+
+### 9. 用一句话描述当前 Cheney
+
+```text
+当前 CheneyGC 在 mutator 阶段把新对象 bump-allocate 到 local workspace 的 young 区；
+write barrier 记录 old/init 指向 young 的 slot；
+minor GC 时从 roots、function-table strong slots、remembered set 出发，
+一边扫描一边把 live young objects memcpy 到 old/DRAM，
+然后用 dram_space.current 作为 Cheney scan pointer 继续扫描刚复制出的对象，
+直到 scan pointer 追上 free pointer；
+最后整体回收 young 区并清空 remembered set。
+```
+
+## 2026-05-25：指针修复改为普通 store、Cheney 重跑、GiYSBF512 实验
+
+### 1. 本次决定和代码修改
+
+用户决定：以后在指针修复，也就是 patch old slot / remembered-set slot 的环节，不再使用 NT store，直接使用普通 store。
+
+对应修改：
+
+```text
+ejsvm/GiY.cc:103
+GIY_OLD_SLOT_NT_STORE 默认值为 0
+
+ejsvm/GiY.cc:978
+giy_store_u64_old()
+  如果 GIY_OLD_SLOT_NT_STORE=1 才使用 _mm_stream_si64；
+  默认路径直接执行 *slot = bits。
+
+ejsvm/common.mk:130
+支持从 make 参数传入 GIY_OLD_SLOT_NT_STORE。
+```
+
+本次 benchmark 明确使用：
+
+```text
+GIY_OLD_SLOT_NT_STORE=0
+```
+
+因此本次 GiY / GiYSBF 的 old slot pointer patch 都是普通 store，不再是 NT store。
+
+### 2. 本次实验配置
+
+输出目录：
+
+```text
+build.debug/benchmarks/out_cheney_rerun_giysbf512_20260525_183854
+```
+
+所有 build、smoke、13 个 benchmark 的 status 都是 0。
+
+本次只跑两组：
+
+```text
+Cheney:
+  OPT_GC=cache_cheney
+  local workspace = 896KB
+  young after aux = 532.24KB
+  aux total = 152KB
+
+GiYSBF512:
+  OPT_GC=giy
+  local workspace = 896KB
+  young after aux = 532.24KB
+  aux total = 152KB
+  GC stack = 48KB
+  FT slot set = 32KB
+  GiYSB staging = 8KB
+  GiYSB tiny table = 64KB
+  tiny / large threshold = 512B
+  NT copy width = 256bit
+  old slot patch = 普通 store
+```
+
+注意：这次没有加入 cache miss 测量，也没有打开额外 PMU 统计，避免给时间结果加入无关测量噪音。
+
+### 3. Cheney 重跑是否有问题
+
+和之前公平 Cheney 结果比较：
+
+| 指标 | 旧 Cheney | 本次 Cheney rerun | 差值 | 差值比例 |
+|---|---:|---:|---:|---:|
+| total | 6597.027s | 6600.436s | +3.409s | +0.052% |
+| business | 6480.616s | 6484.530s | +3.914s | +0.060% |
+| GC full | 116.411s | 115.903s | -0.508s | -0.436% |
+| GC core | 82.005s | 81.808s | -0.197s | -0.240% |
+| scan_RS | 2.987s | 2.978s | -0.009s | -0.301% |
+| scavenge | 78.314s | 78.130s | -0.184s | -0.235% |
+
+结论：
+
+```text
+这次没有看到 Cheney 实现坏掉的证据。
+Cheney 重跑结果和旧结果非常接近。
+Richards 虽然单项运行非常久，但旧结果和重跑结果只差 +1.158s / +0.067%，不是这次新出现的异常。
+```
+
+Cheney 逐项 total 差异：
+
+| benchmark | 本次 - 旧结果 |
+|---|---:|
+| Bounce | +2.574s |
+| CD | +1.392s |
+| DeltaBlue | -0.007s |
+| Havlak | -1.962s |
+| List | -0.285s |
+| Mandelbrot | -0.419s |
+| NBody | -1.713s |
+| Permute | +4.308s |
+| Queens | -0.695s |
+| Richards | +1.158s |
+| Sieve | -0.481s |
+| Storage | -0.225s |
+| Towers | -0.236s |
+
+### 4. 本次 Cheney vs GiYSBF512
+
+| 指标 | Cheney rerun | GiYSBF512 | GiYSBF512 - Cheney |
+|---|---:|---:|---:|
+| total | 6600.436s | 6606.753s | +6.317s (+0.096%) |
+| business | 6484.530s | 6470.558s | -13.972s (-0.215%) |
+| GC full | 115.903s | 136.195s | +20.292s (+17.508%) |
+| GC core | 81.808s | 102.458s | +20.650s |
+| scan_roots | 0.702s | 0.629s | -0.073s |
+| scan_RS | 2.978s | 2.455s | -0.523s |
+| scavenge | 78.130s | 99.374s | +21.244s |
+
+结论：
+
+```text
+GiYSBF512 的 total 几乎追平 Cheney，只慢 0.096%。
+但是 GC full 仍然比 Cheney 慢 17.5%。
+差距主要不是 scan_RS，而是 scavenge。
+这说明“old slot patch 改成普通 store”已经解决了 remembered-set slot patch 的大问题；
+剩下的主要成本在 GiYSBF 的 tiny/staging copy 路径。
+```
+
+逐项看，GiYSBF512 相对 Cheney 的主要 GC 损失：
+
+| benchmark | total 差值 | GC full 差值 | business 差值 |
+|---|---:|---:|---:|
+| CD | -4.426s | +2.099s | -6.524s |
+| Havlak | -2.363s | +5.566s | -7.928s |
+| NBody | +2.311s | +1.061s | +1.251s |
+| Storage | +10.535s | +10.686s | -0.151s |
+| Sieve | +0.585s | +0.125s | +0.461s |
+
+最明显的问题是 Storage：
+
+```text
+Storage 中 GiYSBF512 比 Cheney 慢 +10.535s，
+而 GC full 正好慢 +10.686s。
+所以 Storage 的劣化几乎完全来自 GC。
+```
+
+### 5. GiYSBF512 vs GiYSBF256
+
+和之前的 GiYSBF256 结果比较：
+
+| 指标 | GiYSBF256 | GiYSBF512 | 512 - 256 |
+|---|---:|---:|---:|
+| total | 6672.226s | 6606.753s | -65.473s (-0.981%) |
+| business | 6530.585s | 6470.558s | -60.027s (-0.919%) |
+| GC full | 141.644s | 136.195s | -5.449s (-3.847%) |
+| GC core | 108.141s | 102.458s | -5.683s (-5.255%) |
+| scan_RS | 2.430s | 2.455s | +0.025s |
+| scavenge | 105.095s | 99.374s | -5.721s |
+
+但是这里要小心：
+
+```text
+total 改善 -65.473s 中，有 -61.574s 来自 Richards。
+而 Richards 的 GC 时间几乎没有变化。
+所以 total 上看 512B 明显优于 256B，这个结论主要被 business 时间波动放大了。
+```
+
+去掉 Richards 后：
+
+| 配置 | total | business | GC full |
+|---|---:|---:|---:|
+| GiYSBF256 | 4875.205s | 4733.724s | 141.485s |
+| GiYSBF512 | 4871.306s | 4735.271s | 136.034s |
+
+去掉 Richards 后的结论：
+
+```text
+512B 仍然比 256B 的 GC full 快约 5.45s。
+这是真实存在的 GC 方向改善。
+但 total 只快约 3.90s，幅度很小。
+```
+
+512B 相对 256B 的主要 GC 改善来自：
+
+| benchmark | GC full 差值 | scavenge 差值 |
+|---|---:|---:|
+| CD | -1.545s | -1.558s |
+| Havlak | -4.110s | -4.034s |
+| Storage | -0.193s | -0.154s |
+
+推断：
+
+```text
+512B threshold 比 256B 更好，说明有一部分 256B 到 512B 的对象进入 staging/批量路径后，
+确实减少了一些 scavenge 成本，尤其是 CD 和 Havlak。
+但是改善幅度不够大，无法抵消 GiYSBF 相对标准 GiY / Cheney 的 staging 路径额外成本。
+```
+
+### 6. 和标准 GiY 的关系
+
+之前同口径的标准 GiY 结果：
+
+| 配置 | total | business | GC full | GC core | scavenge |
+|---|---:|---:|---:|---:|---:|
+| 标准 GiY | 6630.018s | 6518.418s | 111.600s | 78.494s | 75.868s |
+| GiYSBF512 | 6606.753s | 6470.558s | 136.195s | 102.458s | 99.374s |
+
+解释：
+
+```text
+从 GC 时间看，标准 GiY 仍然明显更好。
+GiYSBF512 的 GC full 比标准 GiY 慢约 24.595s。
+GiYSBF512 的 total 看起来比标准 GiY 快约 23.265s，
+但这个 total 优势主要来自 business 时间差异，而且两组不是同一次脚本中同时重跑，
+所以不能把它当成 GiYSBF512 在端到端上稳定战胜标准 GiY 的强证据。
+```
+
+目前更可信的判断：
+
+```text
+1. old slot patch 使用普通 store 是正确方向，因为 scan_RS 已经降到很小。
+2. GiYSBF512 比 GiYSBF256 在 GC 上稍好，512B threshold 可以继续保留为候选。
+3. 但 GiYSBF 系列当前真正的瓶颈仍然是 scavenge，也就是 tiny/staging copy 本身。
+4. 如果继续优化 GiYSBF，重点不应该再放在 old slot patch 的 NT store，
+   而应该放在减少 staging 路径的二次 copy、减少 tiny table 记录成本、
+   或者只对真正值得 batch 的对象区域启用 staging。
+```
+
+### 7. 当前建议
+
+下一步更合理的方向：
+
+```text
+不要继续无脑增大 tiny threshold。
+512B 虽然比 256B 好一点，但仍然让 GC 明显慢于标准 GiY。
+
+应该改成“有条件启用 staging”：
+  1. 默认仍使用标准 GiY 的一次 copy。
+  2. 只有当一个 minor GC 中 tiny 对象累计到足够多、并且能填满 staging buffer 时，
+     才启用 GiYSBF 的批量 staging/NT 路径。
+  3. 如果对象数量少、总字节数少、或者 flush 次数太少，
+     直接走标准 GiY copy，避免 tiny table 和二次 copy 的固定成本。
+```
+
+## 2026-05-25：Are We Fast Yet benchmark 是否适合 GC 压力测试
+
+### 1. Are We Fast Yet 原本是为了什么
+
+Are We Fast Yet, AWFY, 原本不是专门为了 GC 设计的 benchmark suite。
+
+它的主要目标是：
+
+```text
+比较不同语言实现，而不是比较语言本身；
+观察 compiler / runtime 是否能把常见抽象的开销优化掉；
+重点抽象包括 object、closure、array、string 等核心语言机制。
+```
+
+官方 README 也明确说，很多其他因素，包括 GC、标准库、语言特有抽象，并不是这个项目最初覆盖的重点。
+
+所以 AWFY 更像是：
+
+```text
+语言实现 / VM / compiler / runtime 的综合性能测试
+```
+
+而不是：
+
+```text
+专门的 GC stress benchmark
+```
+
+### 2. 它是否完全不能用来测 GC
+
+不是。
+
+AWFY 里确实有一些 benchmark 会制造明显 GC 压力，例如：
+
+```text
+Storage:
+  创建并检查 array tree；
+  官方说明中明确说它会 stress the garbage collector。
+
+CD / Havlak:
+  分配量大，对象图复杂；
+  对 GC、object layout、hash table / array representation 都比较敏感。
+
+DeltaBlue / Richards:
+  更像 VM/object/message/dispatch 相关压力；
+  会产生对象，但不一定是纯 GC 压力。
+
+List / Bounce / Sieve / Towers / Permute:
+  有些会分配对象，但规模和结构比较单一；
+  作为 GC 代表性 workload 不够强。
+```
+
+### 3. 对当前 GiY / Cheney / GiYSB 研究的意义
+
+当前研究关注的是：
+
+```text
+minor GC；
+young -> old promotion；
+remembered set；
+old slot patch；
+copy order；
+local workspace / cache friendliness；
+staging buffer / NT store。
+```
+
+AWFY 可以用来观察这些优化在“正常 JavaScript 程序风格”下是否有副作用。
+
+但是它不能单独证明一个 GC 设计一定好，因为：
+
+```text
+1. 它不是专门控制 live ratio 的 GC benchmark。
+2. 它不是专门控制 object size distribution 的 benchmark。
+3. 它不是专门控制 remembered-set density 的 benchmark。
+4. 它没有系统覆盖不同对象图形状。
+5. 很多 benchmark 的 total time 主要受 business logic/JIT/runtime dispatch 影响，
+   GC 时间只占一小部分。
+```
+
+因此，对论文来说，AWFY 适合作为：
+
+```text
+真实一些的 VM-level benchmark suite；
+用来说明 GC 改动不会只在人工 microbenchmark 中有效。
+```
+
+但还需要补充专门的 GC microbenchmark。
+
+### 4. 建议的使用方式
+
+当前应该把 AWFY 分成两类看：
+
+```text
+GC 压力较强：
+  Storage
+  Havlak
+  CD
+  NBody
+  Mandelbrot
+
+GC 压力较弱或容易被业务时间淹没：
+  Richards
+  Permute
+  Towers
+  List
+  Queens
+  Bounce
+  Sieve
+```
+
+注意：这个分类不是 AWFY 官方分类，而是根据当前实验中 GC full / total 的比例，以及分配和对象图特征做出的研究用途分类。
+
+### 5. 最重要的结论
+
+```text
+AWFY 可以用于 GC 论文中的宏观评估，但不应该作为唯一证据。
+
+对于 GiY / GiYSB 这种具体研究，需要同时报告：
+  1. AWFY full suite 的 total time 和 GC time；
+  2. GC-heavy 子集，例如 Storage / Havlak / CD；
+  3. 自己设计的 GC microbenchmarks，用来单独控制 live ratio、object size、RSet 数量、对象连续性。
+```
+
+如果只用 AWFY，容易出现一个问题：
+
+```text
+GC 优化已经变好了，
+但 total time 被 business logic 噪音盖住；
+
+或者 total time 看起来变好了，
+但其实只是某个 benchmark 的业务时间波动，
+不是 GC 真的更好。
+```
+
+所以论文中更稳妥的说法是：
+
+```text
+We use Are We Fast Yet as a VM-level macrobenchmark suite,
+and complement it with GC-focused microbenchmarks to isolate the effects of allocation rate,
+live-object ratio, remembered-set pressure, and object-size distribution.
+```
+
+## 2026-05-25：加大 GiYSBF staging buffer 是否能降低 scavenge 压力
+
+### 1. 当前代码路径
+
+当前 GiYSB / GiYSBF 的 staging 逻辑在：
+
+```text
+ejsvm/GiY.cc:3046
+giysb_flush_staging()
+  staging buffer -> old/DRAM，使用 forced NT copy。
+
+ejsvm/GiY.cc:3084
+giysb_stage_tiny_chunk()
+  tiny object 从 young/local workspace memcpy 到 staging buffer。
+
+ejsvm/GiY.cc:3143
+giysb_flush_tiny_table()
+  遍历 tiny table，把若干 tiny object 按目标 old 地址顺序分 chunk；
+  如果 chunk_bytes + nbytes > staging_capacity，就 flush 一个 chunk。
+```
+
+所以当前数据路径是：
+
+```text
+young object -> staging buffer -> old/DRAM
+```
+
+而不是：
+
+```text
+young object -> old/DRAM
+```
+
+因此，staging 路径天然比标准 GiY 多一次 copy。
+
+### 2. 加大 staging buffer 可能减少什么
+
+加大 staging buffer 可能减少：
+
+```text
+1. flush 次数；
+2. 每次 flush 的固定开销；
+3. 最后一次 tail flush 太小的问题；
+4. NT store stream 过碎的问题。
+```
+
+也就是说，如果当前瓶颈是：
+
+```text
+staging buffer 太小，导致 tiny objects 被切成太多小 chunk；
+每个 chunk 都要执行一次 NT copy；
+NT stream 太短，无法发挥连续写优势。
+```
+
+那么把 staging 从 8KB 增加到 16KB 或 32KB，理论上可能降低一部分 scavenge 时间。
+
+### 3. 加大 staging buffer 不能减少什么
+
+加大 staging buffer 不能减少：
+
+```text
+1. live object 数量；
+2. object graph 扫描次数；
+3. pointer patch 次数；
+4. young -> staging 的第一次 memcpy；
+5. staging -> old 的总写入字节数。
+```
+
+因此，如果当前 scavenge 变慢的主要原因是：
+
+```text
+每个 tiny object 都多了一次 young -> staging memcpy；
+tiny table decode / chunk 管理有额外开销；
+staging buffer 写入和读取本身消耗 cache bandwidth；
+```
+
+那么单纯加大 staging buffer 不会根本解决问题。
+
+### 4. 当前判断
+
+基于现有结果：
+
+```text
+GiYSBF512 相比 Cheney：
+  scan_RS 更低；
+  但 scavenge 明显更高。
+
+GiYSBF512 相比 GiYSBF256：
+  scavenge 有改善，但改善幅度只有约 5.7s。
+```
+
+这说明：
+
+```text
+现在问题已经不在 old slot patch / remembered set 扫描；
+主要问题确实在 tiny/staging materialization 路径。
+```
+
+加大 staging buffer 有可能进一步减少 chunk/flush 开销，但不应该期待它把 GiYSBF 的 scavenge 降到标准 GiY 的水平。
+
+### 5. 公平实验设计
+
+如果要测试 staging buffer 大小，不应该只把 8KB 改成 32KB 后直接比较，因为这样会改变 local workspace 内部结构。
+
+更公平的方案有两个：
+
+```text
+方案 A：固定 local workspace = 896KB，固定 young after aux
+  增大 staging buffer 的同时，等量缩小 tiny table 或 padding。
+  这样总 workspace 和 young 大小不变。
+
+方案 B：固定 tiny table = 64KB，增大 staging buffer
+  但这会挤占 young 区，使 minor GC 次数可能增加。
+  如果性能变差，可能是 staging 本身差，也可能是 young 变小导致 GC 变频繁。
+```
+
+因此，推荐先做方案 A。
+
+例如：
+
+```text
+8KB staging + 64KB tiny table   当前版本
+16KB staging + 56KB tiny table
+32KB staging + 40KB tiny table
+```
+
+前提是打开 GIYSB_PROFILE，确认 tiny table 的最大使用量没有超过缩小后的容量。
+
+### 6. 我当前的判断
+
+```text
+进一步加大 staging buffer 有可能小幅降低 scavenge，
+但更可能只是减少 flush overhead，而不是解决主要瓶颈。
+
+如果 8KB 已经能形成足够大的 NT chunk，
+那么 16KB/32KB 的收益会很小。
+
+如果 flush 次数非常多、tail chunk 很多、平均 chunk 很小，
+那么加大 staging 才值得。
+```
+
+最应该先测的不是直接 full benchmark，而是打开 profile 得到：
+
+```text
+staging_flushes
+staging_full_flushes
+staging_tail_flushes
+staged_objects
+staged_bytes
+max_tiny_table_entries_per_gc
+```
+
+如果 profile 显示 full flush 次数很多，说明 8KB staging 可能太小。
+如果 tail flush 占比很高，或者 staged bytes 不大，说明加大 staging 没什么意义。
+
+### 7. 下一步建议
+
+推荐下一步：
+
+```text
+1. 先用 GIYSB_PROFILE 跑 Storage / Havlak / CD。
+2. 看 8KB staging 的 flush 次数和平均 flush 大小。
+3. 如果 8KB 确实切得太碎，再测试 16KB / 32KB。
+4. 测试时保持 local workspace 和 young after aux 不变，优先从 tiny table 挪空间给 staging。
+```
+
+目前不建议直接上 64KB 或更大 staging。
+原因是 staging 变大后会更明显挤占 local workspace，而且此前 GiYOL 大 staging 实验已经说明：
+
+```text
+大 staging 不能消除 double-copy 成本；
+如果对象太小、数量太多，双拷贝成本仍然会压过连续 NT store 的收益。
+```
+
+## 2026-05-25：准备运行 GiYSBF512 + GIYSB_PROFILE 完整测试
+
+本次用户要求：
+
+```text
+打开 profile，全面测试当前 512B 阈值版本的真实数据。
+```
+
+本次实验配置：
+
+```text
+配置名：giysbf512_profile_896
+OPT_GC=giy
+GC Local Workspace=896KB
+GIY_RSET_READ_SLOT_AT_GC=true
+GIY_GC_STACK_BYTES=49152
+GIY_NT_COPY_BITS=256
+GIY_OLD_SLOT_NT_STORE=0
+GIY_SB=true
+GIYSB_STAGING_BYTES=8192
+GIYSB_TINY_TABLE_BYTES=65536
+GIYSB_TINY_OBJECT_MAX_BYTES=512
+GIYSB_PROFILE=true
+EJS_DISABLE_GC_PMU=1
+```
+
+注意：
+
+```text
+打开 GIYSB_PROFILE 后会在 reserve/staging/flush 路径增加计数操作。
+因此本次时间结果是 profile build 下的性能数据；
+主要价值是得到 staged bytes、flush 次数、平均 flush 大小、tiny table 最大占用等真实行为数据。
+```
+
+新增脚本：
+
+```text
+tools/run_giysbf512_profile_benchmarks.sh
+```
+
+解析脚本也已扩展：
+
+```text
+tools/parse_giy_slot_cached_store_benchmarks.py
+```
+
+新增解析字段包括：
+
+```text
+giysb_tiny_reserved_objects / MB
+giysb_tiny_overflow_objects / MB
+giysb_large_reserved_objects / MB
+giysb_staged_tiny_objects / MB
+giysb_direct_tiny_objects / MB
+giysb_max_tiny_table_entries
+giysb_staging_flushes
+giysb_staging_full_flushes
+giysb_staging_tail_flushes
+giysb_avg_staging_flush_kb
+```
+
+## 2026-05-25 到 2026-05-26：GiYSBF512 + GIYSB_PROFILE 完整测试结果
+
+### 1. 实验状态
+
+输出目录：
+
+```text
+build.debug/benchmarks/out_giysbf512_profile_20260525_225757
+```
+
+执行时间：
+
+```text
+开始：2026-05-25 22:57:57 JST
+结束：2026-05-26 00:50:51 JST
+```
+
+状态：
+
+```text
+build.status = 0
+smoke giy_gc_probe.status = 0
+13 个 AWFY benchmark 全部 status = 0
+```
+
+解析结果：
+
+```text
+build.debug/benchmarks/out_giysbf512_profile_20260525_225757/summary.csv
+build.debug/benchmarks/out_giysbf512_profile_20260525_225757/compare_slot_cached_store.md
+```
+
+### 2. 本次 profile 版本的整体性能
+
+| 指标 | GiYSBF512 + profile |
+|---|---:|
+| total | 6608.126s |
+| business | 6470.031s |
+| GC full | 138.098s |
+| GC core | 104.780s |
+| scan_roots | 0.618s |
+| scan_RS | 2.477s |
+| scavenge | 101.686s |
+| minor GC count | 1,187,074 |
+| forward ops | 1,674,514,926 |
+
+和非 profile 的 GiYSBF512 比较：
+
+| 指标 | 非 profile 512B | profile 512B | profile - 非 profile |
+|---|---:|---:|---:|
+| total | 6606.753s | 6608.126s | +1.373s (+0.021%) |
+| business | 6470.558s | 6470.031s | -0.527s (-0.008%) |
+| GC full | 136.195s | 138.098s | +1.903s (+1.397%) |
+| GC core | 102.458s | 104.780s | +2.322s (+2.266%) |
+| scan_RS | 2.455s | 2.477s | +0.022s (+0.896%) |
+| scavenge | 99.374s | 101.686s | +2.312s (+2.327%) |
+
+结论：
+
+```text
+GIYSB_PROFILE 的时间开销存在，但这次很小。
+total 只增加 0.021%，GC full 增加约 1.4%。
+因此本次 profile 数据可以用来判断 staging 的真实行为；
+但论文中的主要性能数字仍应使用非 profile build。
+```
+
+### 3. GiYSB profile 关键数据
+
+| 指标 | 数值 |
+|---|---:|
+| tiny reserved objects | 1,734,327,391 |
+| tiny reserved bytes | 99,380.53 MB |
+| large reserved objects | 231,518 |
+| large reserved bytes | 4,072.18 MB |
+| staged tiny objects | 1,734,327,391 |
+| staged tiny bytes | 99,380.53 MB |
+| staging flushes | 13,623,581 |
+| full flushes | 12,439,537 |
+| tail flushes | 1,184,044 |
+| full flush ratio | 91.31% |
+| tail flush ratio | 8.69% |
+| average flush size | 7.47KB |
+| max tiny table entries per GC | 12,762 |
+
+解释：
+
+```text
+tiny/staging 路径处理了约 99.38GB 数据。
+large 路径只有约 4.07GB。
+也就是说，在 512B threshold 下，约 96.1% 的 promoted bytes 都走了 staging/tiny path。
+```
+
+这很重要：
+
+```text
+GiYSBF512 几乎把绝大多数 copied bytes 都放进了 tiny/staging 路径。
+所以当前 scavenge 变慢，基本可以认为是 staging path 本身的成本，而不是少量边角开销。
+```
+
+### 4. 各 benchmark 的 staging 行为
+
+| benchmark | staged MB | flushes | avg flush KB | max table entries |
+|---|---:|---:|---:|---:|
+| Bounce | 27.76 | 6,027 | 4.716 | 573 |
+| CD | 8,797.60 | 1,186,023 | 7.596 | 3,907 |
+| DeltaBlue | 1,166.15 | 158,098 | 7.553 | 12,762 |
+| Havlak | 30,257.19 | 4,015,414 | 7.716 | 11,671 |
+| List | 0.73 | 646 | 1.157 | 414 |
+| Mandelbrot | 36.03 | 288,701 | 0.128 | 343 |
+| NBody | 312.79 | 358,605 | 0.893 | 504 |
+| Permute | 0.03 | 144 | 0.213 | 361 |
+| Queens | 0.88 | 1,336 | 0.674 | 364 |
+| Richards | 8.53 | 2,589 | 3.374 | 683 |
+| Sieve | 1.25 | 23,171 | 0.055 | 336 |
+| Storage | 58,771.46 | 7,582,614 | 7.937 | 9,677 |
+| Towers | 0.13 | 213 | 0.625 | 381 |
+
+最重要的三个 GC-heavy benchmark：
+
+```text
+Storage:
+  staged = 58,771.46MB
+  flushes = 7,582,614
+  avg flush = 7.937KB
+
+Havlak:
+  staged = 30,257.19MB
+  flushes = 4,015,414
+  avg flush = 7.716KB
+
+CD:
+  staged = 8,797.60MB
+  flushes = 1,186,023
+  avg flush = 7.596KB
+```
+
+这说明：
+
+```text
+在真正重要的 GC-heavy 项里，8KB staging 基本已经被填满。
+因此当前问题不是 staging buffer 经常装不满。
+```
+
+### 5. 对“是否应该加大 staging buffer”的新判断
+
+之前的问题是：加大 staging buffer 是否可能降低 scavenge 压力。
+
+现在 profile 数据给出的答案更清楚：
+
+```text
+有可能小幅降低 flush 次数和 NT copy 调用次数；
+但不太可能根本降低 scavenge 压力。
+```
+
+理由：
+
+```text
+1. 平均 flush 已经是 7.47KB，接近当前 8KB staging 上限。
+2. Storage / Havlak / CD 的平均 flush 都在 7.6KB 到 7.94KB。
+3. full flush 占 91.31%，tail flush 只有 8.69%。
+4. 这说明 8KB staging 不是“太小导致大量半空 flush”的状态。
+5. 真正大的成本是 99.38GB tiny data 都经历了 young -> staging -> old 的 double-copy。
+```
+
+因此：
+
+```text
+把 staging 从 8KB 提高到 16KB，可能减少大约一部分 flush 调用次数；
+但 copied bytes 仍然是同样的 99.38GB staged bytes，
+young -> staging 的第一次 memcpy 仍然存在。
+```
+
+### 6. 当前 table 空间是否有余量
+
+当前 tiny table：
+
+```text
+GIYSB_TINY_TABLE_BYTES = 64KB
+entry size = 4B
+capacity = 16,384 entries
+observed max = 12,762 entries
+```
+
+因此 table 不是当前瓶颈。
+
+按 observed max 估算：
+
+```text
+12,762 entries * 4B = 51,048B
+```
+
+所以 52KB tiny table 理论上仍然够用。
+
+公平扩大 staging 的候选配置：
+
+```text
+当前：
+  8KB staging + 64KB tiny table
+
+比较安全：
+  16KB staging + 56KB tiny table
+
+激进但仍可能安全：
+  20KB staging + 52KB tiny table
+
+不安全：
+  32KB staging + 40KB tiny table
+```
+
+原因：
+
+```text
+40KB tiny table capacity = 10,240 entries，
+小于本次观察到的 max 12,762 entries。
+如果直接改成 32KB staging + 40KB tiny table，
+可能导致 table overflow 或行为变化，因此不公平。
+```
+
+### 7. 和 GiY / Cheney 的 GC-heavy 子集对比
+
+这里只看 CD / Havlak / Storage：
+
+| 配置 | total | GC full | scavenge |
+|---|---:|---:|---:|
+| Cheney | 1604.802s | 98.184s | 76.626s |
+| 标准 GiY | 1612.837s | 93.628s | 73.708s |
+| GiYSBF512 非 profile | 1608.548s | 116.535s | 96.295s |
+| GiYSBF512 profile | 1615.750s | 119.017s | 98.614s |
+
+结论：
+
+```text
+在真正 GC-heavy 的 CD/Havlak/Storage 上，
+GiYSBF512 的 total 接近 Cheney/GiY，
+但 GC full 和 scavenge 明显更差。
+```
+
+这进一步说明：
+
+```text
+GiYSBF512 当前不是因为 remembered set 或 slot patch 慢；
+它主要输在 staging materialization 的 scavenge 路径。
+```
+
+### 8. 当前最可信结论
+
+```text
+1. 本次 profile run 成功，所有 benchmark status=0。
+2. profile overhead 很小，可以信任这些行为计数。
+3. 512B threshold 下，staging path 承担了绝大多数 promoted bytes。
+4. 8KB staging 在 Storage/Havlak/CD 中基本能填满，不是明显太小。
+5. 加大 staging buffer 可能减少 flush 次数，但不能消除 double-copy。
+6. 如果继续实验，最公平的是：
+   16KB staging + 56KB tiny table
+   或 20KB staging + 52KB tiny table
+   同时保持 total aux/local workspace 不变。
+7. 不建议直接试 32KB staging + 40KB table，因为本次 max table entries 已经超过 40KB table 容量。
+```
+
+## 2026-05-26：准备运行 16KB staging + 64KB tiny table 公平对照实验
+
+用户决定采用：
+
+```text
+GiYSBF staging buffer = 16KB
+GiYSBF tiny table = 64KB
+```
+
+本次要公平比较四组：
+
+```text
+1. GiYSBF512:
+   staging = 16KB
+   tiny table = 64KB
+   tiny threshold = 512B
+
+2. GiYSBF256:
+   staging = 16KB
+   tiny table = 64KB
+   tiny threshold = 256B
+
+3. GiY:
+   与 GiYSBF16KB 配置使用相同 young after aux
+
+4. Cheney:
+   与 GiYSBF16KB 配置使用相同 young after aux
+```
+
+公平性计算：
+
+```text
+GC Local Workspace = 896KB
+young before aux = 684.24KB
+
+GiYSBF16KB aux:
+  GC stack = 48KB
+  FT slot set = 32KB
+  staging = 16KB
+  tiny table = 64KB
+  total aux = 160KB
+
+因此：
+  young after aux = 684.24KB - 160KB = 524.24KB
+```
+
+为了让 GiY 和 Cheney 也使用相同 young 区：
+
+```text
+GiY:
+  stack = 48KB
+  FT slot set = 32KB
+  padding = 80KB
+  total aux = 160KB
+  young after aux = 524.24KB
+
+Cheney:
+  FT slot set = 32KB
+  padding = 128KB
+  total aux = 160KB
+  young after aux = 524.24KB
+```
+
+本次 benchmark 不打开 profile，不打开 PMU/cache miss：
+
+```text
+GIYSB_PROFILE=false
+EJS_DISABLE_GC_PMU=1
+GIY_OLD_SLOT_NT_STORE=0
+GIY_NT_COPY_BITS=256
+```
+
+新增运行脚本：
+
+```text
+tools/run_giysbf_staging16_fair_benchmarks.sh
+```
+
+该脚本会：
+
+```text
+1. 分别 build 四个配置；
+2. 每个配置先跑 giy_gc_probe smoke；
+3. 按 benchmark 交错运行四个配置；
+4. 输出 summary.csv 和 compare_slot_cached_store.md 可由现有 parser 解析。
+```
+
+## 2026-05-26：16KB staging + 64KB tiny table 公平 benchmark 结果
+
+本次实验已经完整跑完。
+
+输出目录：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_giysbf_s16_fair_20260526_012544
+```
+
+运行时间：
+
+```text
+started_at = 2026-05-26T01:25:44+09:00
+ended_at   = 2026-05-26T08:54:58+09:00
+```
+
+状态检查：
+
+```text
+status 文件数量 = 60
+所有 build / smoke / 13 个 benchmark * 4 个配置 的 status 都是 0
+```
+
+本次比较的四组配置：
+
+| 配置 | staging | tiny table | tiny 阈值 | young after aux | aux total |
+|---|---:|---:|---:|---:|---:|
+| GiYSBF512 | 16KB | 64KB | 512B | 524.24KB | 160KB |
+| GiYSBF256 | 16KB | 64KB | 256B | 524.24KB | 160KB |
+| GiY 同 young | 无 | 无 | 无 | 524.24KB | 160KB |
+| Cheney 同 young | 无 | 无 | 无 | 524.24KB | 160KB |
+
+本次没有打开 profile，也没有打开 PMU/cache miss 测量。这样做是为了避免额外测量逻辑影响时间结果。
+
+```text
+GIYSB_PROFILE=false
+EJS_DISABLE_GC_PMU=1
+GIY_OLD_SLOT_NT_STORE=0
+GIY_NT_COPY_BITS=256
+```
+
+### Aggregate 结果
+
+| 配置 | 总时间 sec | business sec | GC full sec | GC core sec | scan_RS sec | scavenge sec | minor GC |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| GiYSBF512 | 6600.882 | 6464.378 | 136.504 | 103.227 | 2.451 | 100.178 | 1204833 |
+| GiYSBF256 | 6601.824 | 6459.434 | 142.387 | 108.821 | 2.470 | 105.741 | 1204833 |
+| GiY 同 young | 6551.910 | 6441.439 | 110.471 | 77.480 | 2.049 | 74.848 | 1204833 |
+| Cheney 同 young | 6542.159 | 6425.934 | 116.224 | 81.280 | 2.910 | 77.705 | 1195835 |
+
+### 主要差异
+
+以 GiY 同 young 为基准：
+
+| 配置 | 总时间差 | 总时间差 % | GC full 差 | GC full 差 % | GC core 差 | GC core 差 % |
+|---|---:|---:|---:|---:|---:|---:|
+| GiYSBF512 - GiY | +48.972 sec | +0.747% | +26.033 sec | +23.565% | +25.747 sec | +33.231% |
+| GiYSBF256 - GiY | +49.914 sec | +0.762% | +31.916 sec | +28.891% | +31.341 sec | +40.450% |
+| Cheney - GiY | -9.751 sec | -0.149% | +5.753 sec | +5.208% | +3.800 sec | +4.904% |
+
+以 Cheney 同 young 为基准：
+
+| 配置 | 总时间差 | 总时间差 % | GC full 差 | GC full 差 % | GC core 差 | GC core 差 % |
+|---|---:|---:|---:|---:|---:|---:|
+| GiYSBF512 - Cheney | +58.723 sec | +0.898% | +20.280 sec | +17.449% | +21.947 sec | +27.002% |
+| GiYSBF256 - Cheney | +59.665 sec | +0.912% | +26.163 sec | +22.511% | +27.541 sec | +33.884% |
+| GiY - Cheney | +9.751 sec | +0.149% | -5.753 sec | -4.950% | -3.800 sec | -4.675% |
+
+GiYSBF512 和 GiYSBF256 的直接比较：
+
+| 指标 | GiYSBF512 - GiYSBF256 |
+|---|---:|
+| 总时间 | -0.942 sec |
+| business 时间 | +4.944 sec |
+| GC full | -5.883 sec |
+| GC core | -5.594 sec |
+| scavenge | -5.563 sec |
+
+解释：512B 阈值版本的 GC 明显比 256B 阈值版本轻一些，但是 business 时间反而慢一些，所以最后总时间几乎一样。单看这次结果，GiYSBF 内部 512B 阈值比 256B 阈值更好。
+
+### 每个 benchmark 相对 GiY 的总时间差
+
+正数表示比 GiY 慢，负数表示比 GiY 快。
+
+| Benchmark | GiYSBF512 - GiY | GiYSBF256 - GiY | Cheney - GiY |
+|---|---:|---:|---:|
+| Bounce | +0.743 | +13.325 | +0.184 |
+| CD | -0.198 | +8.466 | +1.135 |
+| DeltaBlue | +0.504 | +0.450 | -3.309 |
+| Havlak | +7.772 | +8.173 | +15.301 |
+| List | -0.510 | -0.621 | -0.801 |
+| Mandelbrot | -3.304 | -0.954 | -6.398 |
+| NBody | -17.816 | -18.547 | -15.291 |
+| Permute | +20.028 | +9.084 | -2.331 |
+| Queens | -0.073 | +14.169 | -0.025 |
+| Richards | -0.522 | -2.237 | -6.853 |
+| Sieve | +23.512 | +0.351 | +0.199 |
+| Storage | +18.930 | +18.449 | +7.899 |
+| Towers | -0.094 | -0.194 | +0.539 |
+
+### 每个 benchmark 相对 GiY 的 GC full 时间差
+
+正数表示 GC 比 GiY 慢，负数表示 GC 比 GiY 快。
+
+| Benchmark | GiYSBF512 - GiY | GiYSBF256 - GiY | Cheney - GiY |
+|---|---:|---:|---:|
+| Bounce | +0.015 | +0.015 | +0.019 |
+| CD | +0.615 | +2.073 | -1.621 |
+| DeltaBlue | +0.553 | +0.533 | +0.070 |
+| Havlak | +4.259 | +8.325 | -1.825 |
+| List | +0.000 | +0.002 | +0.000 |
+| Mandelbrot | +0.076 | +0.225 | -0.138 |
+| NBody | +0.461 | +0.724 | +0.554 |
+| Permute | +0.000 | +0.000 | +0.000 |
+| Queens | -0.001 | +0.000 | +0.001 |
+| Richards | -0.001 | -0.001 | +0.008 |
+| Sieve | +0.064 | +0.097 | -0.060 |
+| Storage | +19.992 | +19.923 | +8.745 |
+| Towers | +0.000 | +0.000 | +0.000 |
+
+### 分析
+
+这次最重要的结论是：在 16KB staging + 64KB tiny table 下，GiYSBF 没有超过标准 GiY，也没有超过 Cheney 同 young 配置。
+
+GiYSBF 的主要问题仍然是 GC core / scavenge 变重。GiYSBF512 相对 GiY：
+
+```text
+GC full  多 26.033 sec
+GC core  多 25.747 sec
+scavenge 多 25.330 sec
+```
+
+GiYSBF256 相对 GiY：
+
+```text
+GC full  多 31.916 sec
+GC core  多 31.341 sec
+scavenge 多 30.893 sec
+```
+
+这说明当前 GiYSBF 的 staging/tiny table 路径没有降低 GC copy 成本，反而增加了 GC 内部工作量。最明显的 benchmark 是 Storage：GiYSBF512 的 GC full 比 GiY 多 19.992 sec，GiYSBF256 多 19.923 sec。也就是说，整体 GC 差距的大部分来自 Storage。
+
+512B 阈值比 256B 阈值更好。512B 的 GC full 比 256B 少 5.883 sec，scavenge 少 5.563 sec。可能原因是：256B 会把 257B 到 512B 的对象走 large/direct 路径，而 512B 会把这些对象也纳入 staging 批量路径。当前数据看起来 staging 对这一段对象可能更合适。但是因为这次没有打开 GiYSB profile，所以不能直接看到 staged bytes / flush count / table occupancy，只能从时间上推断。
+
+GiY 和 Cheney 同 young 的比较也很重要：GiY 的 GC 时间更短，但总时间略慢。
+
+```text
+GiY 相对 Cheney：
+  总时间   +9.751 sec，慢 0.149%
+  GC full  -5.753 sec，快 4.950%
+  GC core  -3.800 sec，快 4.675%
+```
+
+这说明 GiY 的 GC 部分确实有优势，但是这次 single run 中 business 时间比 Cheney 多 15.505 sec，所以总时间被抵消了。论文汇报时应该同时报告 end-to-end 和 GC time，不能只报告其中一个。
+
+这次总时间里有一些 business-time 长尾。例如 GiYSBF512 的 Sieve 比 GiY 慢 23.512 sec，但 GC full 只慢 0.064 sec；GiYSBF512 的 Permute 比 GiY 慢 20.028 sec，但 GC full 没有差异。这种情况说明单次 full suite 的总时间会受到 business 侧噪音或布局影响。GC 算法本身的评价要重点看 GC full / GC core / scavenge。
+
+### 和旧 8KB staging 结果的参考比较
+
+旧 GiYSBF512 8KB staging 结果来自：
+
+```text
+/home/qiancheng/ejs-new/build.debug/benchmarks/out_cheney_rerun_giysbf512_20260525_183854
+```
+
+注意：旧结果 young after aux = 532.24KB，新结果 young after aux = 524.24KB。因此这个比较不是严格同 young，只能作为参考。
+
+| 指标 | 旧 8KB staging | 新 16KB staging | 新 - 旧 |
+|---|---:|---:|---:|
+| 总时间 | 6606.753 | 6600.882 | -5.871 |
+| business | 6470.558 | 6464.378 | -6.180 |
+| GC full | 136.195 | 136.504 | +0.309 |
+| GC core | 102.458 | 103.227 | +0.769 |
+| scavenge | 99.374 | 100.178 | +0.804 |
+| young after aux | 532.24KB | 524.24KB | -8.00KB |
+
+参考结论：16KB staging 这次没有显示出 GC 时间改善。总时间略低主要来自 business 时间略低，不能说明 staging 变大本身有效。
+
+### 本次结论
+
+1. 当前四组里，总时间最好的是 Cheney 同 young，其次是 GiY 同 young；GiYSBF512 和 GiYSBF256 都更慢。
+2. 当前四组里，GC 时间最好的是 GiY 同 young；GiY 的 GC full 比 Cheney 快 5.753 sec。
+3. GiYSBF 内部，512B 阈值比 256B 阈值好，主要体现在 GC core / scavenge 更低。
+4. 但是 GiYSBF 的总体方向目前还没有成功。它的核心问题不是 staging 太小，而是 staging/tiny table 让 GC copy 路径多了额外工作，尤其 Storage 上很明显。
+5. 下一步如果继续优化 GiYSBF，应该重点减少 tiny staging 的额外复制成本，而不是单纯继续增大 staging buffer。
+
+## 2026-05-26 当前可用性确认
+
+结论：当前我可以正常使用，并会按要求把问答结论记录到 `AIlog.md`。
+
+## 2026-05-26：当前项目状况通读总结
+
+本轮用户要求详细阅读当前项目状况，特别是 `AIlog.md`。我已阅读项目结构、`AIlog.md` 最近主线、`important.md`、`roadmap.txt`、当前 git 状态、核心代码改动和最新 benchmark 输出。
+
+### 当前项目主线
+
+项目是 eJS / eJSVM 上的 GC 研究，当前重点是针对 `Cache/Young -> DRAM/Old` 架构的单线程 minor GC 优化。核心思想是 GiY：尽量在 young/cache 区完成对象图遍历和指针修复，最后把存活对象 materialize/copy 到 old/DRAM，并在 old 写入上使用 non-temporal store，减少 old/DRAM 读取和 cache pollution。
+
+当前主要比较对象：
+
+1. `cache_cheney`：传统 cache-aware CheneyGC baseline。
+2. `GiY`：当前标准 GiY，默认 `GIY_RSET_READ_SLOT_AT_GC=1`，GC stack 为 48KB，FT slot set 为 32KB，NT copy 默认 256-bit，old slot patch 当前使用普通 store。
+3. `GiYOL`：历史上的对象组织/NT batching 实验分支，曾证明方向可运行，但当前不是主线。
+4. `GiYSB / GiYSBF`：当前重点实验分支，尝试 small/large old placement、tiny table、staging buffer、forced NT store，把 tiny/small survivor 聚合后写入 old。
+
+### 当前源码和工作区状态
+
+当前 git 工作区不是干净状态。主要修改包括：
+
+```text
+M AIlog.md
+M ejsvm/GiY.cc
+M ejsvm/common.mk
+M important.md
+M build.debug/* 生成/构建产物
+?? tools/parse_giy_slot_cached_store_benchmarks.py
+?? tools/run_cheney_rerun_giysbf512_benchmarks.sh
+?? tools/run_giy_slot_cached_store_benchmarks.sh
+?? tools/run_giysbf512_profile_benchmarks.sh
+?? tools/run_giysbf_staging16_fair_benchmarks.sh
+```
+
+`ejsvm/GiY.cc` 当前重要改动：
+
+1. 新增 `GIY_OLD_SLOT_NT_STORE`，默认 `0`，也就是 old slot patch 默认不用 `_mm_stream_si64`，改回普通 store。
+2. GiYSB tiny table 的 size class 编码从原来的 4 bit 扩到 7 bit：
+   - 旧编码最多支持 `15 * 8B = 120B`；
+   - 新编码支持到 `127 * 8B = 1016B`，因此能覆盖 128B / 256B / 512B tiny threshold 实验。
+3. `common.mk` 已支持通过 make 参数传入 `GIY_OLD_SLOT_NT_STORE`。
+
+### 当前最新可靠实验
+
+最新完整公平实验目录：
+
+```text
+build.debug/benchmarks/out_giysbf_s16_fair_20260526_012544
+```
+
+实验时间：
+
+```text
+started_at = 2026-05-26T01:25:44+09:00
+ended_at   = 2026-05-26T08:54:58+09:00
+```
+
+本次四组配置：
+
+| 配置 | staging | tiny table | tiny threshold | young after aux |
+|---|---:|---:|---:|---:|
+| GiYSBF512 | 16KB | 64KB | 512B | 524.24KB |
+| GiYSBF256 | 16KB | 64KB | 256B | 524.24KB |
+| GiY 同 young | 无 | 无 | 无 | 524.24KB |
+| Cheney 同 young | 无 | 无 | 无 | 524.24KB |
+
+聚合结果：
+
+| 配置 | Total | Business | GC full | GC core | scan_RS | scavenge |
+|---|---:|---:|---:|---:|---:|---:|
+| GiYSBF512 | 6600.882 | 6464.378 | 136.504 | 103.227 | 2.451 | 100.178 |
+| GiYSBF256 | 6601.824 | 6459.434 | 142.387 | 108.821 | 2.470 | 105.741 |
+| GiY 同 young | 6551.910 | 6441.439 | 110.471 | 77.480 | 2.049 | 74.848 |
+| Cheney 同 young | 6542.159 | 6425.934 | 116.224 | 81.280 | 2.910 | 77.705 |
+
+当前最重要结论：
+
+1. 最新公平实验中，总时间最好的是 Cheney 同 young，其次是 GiY 同 young；GiYSBF512 / GiYSBF256 都更慢。
+2. GC 时间最好的是 GiY 同 young。GiY 的 `GC full` 比 Cheney 快 `5.753s`，说明 GiY 的核心 GC 路径仍有优势。
+3. GiYSBF512 比 GiYSBF256 好，主要体现在 `GC core / scavenge` 更低；但两者都明显慢于标准 GiY。
+4. GiYSBF 当前失败点不是 remembered set，也不是 old slot patch，而是 tiny/staging materialization 路径额外增加了 GC copy 工作。
+5. Storage 是最明显的问题来源：GiYSBF512 的 Storage `GC full` 比 GiY 多约 `19.992s`。
+
+### staging buffer 判断
+
+`GIYSB_PROFILE` 版本的最新行为数据目录：
+
+```text
+build.debug/benchmarks/out_giysbf512_profile_20260525_225757
+```
+
+关键 profile 结果：
+
+```text
+staged tiny bytes = 99,380.53 MB
+large reserved bytes = 4,072.18 MB
+staging flushes = 13,623,581
+full flushes = 12,439,537
+tail flushes = 1,184,044
+avg flush size = 7.47KB
+max tiny table entries = 12,762
+```
+
+这说明 512B threshold 下，大约 96% promoted bytes 都走 tiny/staging 路径。8KB staging 在 Storage / Havlak / CD 中基本能填满，因此主要问题不是 staging 太小，而是 `young -> staging -> old` 的 double-copy 和 tiny table/staging 管理成本。
+
+16KB staging + 64KB tiny table 的结果也没有显示 GC 时间改善：
+
+```text
+旧 8KB staging GiYSBF512:  GC full = 136.195s, scavenge = 99.374s
+新 16KB staging GiYSBF512: GC full = 136.504s, scavenge = 100.178s
+```
+
+注意旧结果 young after aux = 532.24KB，新结果 young after aux = 524.24KB，所以这只是参考比较；但至少不能证明增大 staging 有效。
+
+### 当前下一步判断
+
+如果继续优化 GiYSBF，不应继续优先扩大 staging buffer。更合理的方向是减少 tiny staging 的额外复制成本，例如：
+
+1. 减少或避免 `young -> staging` 这次额外 memcpy。
+2. 重新评估 tiny table 是否值得保留，或者只在非常明确会受益的对象/region 上启用。
+3. 把 GiYSB/GiYSBF 拆成更干净的 A/B：只改 old placement、不 staging；只 staging 特定 size/class；按 workload 或 allocation site 选择性启用。
+4. 继续用同 young / 同 workspace 的公平口径比较，避免 auxiliary workspace 改变导致 minor GC count 混入结论。
+
+当前可以向导师汇报的短结论：
+
+```text
+GiY 的核心 GC 路径仍然比 CheneyGC 更快；
+但 GiYSBF 的 two-class/tiny-staging 方向目前没有成功。
+Profile 显示 staging buffer 已基本填满，问题不是 buffer 太小，
+而是 tiny/staging 路径引入了大量 double-copy 和管理成本。
+下一步应减少 staging path 的额外复制成本，而不是继续增大 staging。
+```
+
+## 2026-05-26：给导师汇报用 GiYSBF 性能差距汇总
+
+用户说明 2026-05-27 要向导师汇报当前项目进度，重点是 GiYSBF 的各种性能差距。本节整理可直接用于汇报的结论和数据。
+
+### 一句话主结论
+
+```text
+GiYSBF 证明了 tiny threshold、staging buffer、forced NT store 等参数会显著影响性能；
+但是截至当前最新公平实验，它还没有超过标准 GiY，也没有超过 CheneyGC。
+主要差距不是 remembered set，也不是 staging buffer 太小，
+而是 tiny/staging materialization 路径引入了 young -> staging -> old 的 double-copy 和管理成本。
+```
+
+### 最新最公平对照：16KB staging，同 young 比较
+
+最新可靠目录：
+
+```text
+build.debug/benchmarks/out_giysbf_s16_fair_20260526_012544
+```
+
+公平条件：
+
+```text
+CACHE_SIZE_KB=896
+young after aux = 524.24KB
+GIY_OLD_SLOT_NT_STORE=0
+GIY_NT_COPY_BITS=256
+GIYSB_PROFILE=false
+PMU disabled
+```
+
+| 配置 | Total | GC full | GC core | scavenge | minor GC |
+|---|---:|---:|---:|---:|---:|
+| GiYSBF512 | 6600.882 | 136.504 | 103.227 | 100.178 | 1204833 |
+| GiYSBF256 | 6601.824 | 142.387 | 108.821 | 105.741 | 1204833 |
+| GiY 同 young | 6551.910 | 110.471 | 77.480 | 74.848 | 1204833 |
+| Cheney 同 young | 6542.159 | 116.224 | 81.280 | 77.705 | 1195835 |
+
+相对 GiY：
+
+| 配置 | Total gap | GC full gap | GC core gap | scavenge gap |
+|---|---:|---:|---:|---:|
+| GiYSBF512 - GiY | +48.972s (+0.747%) | +26.033s (+23.565%) | +25.747s (+33.231%) | +25.330s |
+| GiYSBF256 - GiY | +49.914s (+0.762%) | +31.916s (+28.891%) | +31.341s (+40.450%) | +30.893s |
+
+相对 Cheney：
+
+| 配置 | Total gap | GC full gap | GC core gap |
+|---|---:|---:|---:|
+| GiYSBF512 - Cheney | +58.723s (+0.898%) | +20.280s (+17.449%) | +21.947s (+27.002%) |
+| GiYSBF256 - Cheney | +59.665s (+0.912%) | +26.163s (+22.511%) | +27.541s (+33.884%) |
+
+这里最重要的点：
+
+```text
+1. GiY 的 GC full 比 Cheney 快 5.753s，说明标准 GiY 的 GC 核心仍然有优势。
+2. GiYSBF 的 scan_RS 并不差：
+   GiYSBF512 scan_RS = 2.451s
+   GiY scan_RS       = 2.049s
+   Cheney scan_RS    = 2.910s
+3. GiYSBF 的主要差距集中在 scavenge/materialization：
+   GiYSBF512 scavenge = 100.178s
+   GiY scavenge       = 74.848s
+   gap                = +25.330s
+```
+
+### 哪些 benchmark 贡献了差距
+
+在最新公平实验里，GiYSBF512 相对 GiY 的 GC full gap 为 +26.033s，其中 Storage 单项贡献最大：
+
+| Benchmark | GiYSBF512 GC | GiY GC | Gap |
+|---|---:|---:|---:|
+| Storage | 61.525 | 41.533 | +19.992 |
+| Havlak | 41.610 | 37.351 | +4.259 |
+| CD | 14.552 | 13.937 | +0.615 |
+| DeltaBlue | 2.635 | 2.082 | +0.553 |
+| NBody | 8.953 | 8.492 | +0.461 |
+
+解释：
+
+```text
+Storage 一个 benchmark 就贡献了 GiYSBF512 vs GiY 的大约 77% GC full gap。
+所以汇报时可以说：GiYSBF 的问题在 Storage 这类大量 tiny/small survivor 的 GC-heavy workload 上最明显。
+```
+
+### GiYSBF 内部阈值差距：64B / 128B / 256B
+
+早期 threshold sweep：
+
+```text
+build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319
+```
+
+注意：这组比较的 young after aux 是 532.24KB，不是最新 524.24KB；适合说明趋势，不作为最终公平胜负表。
+
+| Tiny max | Total | GC full | Business | Minor GC |
+|---:|---:|---:|---:|---:|
+| 64B | 6703.283 | 211.272 | 6492.015 | 1187074 |
+| 128B | 6620.341 | 170.784 | 6449.555 | 1187074 |
+| 256B | 6592.568 | 170.272 | 6422.292 | 1187074 |
+
+相对 64B：
+
+```text
+128B: total -1.237%, GC full -19.164%
+256B: total -1.652%, GC full -19.406%
+```
+
+结论：
+
+```text
+扩大 tiny threshold 从 64B 到 128B/256B 明显改善 GiYSBF。
+但是 128B 已经拿到几乎全部 GC 收益；
+256B 相对 128B 的 GC 额外改善只有约 0.300%。
+```
+
+关键单项：
+
+```text
+Storage GC:
+64B  = 91.459s
+128B = 61.373s
+256B = 61.393s
+
+Havlak GC:
+64B  = 75.601s
+128B = 66.072s
+256B = 65.651s
+```
+
+这说明：
+
+```text
+Storage 的主要问题在 128B threshold 就已经被覆盖；
+继续扩大到 256B 没有明显进一步改善 Storage。
+```
+
+### 512B threshold 与 staging buffer 大小
+
+512B + 8KB staging，与 Cheney 同 young 532.24KB 比较：
+
+```text
+目录：build.debug/benchmarks/out_cheney_rerun_giysbf512_20260525_183854
+```
+
+| 配置 | Total | GC full | GC core | scavenge |
+|---|---:|---:|---:|---:|
+| Cheney young532 | 6600.436 | 115.903 | 81.808 | 78.130 |
+| GiYSBF512 8KB | 6606.753 | 136.195 | 102.458 | 99.374 |
+
+差距：
+
+```text
+Total:   +6.317s (+0.096%)
+GC full: +20.292s (+17.508%)
+scavenge: +21.244s
+```
+
+8KB staging vs 16KB staging 的参考比较：
+
+| 指标 | 8KB staging | 16KB staging | 新 - 旧 |
+|---|---:|---:|---:|
+| Total | 6606.753 | 6600.882 | -5.871 |
+| Business | 6470.558 | 6464.378 | -6.180 |
+| GC full | 136.195 | 136.504 | +0.309 |
+| GC core | 102.458 | 103.227 | +0.769 |
+| scavenge | 99.374 | 100.178 | +0.804 |
+
+注意：
+
+```text
+8KB 的 young after aux 是 532.24KB；
+16KB 的 young after aux 是 524.24KB。
+因此这不是严格同 young 的 buffer-size 对照。
+但至少可以说明：把 staging 从 8KB 增到 16KB，没有显示 GC 时间改善。
+```
+
+### Profile 证据：为什么不是 staging 太小
+
+512B + 8KB staging + GIYSB_PROFILE：
+
+```text
+目录：build.debug/benchmarks/out_giysbf512_profile_20260525_225757
+```
+
+关键数据：
+
+| 指标 | 数值 |
+|---|---:|
+| staged tiny bytes | 99,380.53 MB |
+| large reserved bytes | 4,072.18 MB |
+| staging flushes | 13,623,581 |
+| full flushes | 12,439,537 |
+| tail flushes | 1,184,044 |
+| full flush ratio | 91.31% |
+| avg flush size | 7.47KB |
+| max tiny table entries | 12,762 |
+
+解释：
+
+```text
+1. 512B threshold 下，大约 96% promoted bytes 都走 tiny/staging path。
+2. 平均 flush size = 7.47KB，接近 8KB staging 上限。
+3. Storage/Havlak/CD 的平均 flush 都在 7.6KB 到 7.94KB。
+4. full flush 占 91.31%，说明 staging 通常能填满。
+5. 因此主要问题不是 buffer 太小，而是 99.38GB 数据经历了 young -> staging -> old 的 double-copy。
+```
+
+### 可以给导师的讲法
+
+建议汇报顺序：
+
+```text
+1. 先说明标准 GiY 仍然有价值：
+   在最新同 young 实验里，GiY 的 GC full 比 Cheney 快 5.753s。
+
+2. 再说明 GiYSBF 的动机：
+   导师建议 survivor 先聚合，再使用 non-temporal store；
+   GiYSBF 是这个方向的 two-class/tiny-staging forced-NT 实现。
+
+3. 然后说明实验结果：
+   GiYSBF 的 threshold 从 64B 提高到 128B/256B 后有明显改善；
+   但是在最新公平实验中，GiYSBF512/256 仍然比 GiY 和 Cheney 慢。
+
+4. 最后说明原因：
+   RSet 不是主要问题，scan_RS 不高；
+   scavenge/materialization 才是主要问题；
+   profile 显示 staging 已基本填满，因此不是 staging 太小；
+   核心瓶颈是 double-copy 和 tiny table/staging 管理成本。
+```
+
+建议使用的英文短句：
+
+```text
+GiYSBF reduces some locality problems by batching tiny objects,
+but the current implementation pays an extra copy cost:
+objects are copied from young space to the staging buffer,
+and then streamed to old space.
+The profiling data shows that the staging buffer is usually full,
+so the main bottleneck is not the buffer size but the double-copy path.
+```
+
+### 汇报时不要过度声称的点
+
+```text
+1. 不要说 GiYSBF 已经优化成功。
+   更准确：GiYSBF 是一个有价值的 negative result / design exploration。
+
+2. 不要只用 total time 证明好坏。
+   有些 total 差距来自 business-time 波动，例如 Permute / Sieve；
+   GC 机制判断应优先看 GC full、GC core、scavenge。
+
+3. 不要说扩大 staging buffer 有用。
+   当前 16KB 结果没有显示 GC 改善。
+
+4. 不要说问题来自 remembered set。
+   最新数据里 GiYSBF 的 scan_RS 不是主要差距。
+```
+
+### 下一步建议
+
+```text
+1. 不继续优先扩大 staging buffer。
+2. 优先减少 tiny staging 的 double-copy 成本。
+3. 设计 selective staging：只对确实能从 batching/NT store 受益的对象启用。
+4. 做更干净的 ablation：
+   - 只改 old placement，不 staging；
+   - staging 但不 forced NT；
+   - 只对特定 size/shape/allocation site staging。
+5. 最终继续使用同 young / 同 workspace 的公平口径。
+```
+
+## 2026-05-26：实验数据里的 GiY 使用的复制策略
+
+用户询问实验数据里的 `GiY` 使用什么复制策略。这里的 `GiY` 指最新公平实验中的 `giy_young524_896` / 标准 GiY 配置，不是 GiYSB/GiYSBF。
+
+构建参数来自：
+
+```text
+tools/run_giysbf_staging16_fair_benchmarks.sh
+
+make OPT_GC=giy
+  CACHE_SIZE_KB=896
+  GIY_RSET_READ_SLOT_AT_GC=true
+  GIY_GC_STACK_BYTES=49152
+  GIY_LOCAL_PADDING_BYTES=81920
+  GIY_NT_COPY_BITS=256
+  GIY_OLD_SLOT_NT_STORE=0
+```
+
+关键点：
+
+```text
+1. 标准 GiY 没有开启 GIY_SB=true。
+   所以它不使用 GiYSB/GiYSBF 的 tiny table，也不使用 staging buffer。
+
+2. GiY 的复制是“scan 后直接 materialize 到 old”。
+   copy_for_minor 阶段只 reserve old 地址、写 forwarding pointer、把 young object 压入 GC stack；
+   此时不复制对象内容。
+
+3. traverse_stack 阶段 pop young object 后，先在 young/cache 里扫描并修正对象内部指针；
+   然后对这个对象执行一次 young -> old 的直接复制。
+
+4. 复制函数是 giy_copy_live_object()，也就是非 forced 模式：
+   - aligned object size <= 256B：使用普通 memcpy；
+   - aligned object size > 256B：使用 non-temporal copy。
+
+5. 最新实验中 GIY_NT_COPY_BITS=256，
+   因此大对象路径主要使用 256-bit AVX2 streaming store，
+   也就是 _mm256_stream_si256，尾部用 128-bit / 64-bit streaming store 处理。
+
+6. 最新实验中 GIY_OLD_SLOT_NT_STORE=0，
+   所以 old slot patch 使用普通 store，不使用 _mm_stream_si64。
+```
+
+一句话结论：
+
+```text
+实验表里的标准 GiY 是“每个 live object 扫描完后直接复制到 old”的策略；
+小对象 <=256B 用普通 memcpy，大对象 >256B 用 256-bit non-temporal copy。
+它没有 GiYSBF 的 young -> staging -> old double-copy，也没有 tiny table/staging buffer。
+```
+
+## 2026-05-26 到 2026-05-27：普通 GiY 全对象强制 NT store 参考实验
+
+用户要求补做一个参考实验：
+
+```text
+普通 GiY 策略；
+young 区大小与 8KB staging 的 GiYSBF 相同；
+对象搬运时不分大小，始终使用 NT store；
+用于和 GiYSBF 性能差距一起向导师汇报。
+```
+
+### 代码和脚本改动
+
+新增编译开关：
+
+```text
+GIY_FORCE_NT_COPY
+```
+
+代码行为：
+
+```text
+GIY_FORCE_NT_COPY=0:
+  标准 GiY 行为不变：
+  <=256B memcpy，>256B NT copy。
+
+GIY_FORCE_NT_COPY=1:
+  标准 GiY 的 giy_copy_live_object() 也强制走 NT copy；
+  不再使用 <=256B memcpy cutoff。
+```
+
+重要限制：
+
+```text
+这个配置仍然是普通 GiY：
+1. 不开启 GIY_SB。
+2. 不使用 GiYSB/GiYSBF tiny table。
+3. 不使用 staging buffer。
+4. 不存在 young -> staging -> old double-copy。
+5. 只改变 materialization copy primitive。
+```
+
+新增脚本：
+
+```text
+tools/run_giy_force_nt_young532_benchmarks.sh
+```
+
+本次输出目录：
+
+```text
+build.debug/benchmarks/out_giy_force_nt_young532_20260526_230740
+```
+
+报告文件：
+
+```text
+build.debug/benchmarks/out_giy_force_nt_young532_20260526_230740/force_nt_reference_report.md
+```
+
+### 实验配置
+
+```text
+OPT_GC=giy
+CACHE_SIZE_KB=896
+GIY_RSET_READ_SLOT_AT_GC=true
+GIY_GC_STACK_BYTES=49152
+GIY_LOCAL_PADDING_BYTES=73728
+GIY_NT_COPY_BITS=256
+GIY_OLD_SLOT_NT_STORE=0
+GIY_FORCE_NT_COPY=1
+EJS_DISABLE_GC_PMU=1
+```
+
+公平性：
+
+```text
+Young before aux = 684.24KB
+Aux total        = 152.00KB
+Young after aux  = 532.24KB
+```
+
+这与 8KB staging GiYSBF 的 young after aux 相同：
+
+```text
+GiYSBF 8KB:
+  stack 48KB + FT 32KB + staging 8KB + tiny table 64KB = 152KB aux
+
+Force-NT GiY:
+  stack 48KB + FT 32KB + padding 72KB = 152KB aux
+```
+
+运行时间：
+
+```text
+started_at = 2026-05-26T23:07:40+09:00
+ended_at   = 2026-05-27T01:04:11+09:00
+```
+
+状态：
+
+```text
+build.status = 0
+smoke giy_gc_probe.status = 0
+13 / 13 benchmark status = 0
+```
+
+### Aggregate 结果
+
+| Config | Total | Business | GC full | GC core | scan_RS | scavenge | minor GC |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| GiY normal young532 | 6630.018 | 6518.418 | 111.600 | 78.494 | 2.063 | 75.868 | 1187074 |
+| GiY force-NT young532 | 6857.555 | 6549.679 | 307.880 | 275.782 | 2.051 | 273.187 | 1187074 |
+| GiYSBF256 8KB | 6672.226 | 6530.585 | 141.644 | 108.141 | 2.430 | 105.095 | 1187074 |
+| GiYSBF512 8KB | 6606.753 | 6470.558 | 136.195 | 102.458 | 2.455 | 99.374 | 1187074 |
+
+### 相对普通 GiY 的差距
+
+| Metric | Force-NT GiY - Normal GiY |
+|---|---:|
+| Total | +227.537s (+3.432%) |
+| Business | +31.261s (+0.480%) |
+| GC full | +196.280s (+175.878%) |
+| GC core | +197.288s (+251.342%) |
+| scavenge | +197.319s (+260.082%) |
+| scan_RS | -0.012s |
+| minor GC count | same |
+
+关键判断：
+
+```text
+全对象强制 NT 的退化几乎全部来自 GC core / scavenge。
+scan_RS 没变，minor GC 次数完全相同。
+因此原因不是 remembered set，也不是 GC 频率，
+而是 materialization/copy primitive 本身。
+```
+
+### 相对 GiYSBF 的差距
+
+| Metric | Force-NT GiY - GiYSBF256 8KB | Force-NT GiY - GiYSBF512 8KB |
+|---|---:|---:|
+| Total | +185.329s | +250.802s |
+| GC full | +166.236s | +171.685s |
+| GC core | +167.641s | +173.324s |
+| scavenge | +168.092s | +173.813s |
+
+重要结论：
+
+```text
+虽然 GiYSBF 当前仍慢于标准 GiY，
+但 GiYSBF 明显好于“普通 GiY 全对象强制 NT”。
+
+所以结论不是“NT store 总是没用”，
+而是“无条件对所有对象使用 NT store 是错误策略”。
+```
+
+### GC-heavy 子集
+
+子集：
+
+```text
+CD + Havlak + Storage
+```
+
+| Config | Heavy total | Heavy GC full | Heavy GC core | Heavy scavenge |
+|---|---:|---:|---:|---:|
+| GiY normal young532 | 1612.837 | 93.628 | 75.858 | 73.708 |
+| GiY force-NT young532 | 1778.963 | 285.714 | 268.500 | 266.382 |
+| GiYSBF256 8KB | 1612.659 | 122.383 | 104.532 | 102.041 |
+| GiYSBF512 8KB | 1608.548 | 116.535 | 98.763 | 96.295 |
+
+GC-heavy 子集里：
+
+```text
+Force-NT GiY vs normal GiY:
+  GC full  +192.086s
+  scavenge +192.674s
+```
+
+这进一步说明：
+
+```text
+全对象 NT store 对真正 GC-heavy 的项目非常差。
+```
+
+### 单项主要差距
+
+Force-NT GiY 相对 normal GiY：
+
+| Benchmark | Total gap | GC full gap | GC core gap | scavenge gap |
+|---|---:|---:|---:|---:|
+| Storage | +128.222 | +127.841 | +127.896 | +127.898 |
+| Havlak | +39.411 | +48.156 | +48.540 | +48.563 |
+| CD | -1.507 | +16.089 | +16.206 | +16.213 |
+| DeltaBlue | +3.405 | +4.409 | +4.429 | +4.426 |
+
+解释：
+
+```text
+Storage 单项贡献约 65% 的 full-suite GC 退化。
+Storage + Havlak + CD 基本解释了绝大部分 GC full gap。
+```
+
+### 导师汇报版结论
+
+```text
+我补做了一个参考实验：
+普通 GiY 使用和 8KB-staging GiYSBF 相同的 young size，
+但是所有 promoted object 都强制使用 non-temporal store。
+
+结果非常明确：
+这个配置正确性通过，13 个 benchmark 全部 status=0；
+但是性能明显变差。
+
+相对标准 GiY：
+total 慢 3.43%，GC full 慢 175.9%，GC core 慢 251.3%，scavenge 慢 260.1%。
+minor GC 次数完全相同，scan_RS 几乎不变，
+所以问题不是 remembered set 或 GC 频率，
+而是全对象强制 NT copy 本身。
+
+这个结果支持当前 GiY 的大小区分策略：
+小对象用 memcpy，大对象才使用 NT store。
+
+同时，它也说明 GiYSBF 虽然目前慢于标准 GiY，
+但仍然远好于“普通 GiY 全对象 NT”。
+因此下一步不应该简单扩大 NT 使用范围，
+而应该做 selective/batched NT，并减少 staging double-copy 成本。
+```
+
+## 2026-05-27：当前 GiYSBF 复制策略伪代码
+
+用户要求写出当前 GiYSBF 的复制策略伪代码。这里的 GiYSBF 指当前 `USE_GIYSB=1 && GIYSB_TINY_BATCH=1` 的 forced-NT two-class/staging-only 路径。
+
+参数：
+
+```text
+TINY_MAX      = GIYSB_TINY_OBJECT_MAX_BYTES
+STAGING_BYTES = GIYSB_STAGING_BYTES
+TINY_TABLE_BYTES = GIYSB_TINY_TABLE_BYTES
+
+当前实验常用：
+  TINY_MAX = 256B 或 512B
+  STAGING_BYTES = 8KB 或 16KB
+  TINY_TABLE_BYTES = 64KB
+```
+
+核心思想：
+
+```text
+1. tiny object:
+   reserve 到 small-old；
+   只记录 tiny table；
+   扫描阶段不立即 copy；
+   全部对象图扫描结束后，经 staging buffer 批量 forced NT 写入 old。
+
+2. non-tiny / large object:
+   reserve 到 large-old；
+   扫描并修正 child pointer 后，立即 forced NT copy 到 old。
+
+3. tiny staging 路径是：
+   young -> staging buffer -> old
+   所以会产生 double-copy。
+```
+
+伪代码：
+
+```text
+minor_gc():
+    reset_gc_stack()
+    reset_tiny_table()
+    reset_staging_buffer()
+
+    scan_roots_and_remembered_set()
+
+    traverse_stack_and_materialize()
+
+    reset_young_space()
+```
+
+```text
+scan_roots_and_remembered_set():
+    for each root_or_old_slot:
+        p = *slot
+        if p points to young:
+            new_p = copy_for_minor(p)
+            *slot = new_p
+```
+
+```text
+copy_for_minor(src_payload):
+    src_hdr = header(src_payload)
+
+    if src_hdr.forwarding_pointer != 0:
+        return src_hdr.forwarding_pointer
+
+    size = ALIGN(src_hdr.size + sizeof(object_header))
+
+    if size <= TINY_MAX:
+        # tiny path
+        dst_hdr = small_old_free
+        small_old_free += size
+
+        append_tiny_table(
+            src_offset = src_payload - young_start,
+            size_class = size / word_size
+        )
+
+        deferred_tiny = true
+    else:
+        # large path
+        dst_hdr = large_old_free
+        large_old_free += size
+
+        deferred_tiny = false
+
+    src_hdr.forwarding_pointer = payload(dst_hdr)
+    gc_stack.push(src_payload)
+
+    return payload(dst_hdr)
+```
+
+注意：
+
+```text
+tiny table 当前不保存每个对象的 dst 地址。
+它只保存 src offset 和 size class。
+dst 地址依赖 small-old 的连续 reserve 顺序：
+第一个 tiny dst = tiny_batch_begin，
+后续 dst = 前一个 dst + 前一个 object size。
+```
+
+```text
+traverse_stack_and_materialize():
+    used_nt_store = false
+
+    while gc_stack is not empty:
+        src_payload = gc_stack.pop()
+        src_hdr = header(src_payload)
+        size = ALIGN(src_hdr.size + sizeof(object_header))
+        type = src_hdr.type
+
+        # 在 young/cache 中扫描对象字段。
+        # 对每个 child pointer，如果 child 在 young 中，
+        # 调用 copy_for_minor(child)，并把当前对象字段改成 child 的 old 地址。
+        scan_object_fields_in_young(src_payload, type):
+            for each pointer field f:
+                child = *f
+                if child points to young:
+                    *f = copy_for_minor(child)
+
+        dst_payload = src_hdr.forwarding_pointer
+        dst_hdr = header(dst_payload)
+
+        if is_tiny_destination(dst_hdr, size):
+            # tiny 对象已经 reserve，并已进入 tiny table。
+            # 这里不复制，等整轮 traversal 结束后统一 flush tiny table。
+            continue
+        else:
+            # non-tiny / large 对象立即 forced NT materialize。
+            forced_nt_copy(dst_hdr, src_hdr, size)
+            used_nt_store = true
+
+    flush_tiny_table_with_staging(&used_nt_store)
+
+    if used_nt_store:
+        sfence()
+```
+
+```text
+flush_tiny_table_with_staging(used_nt_store):
+    if tiny_table is empty:
+        return
+
+    chunk_start = 0
+    chunk_dst = tiny_batch_begin
+    dst_cursor = tiny_batch_begin
+    chunk_bytes = 0
+
+    for i in [0, tiny_table_count):
+        (src_hdr, size) = decode_tiny_table_entry(tiny_table[i])
+
+        if chunk_bytes != 0 and chunk_bytes + size > STAGING_BYTES:
+            flush_tiny_chunk(
+                start = chunk_start,
+                end = i,
+                dst_start = chunk_dst,
+                bytes = chunk_bytes,
+                full_flush = true
+            )
+
+            chunk_start = i
+            chunk_dst = dst_cursor
+            chunk_bytes = 0
+
+        chunk_bytes += size
+        dst_cursor += size
+
+    flush_tiny_chunk(
+        start = chunk_start,
+        end = tiny_table_count,
+        dst_start = chunk_dst,
+        bytes = chunk_bytes,
+        full_flush = false
+    )
+
+    reset_tiny_table()
+```
+
+```text
+flush_tiny_chunk(start, end, dst_start, bytes, full_flush):
+    staging_used = 0
+
+    for i in [start, end):
+        (src_hdr, size) = decode_tiny_table_entry(tiny_table[i])
+
+        # 第一次 copy：young -> staging
+        memcpy(staging_buffer + staging_used, src_hdr, size)
+        staging_used += size
+
+    # 第二次 copy：staging -> old，用 forced NT store
+    forced_nt_copy(dst_start, staging_buffer, staging_used)
+```
+
+和标准 GiY 的关键区别：
+
+```text
+标准 GiY:
+  每个对象扫描后直接 young -> old。
+  <=256B 用 memcpy，>256B 用 NT copy。
+
+GiYSBF:
+  large 对象扫描后直接 young -> old，但强制 NT copy；
+  tiny 对象扫描后不立即复制，而是 young -> staging -> old；
+  staging -> old 强制 NT copy。
+```
+
+一句话总结：
+
+```text
+当前 GiYSBF 是 two-class forced-NT 策略：
+tiny 对象延迟到整轮 traversal 结束后，通过 staging buffer 批量 NT 写入 old；
+large 对象扫描完成后立即 forced NT 写入 old。
+它的主要额外成本正是 tiny 对象的 young -> staging -> old double-copy。
+```
+
+## 2026-05-27：GiYSBF 不同 tiny/large 阈值性能对比表
+
+用户要求整理之前所有不同 tiny/large 阈值的性能区别。
+
+定义：
+
+```text
+threshold = X:
+  object footprint <= X  => tiny object
+  object footprint >  X  => large object
+
+object footprint = ALIGN(sizeof(object_header) + payload_size)
+```
+
+### 1. 原始 threshold sweep：64B / 128B / 256B
+
+这组最适合说明 threshold 从 64B 扩大到 128B/256B 的趋势。
+
+共同配置：
+
+```text
+CACHE_SIZE_KB=896
+GIYSB_STAGING_BYTES=8192
+GIYSB_TINY_TABLE_BYTES=65536
+GIY_NT_COPY_BITS=256
+GIY_GC_STACK_BYTES=49152
+GIY_RSET_READ_SLOT_AT_GC=true
+young after aux = 532.24KB
+minor GC count = 1187074
+```
+
+数据目录：
+
+```text
+64B baseline:
+  build.debug/benchmarks/out_giysbf_vs_giysb_20260523_172759
+
+128B / 256B:
+  build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319
+```
+
+| Tiny threshold | Tiny 条件 | Large 条件 | Total | Business | GC full | GC core | scan_RS | scavenge | vs 64B total | vs 64B GC |
+|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 64B | `<=64B` | `>64B` | 6703.283 | 6492.015 | 211.272 | 170.835 | 25.937 | 144.303 | baseline | baseline |
+| 128B | `<=128B` | `>128B` | 6620.341 | 6449.555 | 170.784 | 131.032 | 25.872 | 104.584 | -82.942s (-1.237%) | -40.488s (-19.164%) |
+| 256B | `<=256B` | `>256B` | 6592.568 | 6422.292 | 170.272 | 130.849 | 25.852 | 104.400 | -110.715s (-1.652%) | -41.000s (-19.406%) |
+
+这组结论：
+
+```text
+1. 64B 阈值明显太保守，GC full = 211.272s。
+2. 从 64B 扩到 128B 后，GC full 下降约 40.488s，下降 19.164%。
+3. 从 128B 再扩到 256B，GC 只额外下降 0.512s，边际收益很小。
+4. 所以这组 sweep 说明：128B 已经拿到几乎全部 GC 收益，256B 的主要优势更多体现在 total/business 波动。
+```
+
+关键 GC-heavy benchmark：
+
+| Tiny threshold | Storage GC | Havlak GC | CD GC |
+|---:|---:|---:|---:|
+| 64B | 91.459 | 75.601 | 17.730 |
+| 128B | 61.373 | 66.072 | 17.792 |
+| 256B | 61.393 | 65.651 | 17.550 |
+
+解释：
+
+```text
+Storage 是最大改善来源：
+64B -> 128B 时，Storage GC 从 91.459s 降到 61.373s。
+但是 128B -> 256B 时，Storage 几乎没有继续改善。
+```
+
+### 2. 当前 old-slot 普通 store 口径：256B vs 512B，8KB staging
+
+后续修正了 old slot patch，不再默认用 8B NT store patch old slot。
+因此这组更接近当前代码口径，但只有 256B / 512B 两组。
+
+共同点：
+
+```text
+staging = 8KB
+tiny table = 64KB
+young after aux = 532.24KB
+GIY_OLD_SLOT_NT_STORE=0
+minor GC count = 1187074
+```
+
+| Tiny threshold | Tiny 条件 | Large 条件 | Total | Business | GC full | GC core | scan_RS | scavenge |
+|---:|---|---|---:|---:|---:|---:|---:|---:|
+| 256B | `<=256B` | `>256B` | 6672.226 | 6530.585 | 141.644 | 108.141 | 2.430 | 105.095 |
+| 512B | `<=512B` | `>512B` | 6606.753 | 6470.558 | 136.195 | 102.458 | 2.455 | 99.374 |
+
+512B 相对 256B：
+
+| Metric | 512B - 256B |
+|---|---:|
+| Total | -65.473s |
+| Business | -60.027s |
+| GC full | -5.449s |
+| GC core | -5.683s |
+| scan_RS | +0.025s |
+| scavenge | -5.721s |
+
+这组结论：
+
+```text
+1. 当前 old-slot 普通 store 口径下，512B 的 GC 比 256B 更好。
+2. GC full 少 5.449s，主要来自 scavenge 少 5.721s。
+3. 但是 total 的 65.473s 差距主要来自 business 差异，不能全归因于 GC。
+4. 512B 说明把 257B~512B 对象也纳入 tiny/staging，对当前数据有一定 GC 收益。
+```
+
+### 3. 16KB staging 公平口径：256B vs 512B
+
+这组是最新严格同 young 实验的一部分：
+
+```text
+build.debug/benchmarks/out_giysbf_s16_fair_20260526_012544
+```
+
+共同点：
+
+```text
+staging = 16KB
+tiny table = 64KB
+young after aux = 524.24KB
+aux total = 160KB
+GIY_OLD_SLOT_NT_STORE=0
+minor GC count = 1204833
+```
+
+| Tiny threshold | Tiny 条件 | Large 条件 | Total | Business | GC full | GC core | scan_RS | scavenge |
+|---:|---|---|---:|---:|---:|---:|---:|---:|
+| 256B | `<=256B` | `>256B` | 6601.824 | 6459.434 | 142.387 | 108.821 | 2.470 | 105.741 |
+| 512B | `<=512B` | `>512B` | 6600.882 | 6464.378 | 136.504 | 103.227 | 2.451 | 100.178 |
+
+512B 相对 256B：
+
+| Metric | 512B - 256B |
+|---|---:|
+| Total | -0.942s |
+| Business | +4.944s |
+| GC full | -5.883s |
+| GC core | -5.594s |
+| scan_RS | -0.019s |
+| scavenge | -5.563s |
+
+这组结论：
+
+```text
+1. 在 16KB staging 同 young 口径下，512B 仍然比 256B 的 GC 更好。
+2. GC full 少 5.883s，scavenge 少 5.563s。
+3. 但是 total 几乎一样，因为 512B business 反而多 4.944s。
+4. 所以如果只看 GC，512B 比 256B 更好；如果看 total，二者几乎打平。
+```
+
+### 总结表
+
+| 结论问题 | 当前答案 |
+|---|---|
+| 64B 是否合适 | 不合适，太保守，GC 明显更慢。 |
+| 128B 是否有效 | 有效；从 64B 到 128B 拿到约 19% GC full 改善。 |
+| 256B 是否比 128B 明显更好 | 不明显；GC 只额外改善约 0.3%，total 更好但含 business 波动。 |
+| 512B 是否比 256B 更好 | 在当前 old-slot 普通 store 口径下，GC 更好约 5.4s 到 5.9s。 |
+| 阈值越大是否越好 | 不能这么说。512B 比 256B 的 GC 更好，但 GiYSBF 整体仍慢于标准 GiY，核心问题仍是 staging double-copy。 |
+| 当前推荐说法 | 128B/256B 证明扩大 tiny threshold 有收益；512B 在当前口径下 GC 最好，但还不能说明 GiYSBF 方向成功。 |
+
+导师汇报短版：
+
+```text
+GiYSBF 的 tiny/large threshold 对性能很敏感。
+64B 太小；扩大到 128B 后 GC full 下降约 19%，主要来自 Storage 和 Havlak。
+256B 相比 128B 的额外 GC 收益很小。
+在后续 old-slot 普通 store 的当前口径下，512B 比 256B 的 GC 再好约 5-6 秒，
+说明 257B~512B 的对象纳入 staging 有一定帮助。
+但是无论 256B 还是 512B，GiYSBF 仍然慢于标准 GiY，
+所以问题不是 threshold 本身已经解决，而是 staging path 的 double-copy 成本仍然太高。
+```
+
+## 2026-05-27：配套表格用 GiYSBF64 / GiYSBF128 数据与简化伪代码
+
+用户给出的表格：
+
+```text
+GiY           total=6857.555 GC=307.880 scavenge=273.187 minor=1187074
+GiYSBF256 8KB total=6672.226 GC=141.644 scavenge=105.095 minor=1187074
+GiYSBF512 8KB total=6606.753 GC=136.195 scavenge=99.374  minor=1187074
+```
+
+注意：这里的 `GiY=6857.555` 不是标准 GiY，而是普通 GiY 全对象强制 NT store 的参考组。
+
+### 严格配套口径
+
+共同条件：
+
+```text
+young after aux = 532.24KB
+staging = 8KB
+tiny table = 64KB
+GIY_OLD_SLOT_NT_STORE=0
+minor GC count = 1187074
+```
+
+这套口径下能找到：
+
+| Config | Total | GC full | scavenge | minor GC |
+|---|---:|---:|---:|---:|
+| GiY force-NT | 6857.555 | 307.880 | 273.187 | 1187074 |
+| GiYSBF64 8KB | 6814.852 | 180.618 | 144.033 | 1187074 |
+| GiYSBF256 8KB | 6672.226 | 141.644 | 105.095 | 1187074 |
+| GiYSBF512 8KB | 6606.753 | 136.195 | 99.374 | 1187074 |
+
+严格配套口径下，目前没有 128B run。
+
+### 128B 参考数据
+
+128B 数据来自旧 threshold sweep：
+
+```text
+build.debug/benchmarks/out_giysbf_tiny_threshold_20260524_124319
+```
+
+它和上表不完全同口径，主要差异是 old slot patch 修正之前 scan_RS 很高，所以 `GC full` 不能直接和上面的 current 口径混为严格比较。但是 `scavenge` 可以作为 tiny/staging copy 成本的参考。
+
+| Config | Total | GC full | scavenge | minor GC | 说明 |
+|---|---:|---:|---:|---:|---|
+| GiYSBF128 8KB | 6620.341 | 170.784 | 104.584 | 1187074 | 旧 threshold sweep 参考 |
+
+如果要给导师一张不误导的表，建议这样写：
+
+| Config | Total | GC full | scavenge | minor GC | 口径 |
+|---|---:|---:|---:|---:|---|
+| GiY force-NT | 6857.555 | 307.880 | 273.187 | 1187074 | current / strict |
+| GiYSBF64 8KB | 6814.852 | 180.618 | 144.033 | 1187074 | current / strict |
+| GiYSBF128 8KB | 6620.341 | 170.784 | 104.584 | 1187074 | old sweep / reference |
+| GiYSBF256 8KB | 6672.226 | 141.644 | 105.095 | 1187074 | current / strict |
+| GiYSBF512 8KB | 6606.753 | 136.195 | 99.374 | 1187074 | current / strict |
+
+更严谨的说法：
+
+```text
+64B / 256B / 512B 可以和 force-NT GiY 严格配套比较。
+128B 当前只有旧 sweep 参考值；
+如果要正式把 128B 放进 current 表，需要用 GIY_OLD_SLOT_NT_STORE=0 的当前代码重跑 128B。
+```
+
+### 更简化的 GiYSBF 核心伪代码
+
+只展示和标准 GiY 的核心差异：
+
+```text
+GiY:
+  for each live object:
+      scan object in young
+      patch its child pointers
+      copy young -> old directly
+```
+
+```text
+GiYSBF:
+  for each live object:
+      scan object in young
+      patch its child pointers
+
+      if object_size <= TINY_THRESHOLD:
+          record object in tiny_table
+          do not copy now
+      else:
+          forced_NT_copy young -> old
+
+  after all live objects are scanned:
+      for tiny objects in tiny_table:
+          memcpy young -> staging
+          forced_NT_copy staging -> old
+```
+
+核心区别一句话：
+
+```text
+GiY 是每个对象扫描后直接 young -> old；
+GiYSBF 是 large 对象直接 young -> old，但 tiny 对象延迟到最后走 young -> staging -> old。
+```
+
+## 2026-05-27：CheneyGC 同口径数据补充
+
+用户要求补充和上一张表同口径的 CheneyGC 数据。
+
+同口径定义：
+
+```text
+young after aux = 532.24KB
+aux total = 152KB
+CACHE_SIZE_KB = 896
+benchmark CPU = 0
+```
+
+CheneyGC 数据来源：
+
+```text
+build.debug/benchmarks/out_cheney_rerun_giysbf512_20260525_183854
+config = cheney896_young532_rerun
+```
+
+配套表：
+
+| Config | Total | GC full | scavenge | minor GC | 口径 |
+|---|---:|---:|---:|---:|---|
+| CheneyGC young532 | 6600.436 | 115.903 | 78.130 | 1178229 | current / strict |
+| GiY force-NT | 6857.555 | 307.880 | 273.187 | 1187074 | current / strict |
+| GiYSBF64 8KB | 6814.852 | 180.618 | 144.033 | 1187074 | current / strict |
+| GiYSBF128 8KB | 6620.341 | 170.784 | 104.584 | 1187074 | old sweep / reference |
+| GiYSBF256 8KB | 6672.226 | 141.644 | 105.095 | 1187074 | current / strict |
+| GiYSBF512 8KB | 6606.753 | 136.195 | 99.374 | 1187074 | current / strict |
+
+注意：
+
+```text
+CheneyGC 的 minor GC count = 1178229，
+GiY/GiYSBF 系列是 1187074。
+两边 young after aux 相同，但 collector 行为不同，所以 minor GC count 不必完全相同。
+```
+
+直接比较：
+
+```text
+GiYSBF512 8KB vs CheneyGC:
+  Total    +6.317s
+  GC full  +20.292s
+  scavenge +21.244s
+
+GiYSBF256 8KB vs CheneyGC:
+  Total    +71.790s
+  GC full  +25.741s
+  scavenge +26.965s
+
+GiYSBF64 8KB vs CheneyGC:
+  Total    +214.416s
+  GC full  +64.715s
+  scavenge +65.903s
+
+GiY force-NT vs CheneyGC:
+  Total    +257.119s
+  GC full  +191.977s
+  scavenge +195.057s
+```
+
+汇报短句：
+
+```text
+在同样 young after aux = 532.24KB 的口径下，
+CheneyGC 的 GC full 是 115.903s，scavenge 是 78.130s。
+GiYSBF512 已经接近 Cheney 的 total，但 GC full 仍多 20.292s；
+GiY 全对象强制 NT 则明显最差，GC full 比 Cheney 多 191.977s。
+```
+
+## 2026-05-27：GiYSBF256 8KB benchmark 细节
+
+用户要求展开这一组数据：
+
+```text
+GiYSBF256 8KB = Total 6672.226s, GC full 141.644s, scavenge 105.095s, minor GC 1187074
+```
+
+数据来源：
+
+```text
+build.debug/benchmarks/out_giy_slot_cached_store_20260525_121041/summary.csv
+config = giysbf256_slot_cached_896
+```
+
+实验口径：
+
+```text
+status = 0 for all benchmarks
+CACHE_SIZE_KB = 896
+workspace_after_rset = 704KB
+young before aux = 684.24KB
+young after aux = 532.24KB
+aux total = 152KB
+GiYSB staging buffer = 8192B = 8KB
+GiYSB tiny table = 65536B = 64KB
+GiYSB tiny max = 256B
+tiny policy = staging-only forced NT
+GIY_NT_COPY_BITS = 256
+GIY_OLD_SLOT_NT_STORE = 0
+```
+
+汇总：
+
+| Metric | Value |
+|---|---:|
+| Total | 6672.226s |
+| Business | 6530.585s |
+| GC full | 141.644s |
+| GC core | 108.141s |
+| scan_roots | 0.615s |
+| scan_RS | 2.430s |
+| scavenge | 105.095s |
+| minor GC | 1187074 |
+| forward operations | 1674514926 |
+| write barrier calls | 2056280889 |
+
+逐 benchmark 细节：
+
+| Benchmark | Total | Business | GC full | GC core | scan_RS | scavenge | minor GC | avg pause ms | WB calls | alloc MB | forward ops |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 304.763 | 304.606 | 0.158 | 0.052 | 0.003 | 0.047 | 3568 | 0.044 | 121057 | 1157.17 | 610155 |
+| CD | 483.023 | 467.228 | 15.795 | 10.760 | 0.109 | 10.531 | 123189 | 0.128 | 8498164 | 28661.32 | 162299407 |
+| DeltaBlue | 132.857 | 130.284 | 2.574 | 1.773 | 0.127 | 1.633 | 17200 | 0.150 | 8078057 | 5710.71 | 31898877 |
+| Havlak | 779.862 | 734.622 | 45.240 | 34.957 | 1.974 | 32.776 | 255450 | 0.177 | 145293810 | 102308.28 | 382690589 |
+| List | 185.991 | 185.969 | 0.023 | 0.003 | 0.000 | 0.002 | 546 | 0.041 | 605 | 141.98 | 24939 |
+| Mandelbrot | 397.666 | 391.700 | 5.966 | 0.277 | 0.004 | 0.198 | 288607 | 0.021 | 56 | 49956.79 | 1717918 |
+| NBody | 641.265 | 631.998 | 9.268 | 0.912 | 0.185 | 0.596 | 358483 | 0.026 | 1874776195 | 62942.80 | 3048805 |
+| Permute | 815.618 | 815.616 | 0.002 | 0.000 | 0.000 | 0.000 | 40 | 0.054 | 98836 | 14.70 | 639 |
+| Queens | 217.054 | 217.015 | 0.039 | 0.004 | 0.000 | 0.003 | 1234 | 0.032 | 3997161 | 518.88 | 8518 |
+| Richards | 1797.021 | 1796.861 | 0.159 | 0.028 | 0.000 | 0.024 | 2400 | 0.066 | 12987149 | 446.00 | 245278 |
+| Sieve | 237.347 | 236.281 | 1.066 | 0.559 | 0.002 | 0.550 | 23076 | 0.046 | 23134 | 11455.61 | 23544 |
+| Storage | 349.774 | 288.426 | 61.348 | 58.815 | 0.026 | 58.734 | 113172 | 0.542 | 1056228 | 42104.41 | 1091942340 |
+| Towers | 329.985 | 329.979 | 0.006 | 0.001 | 0.000 | 0.001 | 109 | 0.055 | 1350437 | 29.37 | 3917 |
+
+GC full 贡献最大的 benchmark：
+
+| Benchmark | GC full | 占 GiYSBF256 总 GC full |
+|---|---:|---:|
+| Storage | 61.348s | 43.31% |
+| Havlak | 45.240s | 31.94% |
+| CD | 15.795s | 11.15% |
+| NBody | 9.268s | 6.54% |
+| Mandelbrot | 5.966s | 4.21% |
+
+scavenge 贡献最大的 benchmark：
+
+| Benchmark | scavenge | 占 GiYSBF256 总 scavenge |
+|---|---:|---:|
+| Storage | 58.734s | 55.89% |
+| Havlak | 32.776s | 31.19% |
+| CD | 10.531s | 10.02% |
+| DeltaBlue | 1.633s | 1.55% |
+| NBody | 0.596s | 0.57% |
+
+结论：
+
+```text
+GiYSBF256 8KB 的 GC 压力高度集中：
+Storage + Havlak + CD 合计贡献 122.383s GC full，占总 GC full 的约 86.40%；
+同三项贡献 102.041s scavenge，占总 scavenge 的约 97.09%。
+
+因此这组配置的问题不是所有 benchmark 都慢，
+而是 Storage/Havlak/CD 的对象搬运路径把 staging + forced NT 的额外成本集中放大了。
+如果要解释 GiYSBF256 为什么仍慢于标准 GiY，
+重点应放在 Storage 和 Havlak，尤其 Storage 的 scavenge = 58.734s。
+```
+
+## 2026-05-27：之前 GiYSBF256 256B 性能分析报告整理
+
+用户要求给出“之前的 256B 性能分析报告”。这里把之前关于 `GiYSBF256` 的分析整理成可汇报版本，并区分两个历史阶段：
+
+```text
+阶段 A：旧口径 / old-slot patch 仍使用 8B NT store
+  典型数据：GiYSBF256 total = 6592.568s, GC full = 170.272s
+  这个阶段 GiYSBF256 端到端看起来最好，但 GC 本身更慢。
+
+阶段 B：current 口径 / old-slot patch 改为普通 cached store
+  典型数据：GiYSBF256 8KB total = 6672.226s, GC full = 141.644s
+  这个阶段 scan_RS 问题被修正，剩下的问题集中在 scavenge / object materialization。
+```
+
+### 阶段 A：旧口径下的 256B 结果
+
+实验口径：
+
+```text
+local workspace = 896KB
+actual young after aux = 532.24KB
+GiYSBF tiny threshold = 256B
+GiYSBF staging buffer = 8KB
+GiYSBF tiny table = 64KB
+old slot patch = 8B NT store
+```
+
+整体结果：
+
+| GC | Total | Business | GC full | GC core | scan_RS | scavenge | minor GC |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| CheneyGC | 6597.027 | 6480.616 | 116.411 | 82.005 | 2.987 | 78.314 | 1178229 |
+| GiY | 6648.775 | 6508.511 | 140.264 | 101.011 | 25.443 | 75.021 | 1187074 |
+| GiYSBF256 | 6592.568 | 6422.296 | 170.272 | 130.849 | 25.852 | 104.400 | 1187074 |
+| GiYSBF512 | 6679.640 | 6513.208 | 166.432 | 126.273 | 25.832 | 99.837 | 1187074 |
+
+旧口径下，GiYSBF256 相对 CheneyGC：
+
+| 指标 | 差异 |
+|---|---:|
+| Total | -4.459s (-0.068%) |
+| Business | -58.320s (-0.900%) |
+| GC full | +53.861s (+46.268%) |
+| scavenge | +26.086s |
+| scan_RS | +22.865s |
+
+旧口径下，GiYSBF256 相对 GiY：
+
+| 指标 | 差异 |
+|---|---:|
+| Total | -56.207s (-0.845%) |
+| Business | -86.215s (-1.325%) |
+| GC full | +30.008s (+21.394%) |
+| scavenge | +29.379s |
+| scan_RS | +0.409s |
+
+阶段 A 的核心判断：
+
+```text
+GiYSBF256 的端到端 Total 看起来最好：
+  比 CheneyGC 快 4.459s；
+  比 GiY 快 56.207s。
+
+但这个结果不能解释为 GiYSBF 的 GC 策略成功。
+因为 GiYSBF256 的 GC full 反而是几组里最慢：
+  比 CheneyGC 慢 53.861s；
+  比 GiY 慢 30.008s。
+
+也就是说，旧口径下 GiYSBF256 的 Total 优势主要来自 business residual 更低，
+不是来自 GC 复制策略本身更快。
+```
+
+旧口径下的主要问题：
+
+```text
+1. scan_RS 非常高：
+   GiYSBF256 scan_RS = 25.852s
+   CheneyGC scan_RS = 2.987s
+
+2. scavenge 也明显变慢：
+   GiYSBF256 scavenge = 104.400s
+   GiY scavenge = 75.021s
+   CheneyGC scavenge = 78.314s
+
+3. 原因判断：
+   GiYSBF 的 tiny table + staging buffer + forced NT materialization
+   没有降低复制主体成本，反而增加了小对象管理、flush、二次搬运成本。
+```
+
+### 阶段 B：current 口径下的 256B 结果
+
+后来修正了一个重要问题：
+
+```text
+old slot patch 从 8B NT store 改成普通 cached store。
+```
+
+修正后的 current 口径：
+
+```text
+CACHE_SIZE_KB = 896
+young after aux = 532.24KB
+aux total = 152KB
+GiYSBF staging buffer = 8KB
+GiYSBF tiny table = 64KB
+GiYSBF tiny max = 256B
+tiny policy = staging-only forced NT
+GIY_OLD_SLOT_NT_STORE = 0
+```
+
+修正后对比 GiY / GiYSB64 / GiYSBF256：
+
+| 指标 | GiY | GiYSB64 | GiYSBF256 |
+|---|---:|---:|---:|
+| Total | 6630.018 | 6814.852 | 6672.226 |
+| Business | 6518.418 | 6634.233 | 6530.585 |
+| GC full | 111.600 | 180.618 | 141.644 |
+| GC core | 78.494 | 147.086 | 108.141 |
+| scan_RS | 2.063 | 2.428 | 2.430 |
+| scavenge | 75.868 | 144.033 | 105.095 |
+| minor GC | 1187074 | 1187074 | 1187074 |
+
+current 口径下，GiYSBF256 相对 GiY：
+
+| 指标 | 差异 |
+|---|---:|
+| Total | +42.208s (+0.637%) |
+| GC full | +30.044s (+26.921%) |
+| GC core | +29.647s (+37.77%) |
+| scan_RS | +0.367s (+17.79%) |
+| scavenge | +29.227s (+38.52%) |
+
+current 口径下，GiYSBF256 相对同 young CheneyGC：
+
+```text
+CheneyGC young532:
+  Total = 6600.436s
+  GC full = 115.903s
+  scavenge = 78.130s
+  minor GC = 1178229
+
+GiYSBF256 8KB:
+  Total = 6672.226s
+  GC full = 141.644s
+  scavenge = 105.095s
+  minor GC = 1187074
+```
+
+| 指标 | GiYSBF256 - CheneyGC |
+|---|---:|
+| Total | +71.790s |
+| GC full | +25.741s |
+| scavenge | +26.965s |
+
+current 口径下的 benchmark 归因：
+
+| Benchmark | GC full | scavenge | 说明 |
+|---|---:|---:|---|
+| Storage | 61.348 | 58.734 | 最大问题，占总 scavenge 约 55.89% |
+| Havlak | 45.240 | 32.776 | 第二大问题，占总 scavenge 约 31.19% |
+| CD | 15.795 | 10.531 | 第三大问题，占总 scavenge 约 10.02% |
+
+```text
+Storage + Havlak + CD:
+  GC full = 122.383s，占 GiYSBF256 总 GC full 约 86.40%
+  scavenge = 102.041s，占 GiYSBF256 总 scavenge 约 97.09%
+```
+
+### 最终汇报结论
+
+```text
+GiYSBF256 是比 GiYSB64 明显更合理的 tiny threshold：
+  GiYSB64 GC full = 180.618s
+  GiYSBF256 GC full = 141.644s
+  256B 比 64B 少 38.974s GC full。
+
+但是 GiYSBF256 仍然没有超过标准 GiY：
+  GiY GC full = 111.600s
+  GiYSBF256 GC full = 141.644s
+  GiYSBF256 多 30.044s。
+
+修正 old slot patch 之后，scan_RS 已经不是主要矛盾：
+  GiYSBF256 scan_RS = 2.430s
+  GiY scan_RS = 2.063s
+
+真正的差距来自 scavenge：
+  GiYSBF256 scavenge = 105.095s
+  GiY scavenge = 75.868s
+  GiYSBF256 多 29.227s。
+
+这说明当前 256B 策略的问题不是 remembered set，
+而是 staging buffer / tiny table / forced NT materialization 的对象搬运路径。
+尤其 Storage 和 Havlak 放大了这部分成本。
+```
+
+适合对导师说的短版：
+
+```text
+256B threshold 相比 64B 明显改善了 GiYSBF，
+说明扩大 tiny batching 覆盖范围是有收益的。
+但在修正 old slot store 后，GiYSBF256 仍比标准 GiY 慢：
+Total 慢 42.208s，GC full 慢 30.044s，scavenge 慢 29.227s。
+现在瓶颈已经不是 scan_RS，而是 tiny staging 的对象搬运路径。
+其中 Storage/Havlak/CD 贡献了约 86% 的 GC full 和约 97% 的 scavenge。
+```
+
+## 2026-05-27：当前 GiY / GiYSBF 相关数据结构和大小
+
+用户要求说明当前数据结构以及各个结构的大小。这里按当前主实验口径整理：
+
+```text
+config = giysbf256_slot_cached_896 / giysbf512_slot_cached_896 同类口径
+CACHE_SIZE_KB = 896
+GIY_RSET_READ_SLOT_AT_GC = 1
+GIY_GC_STACK_BYTES = 49152 = 48KB
+GIY_NT_COPY_BITS = 256
+GIY_OLD_SLOT_NT_STORE = 0
+USE_GIYSB = 1
+GIYSB_TINY_BATCH = 1
+GIYSB_STAGING_BYTES = 8192 = 8KB
+GIYSB_TINY_TABLE_BYTES = 65536 = 64KB
+GIYSB_TINY_OBJECT_MAX_BYTES = 64 / 256 / 512，取决于具体配置
+GIYSB_SMALL_OLD_RATIO = 50
+```
+
+### 基础单位
+
+当前 64-bit build 下：
+
+| 项 | 大小 |
+|---|---:|
+| pointer / uintptr_t / size_t | 8B |
+| JSValue | 8B |
+| cell_type_t enum | 4B |
+| bool | 1B |
+| uint32_t | 4B |
+| object_header | 16B |
+
+`object_header` 当前字段：
+
+```text
+uintptr_t forwarding_pointer;  // 8B
+cell_type_t type;              // 4B
+int size;                      // 4B, payload bytes
+```
+
+所以每个 heap object 的实际占用近似为：
+
+```text
+ALIGN(payload_bytes + 16, 8)
+```
+
+### cache / DRAM 管理结构
+
+| 结构 | sizeof | 说明 |
+|---|---:|---|
+| Cache_space | 40B | cache/young 区的 begin/work_begin/current/end/size 信息 |
+| Dram_space | 48B | old/DRAM 区 begin/free/current/end/size 信息 |
+| RememberedSet | 40B | remembered set 的元数据，不含动态数组 |
+| object_header | 16B | 每个 cache/old 对象头 |
+
+当前 remembered set 动态占用：
+
+| 结构 | 单项大小 | 容量 | 总大小 | 说明 |
+|---|---:|---:|---:|---|
+| remembered_set.buffer | 8B | 16384 entries | 128KB | 记录 slot 地址，低 bit 可标记 ptr slot |
+| remembered_set.values | 8B | 0 | 0KB | 当前 read_slot 模式不用保存 value |
+| remembered_set.hash_table | 8B | 8192 buckets | 64KB | 去重/查找用 hash |
+| 合计 |  |  | 192KB | 从 cache budget 中预留 |
+
+因此 `CACHE_SIZE_KB=896` 后，先扣掉 RSet：
+
+```text
+896KB - 192KB = 704KB
+```
+
+这就是 benchmark 里 `workspace_after_rset = 704KB` 的来源。
+
+### GiY / GiYSBF aux workspace
+
+GiYSBF 8KB 当前 aux workspace：
+
+| 结构 | 元数据 sizeof | 动态占用 | 容量 | 说明 |
+|---|---:|---:|---:|---|
+| GiYGCStack | 48B | 48KB | 6144 entries | young traversal worklist，entry 是 uintptr_t |
+| EdgePatchLog | 32B | 0KB | 0 | 当前 edge log 实际未分配，edge_bytes=0 |
+| EdgePatchEntry | 16B | - | - | 如果启用 edge log，每条 young edge patch 记录 16B |
+| GiYFTSlotSet | 32B | 32KB | 4096 entries | 记录 FunctionTable / AllocSite 等外部 slot |
+| GiYJSObjectLayoutCacheEntry | 24B | 0KB | 0 | 当前 layout cache entries=0 |
+| GiYSB staging buffer | pointer 元数据 8B | 8KB | byte buffer | tiny 对象先 young -> staging |
+| GiYSB tiny table | pointer 元数据 8B | 64KB | 16384 entries | 每条 uint32_t，记录 tiny object source offset + size class |
+
+GiYSBF 8KB aux 合计：
+
+```text
+48KB stack
++ 32KB ft slot set
++ 8KB staging buffer
++ 64KB tiny table
+= 152KB
+```
+
+对应输出：
+
+```text
+Young before aux: 684.24KB
+Young after aux:  532.24KB
+Aux total:        152.00KB
+```
+
+标准 GiY 为了同口径 young，也使用同样 152KB aux budget，但组成不同：
+
+```text
+48KB stack
++ 32KB ft slot set
++ 72KB local padding
+= 152KB
+```
+
+也就是说：
+
+```text
+GiYSBF 的 72KB 不是 padding，而是 8KB staging + 64KB tiny table。
+GiY/force-NT GiY 的 72KB 是 GIY_LOCAL_PADDING_BYTES，用来保证 young after aux 相同。
+```
+
+### GiYSBF tiny table 编码
+
+每个 tiny table entry 是 `uint32_t`，大小 4B。
+
+当前编码：
+
+```text
+low  7 bits  = size_class = align_bytes / 8
+high 25 bits = offset_units = (payload_ptr - cache_space.work_begin) / 8
+```
+
+所以：
+
+| tiny table 项 | 值 |
+|---|---:|
+| entry size | 4B |
+| table bytes | 65536B = 64KB |
+| capacity | 16384 entries |
+| size bits | 7 bits |
+| max encoded size_class | 127 |
+| max encoded aligned size | 1016B |
+
+但实际 tiny 上限由 `GIYSB_TINY_OBJECT_MAX_BYTES` 决定：
+
+| 配置 | tiny max | 最大 size_class |
+|---|---:|---:|
+| GiYSBF64 | 64B | 8 |
+| GiYSBF128 | 128B | 16 |
+| GiYSBF256 | 256B | 32 |
+| GiYSBF512 | 512B | 64 |
+
+注意：
+
+```text
+64B / 128B / 256B / 512B 这些 threshold 只改变“哪些对象进入 tiny table”，
+不改变 tiny table 本身大小。
+当前主实验里 tiny table 一直是 64KB，capacity 一直是 16384 entries。
+```
+
+### GiYSB old-space split
+
+GiYSB 还维护一个 old-space 分区元数据：
+
+| 结构 | sizeof | 说明 |
+|---|---:|---|
+| GiYSBOldSpace | 56B | small/large old 区 begin/free/end 指针 |
+| GiYSBProfile | 112B | profile 计数器结构；当前 GIYSB_PROFILE=0，不作为主开销解释 |
+
+当前运行中 DRAM/old space 初始化为：
+
+```text
+DRAM size = 134217728KB = 128GB
+small old = 67108864KB = 64GB
+large old = 67108864KB = 64GB
+ratio = 50% / 50%
+```
+
+GiYSBF 的对象放置规则：
+
+```text
+tiny object  -> small old 区 reserve，稍后通过 tiny table + staging materialize
+large object -> large old 区 reserve，并直接 forced NT copy
+```
+
+### 主要 VM 对象结构 sizeof
+
+这些是当前编译宏下的 `sizeof`，用于解释对象 payload 基础开销：
+
+| 结构 | sizeof |
+|---|---:|
+| JSObject | 16B |
+| StringCell | 16B |
+| FlonumCell | 8B |
+| PropertyMap | 80B |
+| PropertyMapList | 16B |
+| Shape | 56B |
+| FunctionFrame | 24B |
+| Context | 136B |
+| UnwindProtect | 40B |
+| HashTable | 16B |
+| HashEntry | 24B |
+| struct property | 16B |
+| struct transition | 16B |
+| TransitionTable | 8B |
+| StrCons | 16B |
+| StrTable | 16B |
+| FunctionTable | 40B |
+| AllocSite | 24B |
+| InlineCache | 48B |
+| Instruction | 96B |
+
+### 汇报短句
+
+```text
+当前 GiYSBF 的额外结构主要是 8KB staging buffer 和 64KB tiny table。
+tiny table 每条 entry 是 4B，因此 64KB table 可以记录 16384 个 tiny object。
+GiYSBF 的 aux workspace 总共 152KB，其中 stack 48KB、FT slot set 32KB、
+staging 8KB、tiny table 64KB。
+
+为了公平比较，普通 GiY/force-NT GiY 也保留 152KB aux，
+但其中 72KB 是 padding；GiYSBF 则把这 72KB 用于 staging + tiny table。
+因此 64B/256B/512B threshold 实验中，数据结构总大小不变，
+变化的是进入 tiny table 的对象范围。
+```
+
+## 2026-05-29：轮讲准备 - 取消 tiny table、直接 staging 小对象的研究路线
+
+用户马上要轮讲，导师希望围绕当前研究给出可能解释和下一周计划。当前讨论的新想法是：
+
+```text
+取消 tiny table。
+小对象不再先记录 source offset，然后 GC traversal 结束后再回到 young 区二次读取。
+而是在对象处理过程中，直接把小对象内容 pack 进 staging buffer。
+staging buffer 满后，对应 old 区连续范围使用 NT store flush。
+目标：减少 tiny table 管理和二次读取 young 对象的成本。
+```
+
+### 1. 轮讲可以讲的核心问题
+
+当前数据已经能支撑一个清晰的研究问题：
+
+```text
+GiYSBF 的设计初衷是把小对象聚合起来，用 staging buffer + NT store 降低零散写 old 的成本。
+但当前结果显示，GiYSBF 的 scavenge 反而明显慢于标准 GiY。
+
+因此现在的问题不是“GiYSBF 是否一定更快”，
+而是要定位：GiYSBF 慢在哪里？
+```
+
+当前主表中最关键的数据：
+
+| Config | Total | GC full | scavenge | minor GC |
+|---|---:|---:|---:|---:|
+| GiY normal | 6630.018 | 111.600 | 75.868 | 1187074 |
+| GiYSBF64 8KB | 6814.852 | 180.618 | 144.033 | 1187074 |
+| GiYSBF256 8KB | 6672.226 | 141.644 | 105.095 | 1187074 |
+| GiYSBF512 8KB | 6606.753 | 136.195 | 99.374 | 1187074 |
+| CheneyGC young532 | 6600.436 | 115.903 | 78.130 | 1178229 |
+
+可以讲出的现象：
+
+```text
+1. tiny threshold 从 64B 扩到 256B/512B 后，GiYSBF 明显改善。
+   说明“小对象聚合”的方向不是完全无效。
+
+2. 但是 GiYSBF256/512 的 scavenge 仍明显慢于 GiY/Cheney。
+   说明当前实现中的 tiny table + staging materialization 仍有额外成本。
+
+3. Storage / Havlak / CD 是主要来源。
+   GiYSBF256 中，这三个 benchmark 贡献约 86% 的 GC full 和约 97% 的 scavenge。
+```
+
+### 2. 当前 GiYSBF 为什么可能慢
+
+当前 GiYSBF 的 tiny 路径可以概括为：
+
+```text
+for each live tiny object:
+    reserve old address
+    scan object in young
+    patch child pointers
+    append tiny_table entry
+    do not copy object now
+
+after traversal:
+    for each tiny_table entry:
+        decode source offset and size
+        read object again from young
+        memcpy young -> staging
+        flush staging -> old by forced NT store
+```
+
+这里可能有三类成本：
+
+```text
+1. tiny table 管理成本
+   每个 tiny object 要 append / bounds check / encode offset / decode entry。
+
+2. 二次读取 young 对象
+   traversal 时已经扫描过 object；
+   materialization 时又通过 tiny table 回到 young 区读一次。
+   对 Storage / Havlak 这种小对象密集 benchmark，这会被放大。
+
+3. staging flush 成本
+   如果 flush chunk 不够大，NT store 的收益可能覆盖不了 pack/flush 的管理成本。
+```
+
+这次提出的 direct staging 正好针对前两项：
+
+```text
+不再保存 tiny table entry；
+也不再 traversal 结束后重新遍历 tiny table、重新读取 young 对象；
+而是在对象被处理时直接进入 staging buffer。
+```
+
+### 3. 新想法的核心伪代码
+
+当前 GiYSBF：
+
+```text
+if object is tiny:
+    reserve old address
+    scan and patch object in young
+    tiny_table.append(source_offset, size)
+
+after all live objects are discovered:
+    for entry in tiny_table:
+        copy young -> staging
+        if staging full:
+            NT store staging -> old
+```
+
+新 direct staging 版本：
+
+```text
+if object is tiny:
+    reserve old address
+    scan and patch object in young
+
+    if staging is full or old destination is not contiguous:
+        NT store staging -> old
+        clear staging
+
+    copy patched object young -> staging
+
+after traversal:
+    NT store remaining staging -> old
+```
+
+最关键的正确性要求：
+
+```text
+小对象必须在 scan/patch 之后再复制进 staging。
+
+如果在 patch child pointers 之前就复制到 staging，
+staging 中可能保留 young pointer，最后写入 old 后就是错误对象。
+```
+
+所以这个实验真正要验证的是：
+
+```text
+在保持 pointer patch 正确性的前提下，
+能不能把 tiny object materialization 从“结束后统一二次读取”
+改成“扫描完成后立即 staging”。
+```
+
+### 4. 如果 direct staging 成功，说明什么
+
+成功定义可以先定得务实一点：
+
+```text
+不是必须立刻超过 GiY。
+只要 GiYSBF256/512 的 scavenge 明显下降，
+尤其 Storage/Havlak/CD 明显下降，就说明方向成立。
+```
+
+如果成功，可以汇报的解释是：
+
+```text
+当前 GiYSBF 的主要额外成本来自 tiny table 延迟 materialization：
+tiny table 让小对象在 traversal 后被再次读取和整理。
+取消 tiny table、在对象处理时直接进入 staging 后，
+减少了二次 young read 和 table decode，因此 scavenge 下降。
+```
+
+成功后一周计划：
+
+| 时间 | 工作 |
+|---|---|
+| Day 1 | 实现 `GIYSB_DIRECT_STAGING=1` 原型，保留旧 tiny table 路径作为 baseline |
+| Day 2 | 跑 smoke / probe / 小 benchmark，重点检查 pointer patch 正确性 |
+| Day 3 | 跑 full suite：GiY、GiYSBF256-table、GiYSBF256-direct、GiYSBF512-direct |
+| Day 4 | 加 profile：staged objects、staged bytes、flush count、avg flush bytes、fallback count |
+| Day 5 | 做 threshold sweep：64B / 128B / 256B / 512B |
+| Day 6 | 重点分析 Storage / Havlak / CD，解释 scavenge 下降来自哪里 |
+| Day 7 | 整理报告：direct staging 是否证明 tiny table 是瓶颈 |
+
+成功后下一轮可以讲的表：
+
+| Config | Total | GC full | scavenge | Storage scavenge | Havlak scavenge | flush avg bytes |
+|---|---:|---:|---:|---:|---:|---:|
+| GiY normal | baseline | baseline | baseline | baseline | baseline | - |
+| GiYSBF256 table | old result | old result | old result | old result | old result | old result |
+| GiYSBF256 direct | new result | new result | new result | new result | new result | new result |
+| GiYSBF512 direct | new result | new result | new result | new result | new result | new result |
+
+成功后可以对导师说：
+
+```text
+我验证了 GiYSBF 当前慢的主要原因之一不是 staging buffer 这个想法本身，
+而是 tiny table 带来的延迟 materialization。
+直接 staging 后，如果 scavenge 下降，说明 young 二次读取和 table decode 是重要成本。
+下一步应该继续优化 flush 粒度和 threshold，而不是继续扩大 tiny table。
+```
+
+### 5. 如果 direct staging 失败，也能讲什么
+
+失败分两种：
+
+#### 失败 A：正确性失败
+
+可能现象：
+
+```text
+程序崩溃；
+benchmark 输出错误；
+对象字段出现 young pointer 留在 old object；
+minor GC 后访问错误。
+```
+
+解释：
+
+```text
+这说明当前 GiYSBF 延迟 materialization 可能不仅是性能设计，
+也承担了 correctness 作用：
+它保证对象在 young 区完成 pointer patch 后，再统一复制到 old。
+
+如果 direct staging 太早复制，就会把未 patch 的对象内容写入 staging。
+```
+
+失败 A 后一周计划：
+
+| 时间 | 工作 |
+|---|---|
+| Day 1 | 加 assert：写入 old 前检查 staged object 内部是否还有 young pointer |
+| Day 2 | 明确 direct staging 的插入点：必须在 object scan/patch 完成之后 |
+| Day 3 | 对 Storage/Havlak 做最小复现，定位是哪类对象/字段残留 young pointer |
+| Day 4 | 尝试“scan complete 后 staging”的保守版本 |
+| Day 5 | 如果仍失败，设计 staging entry patch 机制，即 staging 中也能修 pointer |
+| Day 6 | 整理 correctness 结论：为什么 tiny table 延迟复制保证正确性 |
+| Day 7 | 轮讲汇报：失败原因不是工程问题，而是揭示了复制时机约束 |
+
+失败 A 可以对导师说：
+
+```text
+direct staging 暴露了 GiYSBF 的一个关键约束：
+小对象不能在 pointer patch 完成前被物化。
+这说明 tiny table 的延迟复制虽然有性能成本，
+但它简化了 correctness。
+下一步应该研究“scan 完成后立即 staging”或“staging 内 pointer patch”的实现。
+```
+
+#### 失败 B：正确但性能没有提升
+
+可能现象：
+
+```text
+direct staging 能跑通；
+但 scavenge 没下降，甚至更慢。
+```
+
+解释：
+
+```text
+这说明 tiny table / 二次 young read 不是主要瓶颈。
+真正瓶颈可能是：
+
+1. 小对象 pack 到 staging 的 memcpy 成本；
+2. 8KB flush 太小，NT store 没有收益；
+3. forced NT store 对很多小对象组合仍然不划算；
+4. Storage/Havlak 的对象图让 staging chunk 不够连续；
+5. 标准 GiY 的 size-aware 策略本来就更适合当前 workload。
+```
+
+失败 B 后一周计划：
+
+| 时间 | 工作 |
+|---|---|
+| Day 1 | 保留 direct staging 结果，和 tiny table 版本逐 benchmark 对比 |
+| Day 2 | 加 flush profile：flush 次数、平均 bytes、tail flush bytes、objects per flush |
+| Day 3 | 做 copy 策略拆分实验：staging + cached store vs staging + NT store |
+| Day 4 | 做 adaptive staging：只有 chunk >= 4KB/8KB 才 NT，否则走普通 GiY copy |
+| Day 5 | 专门跑 Storage/Havlak/CD，确认是否 flush 太碎 |
+| Day 6 | 对比 GiY force-NT：解释为什么 unconditional NT 会差 |
+| Day 7 | 汇报：瓶颈不是 tiny table，而是 small-object staging/NT 本身的性价比 |
+
+失败 B 可以对导师说：
+
+```text
+direct staging 没有提升，反而说明当前问题不主要来自 tiny table。
+真正问题更可能是 staging + forced NT 对小对象不划算。
+这和 force-NT GiY 的实验一致：无条件 NT store 会显著拖慢 GC。
+下一步应该做 adaptive 策略，只在能形成足够大连续 chunk 时才用 staging + NT。
+```
+
+### 6. 不管成功失败，都能保证轮讲有内容
+
+这周的目标不应该写成“必须做出更快 GC”，而应该写成：
+
+```text
+验证 GiYSBF 当前 scavenge 变慢的原因。
+```
+
+这样实验无论结果如何，都有研究价值：
+
+| 结果 | 可以得出的结论 |
+|---|---|
+| direct staging 更快 | tiny table / 二次 young read 是 GiYSBF 主要瓶颈 |
+| direct staging 正确性失败 | tiny table 延迟复制承担了 pointer patch correctness 作用 |
+| direct staging 跑通但不快 | 瓶颈不是 table，而是 staging pack / forced NT / flush 粒度 |
+| direct staging 只在 Storage/Havlak 有效 | 优化应按 workload/object graph 自适应启用 |
+| direct staging 只在 512B 有效 | threshold 和 staging 粒度存在联动，需要 sweep |
+
+### 7. 轮讲建议结构
+
+可以按 6 页讲：
+
+```text
+Slide 1: 当前问题
+  GiYSBF 的目标是优化 GiY 的对象搬运，但 scavenge 仍比 GiY 慢。
+
+Slide 2: 数据现象
+  64B -> 256B/512B 改善明显，但 Storage/Havlak/CD 仍贡献大部分 GC cost。
+
+Slide 3: 当前机制解释
+  tiny table 记录小对象，traversal 后再 decode table、二次读取 young、staging -> old。
+
+Slide 4: 新假设
+  取消 tiny table，scan/patch 后直接 staging，满了就 NT flush。
+
+Slide 5: 成功/失败的解释
+  成功说明 table/二次读取是瓶颈；
+  失败说明瓶颈在 correctness 时机或 forced NT/staging 本身。
+
+Slide 6: 下一周计划
+  实现 direct staging prototype；
+  跑 GiY / table / direct 对比；
+  加 flush profile；
+  重点分析 Storage/Havlak/CD。
+```
+
+### 8. 一句话版本
+
+```text
+我下一步不是盲目继续调 threshold，而是要验证 GiYSBF 变慢的根因：
+当前 tiny table 方案会让小对象在 traversal 后再次从 young 区读取并 staging，
+所以我准备实现一个 no tiny table 的 direct staging 版本。
+如果它变快，说明 tiny table 和二次读取是瓶颈；
+如果它不变快或更慢，说明问题在 forced NT / staging flush 粒度本身。
+无论成功失败，都能把 GiYSBF 的性能差距解释得更具体。
+```
+
+## 2026-05-29：带 GiY 本体的下一步 direct staging 伪代码
+
+用户要求写一份“带有 GiY 算法本体的、下一步代码伪代码”。这里的目标是：
+
+```text
+先讲清楚标准 GiY minor GC 的主体流程；
+再讲当前 GiYSBF tiny table 路径；
+最后给出下一步 no tiny table / direct staging 小对象的伪代码。
+```
+
+### 1. 标准 GiY minor GC 本体
+
+标准 GiY 的核心思想：
+
+```text
+1. young object 被发现时，先在 old/DRAM 中 reserve 目标地址；
+2. forwarding pointer 写回 young object header；
+3. 遍历 young object 时，把对象内部 young pointer patch 成 old pointer；
+4. patch 后再把整个对象从 young copy 到 old；
+5. root / remembered set / function table 等外部 slot 最后统一 patch。
+```
+
+伪代码：
+
+```text
+GiY_minor_gc(ctx):
+    reset_gc_worklist()
+    reset_function_table_slot_set()
+    used_nt_store = false
+
+    # Phase 1: 从 roots 发现 live young object
+    scan_roots_with_reserve_tracer(ctx)
+    scan_function_table_slots_with_reserve_tracer()
+
+    # Phase 2: 从 remembered set 发现 live young object
+    for slot in remembered_set:
+        value = read(slot)
+        if value points to young object:
+            new_ptr = GiY_forward(value)
+
+    # Phase 3: 遍历所有 live young object，并 materialize 到 old
+    while worklist is not empty:
+        src_payload = pop_worklist()
+        src_hdr = header(src_payload)
+        dst_payload = src_hdr.forwarding_pointer
+        dst_hdr = header(dst_payload)
+        object_size = align(src_hdr.size + HEADER_SIZE)
+
+        # 关键：先扫描对象内部字段
+        # 如果字段指向 young，则 reserve 目标地址，并把对象内部字段 patch 成 old pointer
+        scan_object_with_reserve_tracer(src_payload)
+
+        # patch 完成后，复制整个对象
+        GiY_copy_object(dst_hdr, src_hdr, object_size)
+
+    # Phase 4: patch roots / function table / remembered set
+    scan_roots_with_patch_tracer(ctx)
+    patch_function_table_slots()
+    patch_remembered_set_slots()
+
+    if used_nt_store:
+        sfence()
+
+    reset_young_allocation_pointer()
+```
+
+`GiY_forward`：
+
+```text
+GiY_forward(ptr):
+    if ptr is already in old/init/non-young:
+        return ptr
+
+    src_hdr = header(ptr)
+
+    if src_hdr.forwarding_pointer != 0:
+        return src_hdr.forwarding_pointer
+
+    object_size = align(src_hdr.size + HEADER_SIZE)
+    dst_hdr = old_alloc(object_size)
+    src_hdr.forwarding_pointer = payload(dst_hdr)
+    push_worklist(ptr)
+
+    return src_hdr.forwarding_pointer
+```
+
+`GiY_copy_object`：
+
+```text
+GiY_copy_object(dst_hdr, src_hdr, object_size):
+    if object_size <= 256B:
+        memcpy(dst_hdr, src_hdr, object_size)
+    else:
+        NT_store_copy(dst_hdr, src_hdr, object_size)
+```
+
+这里就是标准 GiY 和 force-NT GiY 的核心区别：
+
+```text
+标准 GiY:
+    <=256B 用 memcpy
+    >256B 用 NT store
+
+force-NT GiY:
+    不分大小，全部用 NT store
+```
+
+### 2. 当前 GiYSBF tiny table 路径
+
+当前 GiYSBF 在 `GiY_forward` 中改变 old allocation：
+
+```text
+GiYSBF_forward(ptr):
+    src_hdr = header(ptr)
+    object_size = align(src_hdr.size + HEADER_SIZE)
+
+    if object_size <= TINY_THRESHOLD:
+        dst_hdr = small_old_alloc(object_size)
+        src_hdr.forwarding_pointer = payload(dst_hdr)
+        tiny_table.append(src_payload_offset, object_size)
+        push_worklist(ptr)
+        return payload(dst_hdr)
+
+    else:
+        dst_hdr = large_old_alloc(object_size)
+        src_hdr.forwarding_pointer = payload(dst_hdr)
+        push_worklist(ptr)
+        return payload(dst_hdr)
+```
+
+当前 GiYSBF 的 traversal / copy：
+
+```text
+GiYSBF_traverse_and_copy_current():
+    while worklist is not empty:
+        src_payload = pop_worklist()
+        src_hdr = header(src_payload)
+        dst_hdr = header(src_hdr.forwarding_pointer)
+        object_size = align(src_hdr.size + HEADER_SIZE)
+
+        # 和 GiY 一样，先扫描并 patch young object 内部字段
+        scan_object_with_reserve_tracer(src_payload)
+
+        if dst_hdr is in small_old and object_size <= TINY_THRESHOLD:
+            # tiny object 当前不复制
+            # 只依靠 tiny_table 在最后统一 materialize
+            continue
+
+        else:
+            # large object 直接 forced NT copy
+            NT_store_copy(dst_hdr, src_hdr, object_size)
+
+    # traversal 结束后，才处理 tiny table
+    flush_tiny_table()
+```
+
+当前 `flush_tiny_table`：
+
+```text
+flush_tiny_table():
+    staging.clear()
+
+    for entry in tiny_table:
+        src_hdr = decode_source_from_young(entry)
+        object_size = decode_size(entry)
+        dst_hdr = current_small_old_destination()
+
+        if staging is full:
+            NT_store_copy(staging_dst, staging_buffer, staging_used)
+            staging.clear()
+
+        memcpy(staging_buffer + staging_used, src_hdr, object_size)
+        staging_used += object_size
+
+    if staging_used > 0:
+        NT_store_copy(staging_dst, staging_buffer, staging_used)
+
+    tiny_table.clear()
+```
+
+当前 GiYSBF 的问题点：
+
+```text
+tiny object 在 traversal 时已经被 scan/patch 过一次；
+但真正复制时，又通过 tiny_table 回到 young 区读一次。
+
+也就是：
+    第一次：scan young object
+    第二次：decode tiny_table 后再次 read young object，copy 到 staging
+
+下一步 direct staging 就是要去掉 tiny_table 和第二次 young 读取。
+```
+
+### 3. 下一步代码：no tiny table / direct staging
+
+建议新增编译开关：
+
+```text
+GIYSB_DIRECT_STAGING = 1
+```
+
+公平实验时还要保留 young size 口径：
+
+```text
+原 GiYSBF:
+    8KB staging + 64KB tiny table = 72KB
+
+direct staging:
+    8KB staging + 64KB padding = 72KB
+
+这样 young after aux 仍然保持 532.24KB，
+不会因为取消 tiny table 而让 young 变大。
+```
+
+direct staging 的 `forward`：
+
+```text
+GiYSB_direct_forward(ptr):
+    if ptr is not young:
+        return ptr
+
+    src_hdr = header(ptr)
+
+    if src_hdr.forwarding_pointer != 0:
+        return src_hdr.forwarding_pointer
+
+    object_size = align(src_hdr.size + HEADER_SIZE)
+
+    if object_size <= TINY_THRESHOLD:
+        dst_hdr = small_old_alloc(object_size)
+    else:
+        dst_hdr = large_old_alloc(object_size)
+
+    src_hdr.forwarding_pointer = payload(dst_hdr)
+    push_worklist(ptr)
+    return payload(dst_hdr)
+```
+
+注意：
+
+```text
+direct staging 的 forward 阶段不再 append tiny_table。
+它只负责 reserve old address、设置 forwarding pointer、push worklist。
+```
+
+direct staging 的 traversal：
+
+```text
+GiYSB_direct_traverse_and_copy():
+    direct_staging.clear()
+    used_nt_store = false
+
+    while worklist is not empty:
+        src_payload = pop_worklist()
+        src_hdr = header(src_payload)
+        dst_hdr = header(src_hdr.forwarding_pointer)
+        object_size = align(src_hdr.size + HEADER_SIZE)
+
+        # 必须先 scan/patch，再 copy/stage
+        scan_object_with_reserve_tracer(src_payload)
+
+        if object_size <= TINY_THRESHOLD and dst_hdr is in small_old:
+            direct_stage_tiny_object(dst_hdr, src_hdr, object_size)
+        else:
+            flush_direct_staging_if_not_empty()
+            NT_store_copy(dst_hdr, src_hdr, object_size)
+
+    flush_direct_staging_if_not_empty()
+
+    if used_nt_store:
+        sfence()
+```
+
+`direct_stage_tiny_object`：
+
+```text
+direct_stage_tiny_object(dst_hdr, src_hdr, object_size):
+    # 如果 staging 为空，建立本 chunk 的 old 目标起点
+    if staging.used == 0:
+        staging.dst_start = address(dst_hdr)
+        staging.expected_next_dst = address(dst_hdr)
+
+    # 关键检查 1：old destination 必须连续
+    if address(dst_hdr) != staging.expected_next_dst:
+        flush_direct_staging_if_not_empty()
+        staging.dst_start = address(dst_hdr)
+        staging.expected_next_dst = address(dst_hdr)
+
+    # 关键检查 2：staging buffer 必须放得下
+    if staging.used + object_size > STAGING_BYTES:
+        flush_direct_staging_if_not_empty()
+        staging.dst_start = address(dst_hdr)
+        staging.expected_next_dst = address(dst_hdr)
+
+    # 此时对象已经 scan/patch 完成，可以安全复制
+    memcpy(staging.buffer + staging.used, src_hdr, object_size)
+
+    staging.used += object_size
+    staging.expected_next_dst += object_size
+```
+
+`flush_direct_staging_if_not_empty`：
+
+```text
+flush_direct_staging_if_not_empty():
+    if staging.used == 0:
+        return
+
+    NT_store_copy(staging.dst_start,
+                  staging.buffer,
+                  staging.used)
+
+    staging.clear()
+```
+
+### 4. 最重要的正确性约束
+
+direct staging 不能这样写：
+
+```text
+# 错误
+reserve tiny object
+copy young object to staging immediately
+later scan/patch young object
+```
+
+因为这样 staging 中可能保存的是未 patch 的 young pointer。
+
+正确顺序必须是：
+
+```text
+reserve old address
+scan object
+patch object internal young pointers
+copy patched object into staging
+flush staging to old
+```
+
+也就是说：
+
+```text
+direct staging 应该放在 giy_process_young_node<GiYReserveTracer>(type, src_payload)
+之后，而不是放在 copy_for_minor / reserve_old_object 里面。
+```
+
+### 5. 一个需要特别注意的性能风险
+
+当前 GiY worklist 是 LIFO：
+
+```text
+push_worklist(obj)
+pop_worklist()  # 当前是 LIFO
+```
+
+但是 small_old address 是按 object 被发现的顺序连续分配的。
+
+这意味着：
+
+```text
+reserve order 不一定等于 traversal/materialization order。
+```
+
+如果 direct staging 按 LIFO traversal 顺序 staging，小对象的 old destination 可能不连续。
+所以伪代码里必须有：
+
+```text
+if dst_hdr != staging.expected_next_dst:
+    flush staging
+```
+
+如果 flush 太频繁，direct staging 可能失败。这个失败本身也有解释价值：
+
+```text
+说明当前 tiny table 不只是“额外开销”，
+它还把 tiny materialization 恢复到了 reserve order，
+从而保证 staging flush 可以覆盖连续 old 地址。
+```
+
+如果第一版 direct staging 性能不好，第二版可以尝试：
+
+```text
+把 worklist 从 LIFO 改成 FIFO，
+让 traversal/materialization order 更接近 reserve order，
+提高 direct staging 的连续 chunk 大小。
+```
+
+### 6. 下一步最小实现版本
+
+最小实现建议：
+
+```text
+新增宏：
+    GIYSB_DIRECT_STAGING
+
+保留：
+    GIYSB_STAGING_BYTES = 8192
+    GIYSB_TINY_OBJECT_MAX_BYTES = 256 或 512
+    GIYSB_TINY_TABLE_BYTES = 65536 作为 padding，保持 young after aux 公平
+
+修改点：
+    1. reserve tiny object 时，不再 tiny_table.append()
+    2. traversal loop 中，scan_object 后立刻 direct_stage_tiny_object()
+    3. large object 前先 flush staging，再 forced NT copy large object
+    4. traversal 结束后 flush staging
+    5. 移除/跳过 flush_tiny_table()
+```
+
+### 7. 最终轮讲版伪代码
+
+可以放到 slide 里的简化版本：
+
+```text
+GiY:
+  for each root / remembered-set edge:
+      if edge points to young object:
+          reserve old address
+          set forwarding pointer
+          push object to worklist
+
+  while worklist not empty:
+      obj = pop worklist
+      scan obj and reserve children
+      patch obj internal pointers to old addresses
+      copy patched obj directly young -> old
+
+  patch roots and remembered-set slots
+
+
+Current GiYSBF:
+  while worklist not empty:
+      obj = pop worklist
+      scan obj and patch internal pointers
+
+      if obj is tiny:
+          record obj in tiny_table
+          do not copy now
+      else:
+          forced_NT_copy young -> old
+
+  for obj in tiny_table:
+      memcpy young -> staging
+      forced_NT_copy staging -> old
+
+
+Next Direct-Staging GiYSBF:
+  while worklist not empty:
+      obj = pop worklist
+      scan obj and patch internal pointers
+
+      if obj is tiny:
+          if staging full or old destination not contiguous:
+              forced_NT_copy staging -> old
+          memcpy patched obj young -> staging
+      else:
+          flush staging
+          forced_NT_copy young -> old
+
+  flush staging
+```
+
+一句话：
+
+```text
+GiY 是“scan/patch 后立即 young -> old”；
+当前 GiYSBF 是“tiny 先记 table，最后再 young -> staging -> old”；
+下一步 direct staging 是“tiny 在 scan/patch 后立即 young -> staging，满了再 staging -> old”。
+```
+
+## 2026-05-29：关于 GiY 先 forwarding/patch 再 copy 是否能保证顺序
+
+用户指出：
+
+```text
+按照 GiY 的核心思想，首先修改指针、填入 forwarding pointer，
+然后再真正 copy。再加上 young / old 分区，
+这样不就可以保证顺序一定对了吗？
+```
+
+回答：
+
+```text
+这能保证“引用语义正确”，但不能自动保证“staging buffer 一次 NT flush 的目标地址顺序正确”。
+```
+
+需要区分两个“顺序”：
+
+| 顺序 | GiY forwarding pointer 能否保证 | 说明 |
+|---|---|---|
+| 指针语义顺序 | 能 | 所有引用都通过 forwarding pointer 找到 old 地址，所以 copy 早晚不影响引用结果 |
+| staging 连续写顺序 | 不能自动保证 | staging 里对象的排列必须和 old 区目标地址连续排列一致 |
+
+标准 GiY 中，copy 是逐对象发生的：
+
+```text
+copy object A -> A.old_address
+copy object B -> B.old_address
+```
+
+所以 copy 顺序不重要。只要每个对象知道自己的 `dst_hdr`，就不会写错。
+
+但是 staging buffer 是批量写：
+
+```text
+staging = [obj1][obj2][obj3]
+NT_store staging -> old_start
+```
+
+这要求：
+
+```text
+obj1.dst == old_start
+obj2.dst == obj1.dst + obj1.size
+obj3.dst == obj2.dst + obj2.size
+```
+
+否则 staging 一次写出去时就会把对象写到错误的 old 地址。
+
+当前 GiYSBF 的 tiny table 为什么能保证这一点：
+
+```text
+tiny_table 是在 reserve old address 时 append 的。
+small_old 也是在 reserve 时线性分配的。
+
+因此 tiny_table 顺序 == small_old address 顺序。
+最后 flush_tiny_table 按 tiny_table 顺序 copy，
+所以 staging 里的对象顺序和 old 目标地址顺序一致。
+```
+
+direct staging 的风险：
+
+```text
+当前 GiY worklist 是 LIFO。
+object 的 reserve 顺序不一定等于 traversal/copy 顺序。
+
+如果 direct staging 按 LIFO traversal 顺序把对象塞进 staging，
+staging 中对象顺序可能和 small_old 地址顺序不一致。
+```
+
+所以：
+
+```text
+forwarding pointer 保证的是“这个对象最终应该去哪里”；
+但不保证“多个对象进入 staging buffer 的顺序正好是 old 区连续顺序”。
+```
+
+如果要取消 tiny table，有三种可行策略：
+
+### 策略 A：direct staging 时检查 old 地址连续性
+
+```text
+if staging.used == 0:
+    staging.dst_start = obj.dst
+    staging.expected_next = obj.dst
+
+if obj.dst != staging.expected_next:
+    flush staging
+    staging.dst_start = obj.dst
+    staging.expected_next = obj.dst
+
+append obj to staging
+staging.expected_next += obj.size
+```
+
+优点：
+
+```text
+正确性安全；
+改动较小；
+能直接验证取消 tiny table 是否减少二次 young read。
+```
+
+缺点：
+
+```text
+如果 LIFO 导致目标地址经常不连续，会频繁 flush，
+staging chunk 变小，NT store 收益可能下降。
+```
+
+### 策略 B：把 worklist 从 LIFO 改成 FIFO
+
+思路：
+
+```text
+让 traversal/copy order 更接近 reserve order。
+如果 copy 顺序接近 reserve 顺序，
+small_old 目标地址就更可能连续，
+direct staging 能形成更大的 chunk。
+```
+
+优点：
+
+```text
+可能真正让 no tiny table direct staging 成为大块连续写。
+```
+
+风险：
+
+```text
+会改变 GiY 本体 traversal order，
+可能影响 cache locality、worklist 行为和 benchmark 结果。
+最好作为第二阶段实验，不要一开始就混在一起。
+```
+
+### 策略 C：先完整 reserve/patch，再按 reserve order copy
+
+这个思想在语义上是对的：
+
+```text
+先把所有 live object 的 forwarding pointer 都填好；
+再按 reserve order copy。
+```
+
+但问题是：
+
+```text
+如果取消 tiny table，就需要另一个结构保存 reserve order 的 source object 列表。
+否则 copy 阶段不知道应该按什么顺序从 young 里取对象。
+```
+
+如果遍历 young heap 找 forwarded object：
+
+```text
+得到的是 young address order，不一定是 small_old reserve order。
+```
+
+如果遍历 old reserved slots：
+
+```text
+old slot 里还没有对象内容，也不知道 source young address。
+除非额外写 source pointer metadata。
+```
+
+所以这个策略本质上会重新引入一个 table / queue，只是名字不叫 tiny table。
+
+### 当前建议
+
+下一步最稳的是策略 A：
+
+```text
+保留 GiY 当前 LIFO worklist；
+取消 tiny table；
+tiny object 在 scan/patch 完成后直接放入 staging；
+放入 staging 前检查 old destination 是否连续；
+不连续就 flush。
+```
+
+这样可以把问题拆开：
+
+```text
+如果策略 A 变快：
+    tiny table / 二次 young read 确实是主要成本。
+
+如果策略 A 跑通但不快：
+    可能是 LIFO 导致 chunk 太碎，或者 staging + forced NT 本身不划算。
+    下一步再测 FIFO worklist 或 adaptive flush。
+
+如果策略 A correctness 失败：
+    说明 direct staging 插入点还太早，必须确保 scan/patch 后再 staging。
+```
+
+可以对导师说的短版：
+
+```text
+GiY 的 forwarding pointer 能保证对象引用最终指向正确 old 地址，
+但 staging buffer 还要求多个对象的 copy 顺序和 old 区连续地址顺序一致。
+当前 tiny table 正是按 reserve order 保证了这个顺序。
+如果取消 tiny table，我需要在 direct staging 中显式检查 dst 连续性；
+否则虽然每个对象的 forwarding pointer 是对的，一次 NT flush 仍可能把对象写到错误位置。
+```
+
+## 2026-05-29：tiny 对象是否可以在修完指针后 memcpy 进 staging
+
+用户问：
+
+```text
+能不能选择：在修完所有指针的时候，再让这个 tiny 对象 memcpy 进 staging buffer？
+```
+
+回答：
+
+```text
+可以，而且这是 direct staging 最应该采用的插入点。
+但这里的“修完所有指针”最好理解为：
+修完当前 tiny 对象内部的 young pointer 之后，
+就可以把这个 tiny 对象 memcpy 到 staging buffer。
+不需要等整个 GC 的 roots / remembered set 全部 patch 完。
+```
+
+原因：
+
+```text
+GiY traversal 扫描当前对象时，如果发现字段指向 young object，
+会先给 child object reserve old address，并设置 child.forwarding_pointer。
+然后当前对象字段可以被 patch 成 child 的 old address。
+
+因此，当 scan_object_with_reserve_tracer(obj) 返回时：
+当前 obj 内部的 young pointer 已经被改成 old pointer。
+这时把 obj 的内容 memcpy 进 staging 是正确的。
+```
+
+伪代码：
+
+```text
+while worklist not empty:
+    obj = pop_worklist()
+    src_hdr = header(obj)
+    dst_hdr = header(src_hdr.forwarding_pointer)
+    object_size = align(src_hdr.size + HEADER_SIZE)
+
+    # 1. 先扫描当前对象
+    #    对象内部如果有 young pointer，就 reserve child old address
+    #    并把当前对象字段 patch 成 child old pointer
+    scan_object_with_reserve_tracer(obj)
+
+    # 2. 当前对象内部指针已经修完
+    if object_size <= TINY_THRESHOLD:
+        direct_stage_tiny_object(dst_hdr, src_hdr, object_size)
+    else:
+        flush_staging_if_needed()
+        NT_copy(src_hdr -> dst_hdr)
+
+flush_staging_if_needed()
+```
+
+需要注意：
+
+```text
+不需要等 child object 已经 copy 到 old。
+只要 child 的 old address 已经 reserve，并且 forwarding pointer 已经设置，
+当前对象就可以安全地指向 child 的 old address。
+这是 GiY 的核心思想。
+```
+
+但是仍然要保留 old destination 连续性检查：
+
+```text
+if staging.used == 0:
+    staging.dst_start = dst_hdr
+    staging.expected_next = dst_hdr
+
+if dst_hdr != staging.expected_next:
+    flush_staging()
+    staging.dst_start = dst_hdr
+    staging.expected_next = dst_hdr
+
+memcpy(staging.buffer + staging.used, src_hdr, object_size)
+staging.used += object_size
+staging.expected_next += object_size
+```
+
+如果“不复制当前对象，而是等整个 GC 所有指针都修完再统一复制 tiny”，就会遇到另一个问题：
+
+```text
+到那时需要知道 tiny 对象的 source young address 和 old destination order。
+这通常又需要一个 table / queue 来记录。
+否则就只能重新遍历 young heap 或 remembered data，
+等于又回到 tiny table / 二次遍历的问题。
+```
+
+所以推荐方案是：
+
+```text
+不要等整个 GC 全部 patch 完。
+在 traversal 中，每处理完一个 tiny object：
+    先 scan/patch 当前对象内部字段；
+    然后立即 memcpy 当前对象到 staging；
+    staging 满或 dst 不连续时 flush。
+```
+
+一句话：
+
+```text
+可以在“当前对象内部指针修完之后”立刻 memcpy 到 staging。
+这保留了 GiY 先 forwarding/patch 再 copy 的正确性，
+同时避免 tiny table 的二次 young 读取。
+但仍必须检查 staging 的 old destination 是否连续。
+```
+
+## 2026-05-29：buffer 满时 NT store 是否可以取消 tiny table
+
+用户问：
+
+```text
+我的想法就是每当 buffer 满了的时候启动一次 NT store，
+这样可以做到取消掉 tiny table 吗？
+```
+
+结论：
+
+```text
+可以取消 tiny table。
+但是 flush 条件不能只有“buffer 满”。
+还必须处理 old destination 不连续、遇到 non-tiny/large object、GC 结束这几种情况。
+```
+
+原因：
+
+```text
+staging buffer 一次 NT store 的前提是：
+buffer 里的对象内容，对应 old 区中一段连续地址。
+
+如果 staging 里是：
+  [objA][objB][objC]
+
+那么 old 区必须正好是：
+  objA.dst, objB.dst = objA.dst + objA.size,
+  objC.dst = objB.dst + objB.size
+```
+
+所以仅仅“buffer 满了再 flush”不够，因为：
+
+```text
+当前 GiY worklist 是 LIFO。
+对象 reserve old 地址的顺序，不一定等于 traversal/copy 的顺序。
+如果 traversal 顺序导致下一个 tiny object 的 dst 不等于 staging.expected_next，
+就必须先 flush staging。
+```
+
+推荐 direct staging 伪代码：
+
+```text
+for each live object popped from GiY worklist:
+    scan object
+    patch object internal young pointers
+
+    if object is tiny:
+        if staging is empty:
+            staging.dst_start = object.dst
+            staging.expected_next = object.dst
+
+        if object.dst != staging.expected_next:
+            NT_store staging -> staging.dst_start
+            clear staging
+            staging.dst_start = object.dst
+            staging.expected_next = object.dst
+
+        if staging.used + object.size > STAGING_BYTES:
+            NT_store staging -> staging.dst_start
+            clear staging
+            staging.dst_start = object.dst
+            staging.expected_next = object.dst
+
+        memcpy patched object -> staging
+        staging.used += object.size
+        staging.expected_next += object.size
+
+    else:
+        if staging is not empty:
+            NT_store staging -> staging.dst_start
+            clear staging
+
+        forced_NT_copy large object young -> old
+
+after worklist traversal:
+    if staging is not empty:
+        NT_store staging -> staging.dst_start
+```
+
+这样就不需要 tiny table 了，因为：
+
+```text
+1. source object 就是当前正在处理的 young object；
+2. old destination 已经在 forwarding pointer 中；
+3. 当前对象内部指针已经 patch 完；
+4. staging 只保存一段即将连续写入 old 的对象内容；
+5. flush 后即可清空，不需要保存历史 tiny entries。
+```
+
+但需要注意一个性能风险：
+
+```text
+如果 old destination 经常不连续，
+那么 staging 会频繁提前 flush。
+这时虽然 tiny table 被取消了，但 NT store chunk 可能变小，
+性能不一定提升。
+```
+
+这也是一个有价值的实验结论：
+
+```text
+如果 direct staging 更快：
+    tiny table / 二次 young read 是主要瓶颈。
+
+如果 direct staging 正确但不快：
+    tiny table 可能还承担了 reserve-order 聚合的作用；
+    取消它后，LIFO traversal 让 staging chunk 变碎。
+    下一步可以测试 FIFO worklist 或 adaptive staging。
+```
+
+汇报短句：
+
+```text
+buffer 满时 NT store 可以作为取消 tiny table 的基础机制，
+但还必须在 old destination 不连续时提前 flush。
+因此新的 direct staging 版本只需要维护 staging_dst_start、
+staging_expected_next 和 staging_used 三个状态，
+不再需要 64KB tiny table。
+```
+
+## 2026-05-29：澄清 - GiYSBF 策略下即时复制小对象到 buffer 能否取消 tiny table
+
+用户澄清：
+
+```text
+不是问普通 GiY，也不是最后再根据 table 回来复制。
+是在 GiYSBF 的策略下：
+每次处理到小对象，就即时把小对象复制到 staging buffer；
+buffer 满了就 flush 一次 NT store；
+这样能不能取消 tiny table？
+```
+
+直接结论：
+
+```text
+可以。
+如果 staging buffer 里直接保存小对象的完整内容，
+而不是只保存 tiny table metadata，
+那么 tiny table 可以取消。
+```
+
+换句话说：
+
+```text
+当前 GiYSBF:
+    tiny table 保存：source offset + size
+    staging buffer 只在最后 materialization 时使用
+
+新的 GiYSBF direct-buffer:
+    不保存 source offset + size
+    小对象内容直接 memcpy 进 staging buffer
+    buffer 满了就 NT flush 到 old
+```
+
+这样 tiny table 的作用被 staging buffer 替代：
+
+| 当前 tiny table 方案 | direct-buffer 方案 |
+|---|---|
+| table 记录小对象在哪里 | 不记录，当前对象就是 source |
+| 最后 decode table | 不需要 decode |
+| 最后再读 young object | 不需要二次读取 |
+| 最后 young -> staging | 处理对象时立即 young -> staging |
+| staging 满 / 结束时 NT -> old | staging 满 / 结束时 NT -> old |
+
+因此这个想法本质上是：
+
+```text
+把 tiny table 从“metadata buffer”改成“data buffer”。
+```
+
+但是有一个必要条件：
+
+```text
+复制进 staging buffer 的小对象，必须已经完成内部 pointer patch。
+```
+
+也就是：
+
+```text
+不能在 reserve old address 的瞬间就把 raw young object memcpy 到 staging；
+应该在当前对象 scan/patch 完之后，再 memcpy 到 staging。
+```
+
+推荐伪代码：
+
+```text
+GiYSBF_direct_buffer_traverse():
+    staging.clear()
+
+    while worklist not empty:
+        obj = pop_worklist()
+        src_hdr = header(obj)
+        dst_hdr = header(src_hdr.forwarding_pointer)
+        size = align(src_hdr.size + HEADER_SIZE)
+
+        # GiY/GiYSBF 原本就要做的步骤
+        scan obj
+        reserve children old addresses
+        patch obj internal pointers to old addresses
+
+        if size <= TINY_THRESHOLD:
+            if staging.used + size > STAGING_BYTES:
+                NT_store staging.buffer -> staging.dst_start
+                staging.clear()
+
+            if staging is empty:
+                staging.dst_start = dst_hdr
+
+            memcpy patched obj -> staging.buffer + staging.used
+            staging.used += size
+
+        else:
+            if staging not empty:
+                NT_store staging.buffer -> staging.dst_start
+                staging.clear()
+
+            forced_NT_copy obj -> dst_hdr
+
+    if staging not empty:
+        NT_store staging.buffer -> staging.dst_start
+```
+
+这份伪代码表达的是用户的核心想法：
+
+```text
+小对象不再进入 tiny table；
+小对象完成指针修正后直接进入 staging buffer；
+buffer 满了就 flush；
+最后剩余部分再 flush。
+```
+
+需要在实现中确认的一点：
+
+```text
+如果 staging buffer 里的多个小对象要一次性 NT store 到 old 的连续地址，
+则这些对象的 dst 必须连续。
+```
+
+如果沿用当前 GiYSBF 的 small_old 线性分配，并且 direct-buffer 的 append 顺序和 small_old reserve 顺序一致，那么只按 buffer 满 flush 就可以。
+
+但如果 append 顺序可能不是 reserve 顺序，例如当前 worklist LIFO 导致处理顺序和 reserve 顺序不同，就要加一个轻量检查：
+
+```text
+if staging is not empty and dst_hdr != staging.expected_next:
+    flush staging
+```
+
+这个检查不是 tiny table，它只是 staging buffer 的正确性 guard。
+
+最终给导师的说法：
+
+```text
+我可以取消 tiny table，把 staging buffer 从“最后使用的数据中转区”
+改成“小对象即时 materialization buffer”。
+小对象在 GiY 的 scan/patch 完成后直接 memcpy 进 staging；
+staging 满了就用 NT store flush 到 old。
+这样可以避免 tiny table append/decode，也避免 traversal 后二次读取 young heap。
+```
+
+## 2026-05-29：修正 - GiYSBF 分 tiny/large old 后，遇到 large object 不需要提前 flush tiny staging
+
+用户指出：
+
+```text
+当前想法是在 GiYSBF 策略下：
+old 区已经被分成 tiny/small old heap 和 large old heap。
+所以进行分支判断时，遇到大 object 并不需要非要提前 flush tiny staging。
+```
+
+修正结论：
+
+```text
+这个判断是对的。
+我之前把“遇到 large object 前 flush staging”说成必要条件，这是不准确的。
+
+在 GiYSBF 的 two old-space 策略下：
+tiny staging 最终写入 small old；
+large object 直接写入 large old。
+
+两者目标区域不重叠，所以 large object copy 不要求 tiny staging 先 flush。
+```
+
+正确的 direct-buffer GiYSBF 逻辑应该是：
+
+```text
+small/tiny object:
+    scan/patch 当前对象内部指针
+    memcpy patched object -> tiny staging buffer
+    if staging buffer full:
+        NT_store staging -> small old
+        clear staging
+
+large object:
+    scan/patch 当前对象内部指针
+    forced_NT_copy young -> large old
+
+after traversal:
+    flush remaining tiny staging -> small old
+```
+
+也就是说，flush 条件应主要来自 tiny staging 自身：
+
+```text
+1. tiny staging buffer 满了；
+2. minor GC 结束，还有残留 staged tiny bytes；
+3. 如果实现中 tiny object 的处理顺序不等于 small_old reserve 顺序，
+   则 tiny dst 不连续时也需要 flush 或额外处理。
+```
+
+但：
+
+```text
+遇到 large object 本身不是 flush 条件。
+```
+
+更准确的伪代码：
+
+```text
+GiYSBF_direct_buffer_traverse():
+    tiny_staging.clear()
+
+    while worklist not empty:
+        obj = pop_worklist()
+        src_hdr = header(obj)
+        dst_hdr = header(src_hdr.forwarding_pointer)
+        size = align(src_hdr.size + HEADER_SIZE)
+
+        # GiY 核心步骤：先修当前对象内部指针
+        scan obj
+        reserve child old addresses
+        patch obj internal pointers to old addresses
+
+        if size <= TINY_THRESHOLD:
+            # dst 在 small/tiny old
+            if tiny_staging.used + size > STAGING_BYTES:
+                NT_store tiny_staging.buffer -> tiny_staging.dst_start
+                tiny_staging.clear()
+
+            if tiny_staging is empty:
+                tiny_staging.dst_start = dst_hdr
+                tiny_staging.expected_next = dst_hdr
+
+            # 如果处理顺序能保证等于 reserve 顺序，这个检查可以只是 assert。
+            # 如果不能保证，就必须用它保护正确性。
+            if dst_hdr != tiny_staging.expected_next:
+                NT_store tiny_staging.buffer -> tiny_staging.dst_start
+                tiny_staging.clear()
+                tiny_staging.dst_start = dst_hdr
+                tiny_staging.expected_next = dst_hdr
+
+            memcpy patched obj -> tiny_staging.buffer + tiny_staging.used
+            tiny_staging.used += size
+            tiny_staging.expected_next += size
+
+        else:
+            # dst 在 large old；不需要 flush tiny staging
+            forced_NT_copy patched obj -> large old dst
+
+    if tiny_staging.used > 0:
+        NT_store tiny_staging.buffer -> tiny_staging.dst_start
+        tiny_staging.clear()
+```
+
+导师汇报短句：
+
+```text
+新的想法是在 GiYSBF 的分区 old heap 上，把 staging buffer 直接作为 tiny heap 的写缓冲。
+小对象在 scan/patch 后立即进入 tiny staging；
+staging 满了才 NT flush 到 small old。
+大对象写入 separate large old，不和 tiny staging 的目标地址重叠，
+所以遇到大对象不需要提前 flush tiny buffer。
+这样可以取消 tiny table，并避免最后二次遍历 young 堆。
+```
+
+## 2026-05-29：澄清 GiY 的“待扫描对象栈”和核心流程伪代码
+
+用户指出：
+
+```text
+“worklist”这个说法指代不明。
+需要把 GiY 原则里的过程写清楚：
+什么时候 reserve，什么时候写 forwarding pointer，
+什么时候修指针，什么时候真正 copy。
+```
+
+### 1. “worklist”到底是什么
+
+之前说的 `worklist`，在当前代码里就是：
+
+```text
+g_gc_stack
+```
+
+更准确的中文名字应该叫：
+
+```text
+待扫描对象栈
+```
+
+它不是：
+
+```text
+不是 JS 程序栈；
+不是 remembered set；
+不是对象存储区；
+不是 tiny table。
+```
+
+它只是 GC 内部的一个待处理列表：
+
+```text
+里面保存的是 young object 的 payload address。
+这些对象已经被发现，并且已经有 forwarding pointer；
+但是对象内部字段还没有被扫描/修正，也还没有真正 copy 到 old。
+```
+
+当前代码中的操作：
+
+```text
+gc_stack_push(payload_ptr)  # 对象刚被发现，加入待扫描对象栈
+gc_stack_pop()              # 取出一个对象，扫描它内部字段，然后 copy/materialize
+```
+
+当前实现是 LIFO：
+
+```text
+pop 的是最后 push 的对象。
+```
+
+### 2. GiY 里遇到一个 young 指针时的真实顺序
+
+一个非常关键的点：
+
+```text
+不是先修指针再 reserve。
+```
+
+因为如果还没有 old address，就不知道应该把指针修成什么。
+
+正确顺序是：
+
+```text
+遇到 slot -> slot 里是 young pointer -> 先 reserve 目标 old 地址
+           -> 在 young object header 里写 forwarding pointer
+           -> 把当前 slot patch 成 forwarding pointer 指向的 old 地址
+```
+
+伪代码：
+
+```text
+process_edge(slot):
+    value = *slot
+
+    if value is not a young pointer:
+        return
+
+    obj = clear_tag(value)
+
+    # 1. 先确保 obj 有 old 地址
+    old_payload = forward(obj)
+
+    # 2. 再把当前 slot 修成 old 地址
+    *slot = put_tag(old_payload, old_tag_or_original_tag)
+```
+
+`forward(obj)`：
+
+```text
+forward(obj):
+    if obj is already old/init/non-young:
+        return obj
+
+    hdr = header(obj)
+
+    if hdr.forwarding_pointer != 0:
+        return hdr.forwarding_pointer
+
+    size = align(hdr.size + HEADER_SIZE)
+
+    # 普通 GiY：从 old/DRAM 线性分配
+    dst_hdr = old_alloc(size)
+
+    # GiYSBF：根据大小从 tiny/small old 或 large old 分配
+    # if size <= TINY_THRESHOLD:
+    #     dst_hdr = small_old_alloc(size)
+    # else:
+    #     dst_hdr = large_old_alloc(size)
+
+    hdr.forwarding_pointer = payload(dst_hdr)
+
+    # 这个对象以后还要被扫描内部字段
+    push_to_pending_scan_stack(obj)
+
+    return hdr.forwarding_pointer
+```
+
+### 3. GiY 处理一个对象时的真实顺序
+
+当一个对象从“待扫描对象栈”里取出来时，它已经满足：
+
+```text
+1. 它是 live young object；
+2. 它已经 reserve 了 old 地址；
+3. 它的 young header 里已经有 forwarding_pointer。
+```
+
+然后处理这个对象：
+
+```text
+process_one_pending_object(obj):
+    src_hdr = header(obj)
+    dst_payload = src_hdr.forwarding_pointer
+    dst_hdr = header(dst_payload)
+    size = align(src_hdr.size + HEADER_SIZE)
+
+    # 1. 扫描当前对象内部字段
+    for each pointer slot inside obj:
+        if slot points to young child:
+            child_old = forward(child)
+            slot = child_old
+
+    # 到这里，当前对象内部的 young pointer 已经修成 old pointer
+
+    # 2. 现在才真正复制当前对象
+    copy src_hdr -> dst_hdr
+```
+
+这就是 GiY 的核心原则：
+
+```text
+先建立所有需要的 old address / forwarding pointer；
+扫描对象时把对象内部指针修成 old pointer；
+然后再 copy 当前对象本体。
+```
+
+更短的版本：
+
+```text
+发现对象时：
+    reserve old
+    写 forwarding pointer
+    加入待扫描对象栈
+
+处理对象时：
+    扫描并修正对象内部指针
+    copy 当前对象到 old
+```
+
+### 4. 标准 GiY 的完整 minor GC 伪代码
+
+```text
+GiY_minor_gc(ctx):
+    clear pending_scan_stack
+
+    # Phase 1: 从 roots 发现 live young object
+    for each root slot:
+        process_edge(slot)
+
+    # Phase 2: 从 remembered set 发现 old -> young edge
+    for each remembered slot:
+        process_edge(slot)
+
+    # Phase 3: 处理所有已发现的 young object
+    while pending_scan_stack not empty:
+        obj = pop pending_scan_stack
+
+        src_hdr = header(obj)
+        dst_hdr = header(src_hdr.forwarding_pointer)
+        size = align(src_hdr.size + HEADER_SIZE)
+
+        # 先修当前对象内部指针
+        for each pointer slot inside obj:
+            process_edge(slot)
+
+        # 再真正 copy 当前对象
+        if size <= 256B:
+            memcpy(dst_hdr, src_hdr, size)
+        else:
+            NT_copy(dst_hdr, src_hdr, size)
+
+    # Phase 4: patch roots / remembered slots / function table slots
+    # 有些外部 slot 在 reserve phase 只发现对象，最后再统一 patch。
+    patch_external_slots()
+
+    reset young allocation area
+```
+
+### 5. 放到 GiYSBF direct-buffer 的版本
+
+在 GiYSBF direct-buffer 中，`forward(obj)` 的 old allocation 改成：
+
+```text
+if obj.size <= TINY_THRESHOLD:
+    dst_hdr = small_old_alloc(size)
+else:
+    dst_hdr = large_old_alloc(size)
+
+obj.forwarding_pointer = payload(dst_hdr)
+push_to_pending_scan_stack(obj)
+```
+
+处理对象时：
+
+```text
+process_one_pending_object_GiYSBF_direct(obj):
+    src_hdr = header(obj)
+    dst_hdr = header(src_hdr.forwarding_pointer)
+    size = align(src_hdr.size + HEADER_SIZE)
+
+    # 1. 先扫描并修正当前对象内部指针
+    for each pointer slot inside obj:
+        process_edge(slot)
+
+    # 2. 当前对象已经是 patched object
+    if size <= TINY_THRESHOLD:
+        # 小对象进入 tiny staging buffer
+        if tiny_staging.used + size > STAGING_BYTES:
+            NT_flush tiny_staging -> small_old
+            clear tiny_staging
+
+        memcpy(src_hdr -> tiny_staging.buffer + tiny_staging.used)
+        tiny_staging.used += size
+
+    else:
+        # 大对象进入 large old
+        # 因为 large old 和 small old 分区不同，
+        # 所以遇到大对象不需要 flush tiny staging。
+        NT_copy(src_hdr -> dst_hdr)
+```
+
+GC 结束时：
+
+```text
+if tiny_staging.used > 0:
+    NT_flush tiny_staging -> small_old
+```
+
+### 6. 最关键的表达
+
+可以对导师这样说：
+
+```text
+GiY 的原则不是“先 copy 再修指针”，也不是简单“先修指针再 reserve”。
+准确地说：
+
+当发现一个 young object 时，先 reserve 它的 old 地址，并在 young header 里留下 forwarding pointer；
+当扫描某个对象内部字段时，通过 forwarding pointer 把字段修成 old 地址；
+当当前对象内部字段都修完以后，再把当前对象内容 copy 到 old。
+
+我下一步的 GiYSBF direct-buffer 方案就是保留这个 GiY 原则：
+小对象仍然先 reserve small old 地址、留下 forwarding pointer；
+等当前小对象内部指针修完后，不再写 tiny table，
+而是直接 memcpy 到 staging buffer；
+staging buffer 满了就 NT flush 到 small old。
+```
+
+## 2026-05-29：轮讲英文简版 - 取消 tiny table 的 direct staging 计划
+
+用户需要马上轮讲，要求用简单英语说明当前研究、direct staging 想法、成功/失败后一周计划。
+
+### Simple English Version
+
+```text
+My current research is about improving the GiY-based minor GC.
+The current GiYSBF design separates the old space into a tiny/small old area
+and a large old area.
+
+For tiny objects, the current implementation does not copy them immediately.
+It first records their source information in a tiny table.
+After the traversal finishes, it scans the tiny table again,
+reads the tiny objects from the young heap again,
+copies them into a staging buffer,
+and then writes the staging buffer to the old space with non-temporal stores.
+
+This design may introduce extra overhead:
+1. tiny table append and decode cost;
+2. reading tiny objects from the young heap for the second time;
+3. extra staging and flush management cost.
+
+So my next idea is to remove the tiny table.
+Instead, after a tiny object has been scanned and its internal pointers have been patched,
+I will immediately copy this patched tiny object into the staging buffer.
+When the staging buffer becomes full, I will flush it to the tiny/small old area
+using non-temporal stores.
+
+Large objects are still copied directly to the large old area.
+Because tiny objects and large objects use different old-space regions,
+large objects do not require flushing the tiny staging buffer.
+```
+
+### If This Idea Succeeds
+
+```text
+If this direct staging approach improves performance,
+it means the tiny table and the second read of the young heap were important bottlenecks.
+
+In the next week, I will:
+1. compare the original GiYSBF and the new direct-staging GiYSBF;
+2. measure GC full time, scavenge time, and total execution time;
+3. focus on Storage, Havlak, and CD, because they dominate the current GC overhead;
+4. add profiling for staged bytes, flush count, average flush size, and tiny object count;
+5. test different tiny thresholds, such as 64B, 128B, 256B, and 512B.
+
+The goal will be to show whether removing the tiny table really reduces the
+small-object materialization cost.
+```
+
+### If This Idea Fails
+
+```text
+If this approach does not improve performance, there are still useful conclusions.
+
+First, if it fails because of correctness problems,
+then it means the timing of copying tiny objects is very important.
+Tiny objects must be copied only after their internal pointers are patched.
+In that case, I will debug the copy timing and check whether any young pointers
+remain inside staged objects.
+
+Second, if it is correct but still slow,
+then the tiny table may not be the main bottleneck.
+The real problem may be the staging buffer itself,
+the cost of memcpy into staging,
+the cost of non-temporal stores,
+or the flush granularity.
+
+In the next week, I will:
+1. profile the number of flushes and average flush size;
+2. check whether the staging buffer is flushed too frequently;
+3. compare non-temporal flush with normal cached copy;
+4. try an adaptive policy: use staging only when the chunk is large enough;
+5. analyze Storage, Havlak, and CD separately.
+```
+
+### One-Minute Talk Version
+
+```text
+The current GiYSBF design uses a tiny table for small objects.
+This avoids immediate copying, but it also means that after traversal,
+the GC has to read the tiny objects from the young heap again and then copy them
+into the staging buffer.
+
+My hypothesis is that this tiny table and the second young-heap read may be one
+reason why GiYSBF still has higher scavenge time than normal GiY.
+
+My next experiment is to remove the tiny table.
+After a tiny object is scanned and its internal pointers are patched,
+I will directly copy it into the staging buffer.
+When the buffer is full, I will flush it to the tiny old area using
+non-temporal stores.
+
+If this succeeds, I can say that the tiny table and the second young-heap read
+were important overheads.
+If it fails, I can still learn whether the bottleneck is actually the staging
+buffer, the flush granularity, or non-temporal stores for small objects.
+So either result will help explain the current performance gap of GiYSBF.
+```
+
+## 2026-05-29：新想法伪代码 - GiYSBF direct staging without tiny table
+
+用户要求给出新想法的伪代码。当前新想法定义如下：
+
+```text
+保持 GiYSBF 的 old-space 分区：
+  tiny/small object -> small old heap
+  large object      -> large old heap
+
+取消 tiny table。
+tiny object 在当前对象内部指针修完后，立即 memcpy 到 staging buffer。
+staging buffer 满了之后，NT store flush 到 small old heap。
+large object 直接 NT copy 到 large old heap，不需要触发 tiny staging flush。
+```
+
+### 核心伪代码
+
+```text
+GiYSBF_direct_staging_minor_gc(ctx):
+    clear pending_scan_object_stack
+    clear tiny_staging_buffer
+
+    # 1. 从 roots / remembered set 发现 live young objects
+    for each root slot:
+        process_edge(slot)
+
+    for each remembered_set slot:
+        process_edge(slot)
+
+    # 2. 处理所有已发现的 young objects
+    while pending_scan_object_stack is not empty:
+        obj = pop pending_scan_object_stack
+
+        src_hdr = header(obj)
+        size = align(src_hdr.size + HEADER_SIZE)
+        dst_hdr = header(src_hdr.forwarding_pointer)
+
+        # GiY 核心原则：
+        # 先扫描当前对象内部字段；
+        # 如果字段指向 young child，就 reserve child old address，
+        # 写 child.forwarding_pointer，
+        # 再把当前对象字段 patch 成 child old address。
+        scan_and_patch_internal_pointers(obj)
+
+        if size <= TINY_THRESHOLD:
+            # tiny object:
+            # 当前对象内部指针已经修完，可以安全放入 staging buffer
+            stage_tiny_object(src_hdr, dst_hdr, size)
+
+        else:
+            # large object:
+            # 直接写 large old heap
+            # 注意：不需要 flush tiny staging buffer
+            NT_copy(src_hdr, dst_hdr, size)
+
+    # 3. GC 结束时，flush 剩余 tiny objects
+    flush_tiny_staging_if_not_empty()
+
+    # 4. patch roots / remembered set / function table 等外部 slot
+    patch_external_slots()
+```
+
+### process_edge
+
+```text
+process_edge(slot):
+    value = *slot
+
+    if value is not a young pointer:
+        return
+
+    obj = clear_tag(value)
+    old_addr = forward(obj)
+
+    # 如果这个 slot 是当前 young object 内部字段，
+    # 就可以立刻修成 old pointer。
+    *slot = put_tag(old_addr, original_tag)
+```
+
+### forward
+
+```text
+forward(obj):
+    src_hdr = header(obj)
+
+    if src_hdr.forwarding_pointer != 0:
+        return src_hdr.forwarding_pointer
+
+    size = align(src_hdr.size + HEADER_SIZE)
+
+    if size <= TINY_THRESHOLD:
+        dst_hdr = small_old_alloc(size)
+    else:
+        dst_hdr = large_old_alloc(size)
+
+    src_hdr.forwarding_pointer = payload(dst_hdr)
+
+    push pending_scan_object_stack(obj)
+
+    return src_hdr.forwarding_pointer
+```
+
+### stage_tiny_object
+
+```text
+stage_tiny_object(src_hdr, dst_hdr, size):
+    if tiny_staging.used == 0:
+        tiny_staging.dst_start = dst_hdr
+
+    if tiny_staging.used + size > STAGING_BUFFER_SIZE:
+        NT_store(tiny_staging.buffer,
+                 tiny_staging.dst_start,
+                 tiny_staging.used)
+        clear tiny_staging
+        tiny_staging.dst_start = dst_hdr
+
+    memcpy(tiny_staging.buffer + tiny_staging.used,
+           src_hdr,
+           size)
+
+    tiny_staging.used += size
+```
+
+### flush_tiny_staging_if_not_empty
+
+```text
+flush_tiny_staging_if_not_empty():
+    if tiny_staging.used == 0:
+        return
+
+    NT_store(tiny_staging.buffer,
+             tiny_staging.dst_start,
+             tiny_staging.used)
+
+    clear tiny_staging
+```
+
+### 一句话说明
+
+```text
+这个版本仍然保留 GiY 的核心原则：
+先 reserve old address、留下 forwarding pointer；
+扫描当前对象并修正内部指针；
+然后才真正复制当前对象。
+
+区别是：
+tiny object 不再写 tiny table，
+而是在内部指针修完后直接进入 staging buffer；
+staging 满了就 NT flush 到 small old heap。
+```
+
+## 2026-05-29：简化版 minor GC 伪代码 - 重点是修改指针和复制
+
+用户要求不要拆太多子过程，只保留 minor GC 运行过程，重点说明：
+
+```text
+1. 怎么写 forwarding pointer；
+2. 怎么修改指针；
+3. tiny object / large object 怎么复制。
+```
+
+简化伪代码：
+
+```text
+MinorGC_GiYSBF_direct_staging:
+    clear 待扫描对象列表
+    clear tiny_staging_buffer
+
+    # 1. 先从 roots 和 remembered set 找到 young object
+    for each pointer slot in roots and remembered_set:
+        if slot points to young object:
+            obj = slot.target
+
+            if obj.forwarding_pointer is empty:
+                if obj.size <= TINY_THRESHOLD:
+                    obj.forwarding_pointer = allocate_in_small_old(obj.size)
+                else:
+                    obj.forwarding_pointer = allocate_in_large_old(obj.size)
+
+                put obj into 待扫描对象列表
+
+            # 把外部 slot 改成 old 地址
+            slot = obj.forwarding_pointer
+
+    # 2. 处理所有已经发现的 young object
+    while 待扫描对象列表 is not empty:
+        obj = take one object from 待扫描对象列表
+
+        # 2.1 先修当前对象内部指针
+        for each pointer field inside obj:
+            if field points to young object:
+                child = field.target
+
+                if child.forwarding_pointer is empty:
+                    if child.size <= TINY_THRESHOLD:
+                        child.forwarding_pointer = allocate_in_small_old(child.size)
+                    else:
+                        child.forwarding_pointer = allocate_in_large_old(child.size)
+
+                    put child into 待扫描对象列表
+
+                # 把当前对象内部指针改成 child 的 old 地址
+                field = child.forwarding_pointer
+
+        # 2.2 当前对象内部指针已经修完，现在开始复制当前对象
+        if obj.size <= TINY_THRESHOLD:
+            if tiny_staging_buffer is full:
+                NT_store tiny_staging_buffer -> small_old
+                clear tiny_staging_buffer
+
+            memcpy patched obj -> tiny_staging_buffer
+
+        else:
+            NT_copy patched obj -> obj.forwarding_pointer in large_old
+
+    # 3. minor GC 结束前，把剩余小对象写入 small old
+    if tiny_staging_buffer is not empty:
+        NT_store tiny_staging_buffer -> small_old
+        clear tiny_staging_buffer
+```
+
+核心解释：
+
+```text
+GiY 的原则是：
+  先给 young object 分配 old 地址；
+  在 young object header 里留下 forwarding pointer；
+  扫描对象时，把对象内部 young pointer 改成 forwarding pointer 指向的 old 地址；
+  当前对象内部指针修完以后，再复制当前对象。
+
+新的 GiYSBF direct staging 复制策略是：
+  tiny object：修完内部指针后，memcpy 到 staging buffer；
+               staging 满了再 NT store 到 small old。
+
+  large object：修完内部指针后，直接 NT copy 到 large old。
+
+  large object 不触发 tiny staging flush，
+  因为 small old 和 large old 是分开的。
+```
